@@ -81,12 +81,19 @@ _Avoid_: merge queue, merge worker
 
 ## State
 
+**Attempt**:
+One invocation of an agent for one step of one ticket, carrying its own session. A ticket's second
+implementer attempt is a different attempt from its first.
+_Avoid_: try, run, invocation
+
 **Lifecycle event**:
-One appended record of a step and its outcome for one ticket. Never rewritten.
+One appended record of a step, its outcome and the attempt's session, for one ticket. Appended when
+a step starts and again when it ends. Never rewritten.
 _Avoid_: log line, transition, history entry
 
 **Status**:
-A ticket's last lifecycle event. Derived on read, never stored.
+A ticket's last lifecycle event. Derived on read, never stored. A ticket left `running` is one whose
+step began and never reported back.
 _Avoid_: state, phase, stage
 
 **Verified**:
@@ -132,8 +139,8 @@ The gate's single attempt to repair a red verify, constrained to fix the cause a
 _Avoid_: repair agent, doctor, healer
 
 **Prepare agent**:
-The resume-only agent that makes a wrecked ticket fit for the normal track to pick up. It never
-lands work.
+The agent that makes a wrecked ticket fit for the normal track to pick up, before a retry mid-run or
+before anything else on a resume. It never lands work.
 _Avoid_: recovery agent, triage agent
 
 **PR writer**:

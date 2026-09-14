@@ -1,7 +1,10 @@
-> **Consumed, not authoritative.** The decisions in this document now live in `docs/adr/` and
-> its vocabulary in `CONTEXT.md`, which supersede it wherever they disagree. It is kept only
-> until the spec it feeds has been split into tickets, and is then deleted. Do not implement
-> from it.
+> **Grilling input, not authoritative.** This document is the starting point for the grilling
+> session that produces the spec — read it for the mechanics it works through. Its
+> *decisions* now live in `docs/adr/` and its vocabulary in `CONTEXT.md`, which win wherever
+> they disagree with the body below. **Read `## Corrections` at the end first:** parts of
+> this document have since been overruled and are left in place only because the reasoning
+> around them is still worth reading. Do not implement from it; it is deleted once the spec
+> it feeds has been split into tickets.
 
 # Handoff: afk goes layerless
 
@@ -389,3 +392,64 @@ them.
   merges ahead of expensive ones. It is the one surviving use for `git merge-tree` after this design
   deletes it as a gate. Recorded so the next session neither re-derives it nor re-adds it as a
   conflict gate — **it is not part of the rewrite and should not be specced.**
+
+---
+
+## Corrections
+
+Added after two grilling sessions (2026-09-14). Everything here supersedes the body above. Nothing
+above was edited, so the arguments stay readable alongside what replaced them.
+
+### Overruled
+
+- **"Frontier" is now "slate."** `docs/agents/issue-tracker.md` already coined *Frontier query* with
+  a different predicate — closed blockers, unassigned issues. Same word, two meanings, one repo.
+- **The gate never skips.** The body allows skipping when `spec tip == baseSha`. That exception was
+  argued from "the tree the implementer already verified", and nothing in the body actually requires
+  an implementer to verify anything. See ADR-0008.
+- **The implementer self-verifies before handing off.** It runs `verify` inside its own session and
+  acts on the result. A self-verify produces no status and no lifecycle event; only the gate
+  produces `verified`. See ADR-0015.
+- **The planner does not look for a `## Blocked by` section.** How a repo records dependency edges
+  is that repo's convention, documented under `docs/agents/`; the planner is an agent so it can read
+  that and comprehend it. Naming one convention in the runner is how the runner gets a plausible,
+  wrong DAG. See ADR-0003.
+- **Recovery is no longer resume-only.** *Decisions* 4 is overruled: on `implement:failed` the
+  prepare agent runs, then the implementer is attempted once more, and only then is the ticket
+  failed for good. The transitive skip is what makes the asymmetry — one stuck implementer silently
+  cost a whole subtree. See ADR-0012.
+- **A lifecycle event is appended when a step starts, and again when it ends.** `outcome` gains
+  `running`. `sessionId` belongs to the *attempt*, not the ticket — the implementer's session is not
+  its resolver's. See ADR-0011.
+- **The runner does not pass `--session-id`.** It reads the id back out of the transcript stream it
+  already writes. Verified: under `-p --output-format stream-json --verbose` every line carries
+  `session_id`, including the first, which arrives before any model work. See ADR-0017.
+
+### Missing from the body entirely
+
+- **Interrupt semantics.** The current runner drains on the first Ctrl+C and kills on the second;
+  this document never mentions it. Because events are written at step start, a hard kill is already
+  safe, so no step handles the signal and draining is only there to avoid throwing away an
+  implementer six minutes in. See ADR-0016.
+- **Tests.** The runner has none, and every bug found on a live `--resume` lived in the
+  git-and-state interaction rather than in pure logic. `docs/agents/layers.md`'s Tests section is
+  the shape: git and the agent CLI are adapters behind ports, the scheduling rules are domain and
+  tested directly, and contract tests run one suite against the fake and against real git. That last
+  part is what would have caught the worktree bugs — each was a *real git* behaviour a hand-written
+  fake would have allowed.
+
+### For the spec, not for an ADR
+
+- **The finish step must not report success over a failure.** A failed push of the spec branch or a
+  failed PR create has to surface as a failure. This has happened: a run printed `done` and the
+  stack silently never existed. It is an acceptance criterion, not a decision.
+- **The prepare agent's per-step instructions.** Still unwritten, still a ticket of its own. It now
+  needs one more than the body assumed: what to check for a ticket left at `running`.
+- **Merge-track throughput is unmeasured.** One serial merge-and-gate track behind three parallel
+  implementers, and ADR-0008 removed the gate skip that was its only pressure valve.
+
+### Parked
+
+- **Sandboxing.** The current implementer sandbox is `--permission-mode auto` with
+  `--disallowedTools "Bash(git push:*)"`. Whether that is sufficient is its own topic and was
+  deliberately not settled.

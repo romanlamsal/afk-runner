@@ -83,4 +83,6 @@ Single-context: `CONTEXT.md` + `docs/adr/` at root. See `docs/agents/domain.md`.
 
 Architecture conventions already in `docs/agents/`. Read before writing code in the area:
 
-- `layers.md` — server layering, ports/adapters, what each layer may import.
+- `layers.md` — server layering, ports/adapters, what each layer may import. It governs the
+  runner too: "server code" there is the logic layer as against the client-facing one, and a
+  CLI is the same thing in spirit. Its Tests section is this repo's test shape.
