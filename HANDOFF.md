@@ -1,3 +1,8 @@
+> **Consumed, not authoritative.** The decisions in this document now live in `docs/adr/` and
+> its vocabulary in `CONTEXT.md`, which supersede it wherever they disagree. It is kept only
+> until the spec it feeds has been split into tickets, and is then deleted. Do not implement
+> from it.
+
 # Handoff: afk goes layerless
 
 Written at the end of a grilling session (2026-09-14). Nothing in it has been implemented. It

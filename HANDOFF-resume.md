@@ -1,3 +1,8 @@
+> **Consumed, not authoritative.** The decisions in this document now live in `docs/adr/` and
+> its vocabulary in `CONTEXT.md`, which supersede it wherever they disagree. It is kept only
+> until the spec it feeds has been split into tickets, and is then deleted. Do not implement
+> from it.
+
 # Handoff: --resume fails work that is already finished
 
 Written 2026-09-14, across three `--resume` attempts on a live run of spec

@@ -84,5 +84,3 @@ Single-context: `CONTEXT.md` + `docs/adr/` at root. See `docs/agents/domain.md`.
 Architecture conventions already in `docs/agents/`. Read before writing code in the area:
 
 - `layers.md` — server layering, ports/adapters, what each layer may import.
-- `components.md` — where UI code goes; routes are controllers.
-- `tanstack-start.md` — TanStack Start + Query file/naming conventions.
