@@ -5,6 +5,7 @@ import {
     manifestPath,
     runDirectory,
     runIgnorePath,
+    ticketWorktree,
     transcriptPath,
 } from "../../src/domain/paths.ts"
 
@@ -83,5 +84,29 @@ describe("transcriptPath", () => {
 
         // then
         expect(path).toBe(".afk/4/transcripts/20260915T111838314Z-planner.jsonl")
+    })
+})
+
+describe("ticketWorktree", () => {
+    it("should give each ticket a worktree of its own in the spec's run directory", () => {
+        // given
+        const spec = 4
+
+        // when
+        const path = ticketWorktree(spec, 7)
+
+        // then
+        expect(path).toBe(".afk/4/t7")
+    })
+
+    it("should never put a ticket's worktree where the gate's is", () => {
+        // given
+        const spec = 4
+
+        // when
+        const path = ticketWorktree(spec, 7)
+
+        // then
+        expect(path).not.toBe(gateWorktree(spec))
     })
 })

@@ -5,7 +5,7 @@
  */
 
 /** Machine-local, and nothing in it is expected to exist on another machine (ADR-0013). */
-const AFK_DIR = ".afk"
+export const AFK_DIR = ".afk"
 
 /** The run directory: one spec's manifest, event log, worktrees and transcripts. */
 export const runDirectory = (spec: number): string => `${AFK_DIR}/${spec}`
@@ -20,6 +20,12 @@ export const runIgnorePath = (spec: number): string => `${runDirectory(spec)}/.g
 
 /** The one long-lived worktree holding the spec branch, and its sole writer (ADR-0006). */
 export const gateWorktree = (spec: number): string => `${runDirectory(spec)}/gate`
+
+/**
+ * One worktree per ticket, cut when its implementer starts and removed once the ticket is verified.
+ * A failed or skipped ticket keeps its own: that is what the prepare agent reads (ADR-0012).
+ */
+export const ticketWorktree = (spec: number, ticket: number): string => `${runDirectory(spec)}/t${ticket}`
 
 /**
  * `20260915T111838314Z` — sorts chronologically as a string, and carries no character a path

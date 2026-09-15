@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { preparedOutput } from "../../src/cli/prepared-output.ts"
-import type { PreparedRun } from "../../src/service/start.ts"
+import type { PreparedRun } from "../../src/domain/run.ts"
 
 const RUN: PreparedRun = {
     root: "/repo",

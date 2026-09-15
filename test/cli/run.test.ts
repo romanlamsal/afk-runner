@@ -4,7 +4,9 @@ import type { Invocation } from "../../src/cli/invocation.ts"
 import { createRun } from "../../src/cli/run.ts"
 import type { Manifest } from "../../src/domain/manifest.ts"
 import type { Mode } from "../../src/domain/mode.ts"
-import type { PreparedRun, StartRequest, StartResult } from "../../src/service/start.ts"
+import type { PreparedRun } from "../../src/domain/run.ts"
+import type { StartRequest, StartResult } from "../../src/service/start.ts"
+import { createStubDrive } from "../fakes/drive.ts"
 
 const MANIFEST: Manifest = {
     spec: 4,
@@ -39,6 +41,7 @@ const harness = (result: StartResult = { outcome: "planned", manifest: MANIFEST 
             started.push(request)
             return result
         },
+        drive: createStubDrive(),
         print: line => printed.push(line),
         printError: line => errors.push(line),
     })
@@ -145,7 +148,7 @@ describe("createRun", () => {
         expect(printed).toContain("spec #4: afk/4/spec cut from main")
     })
 
-    it("should halt on a prepared run until implementing exists", async () => {
+    it("should halt on a worked slate until merging exists", async () => {
         // given
         const { run, errors } = harness({ outcome: "prepared", run: PREPARED })
 
@@ -153,6 +156,6 @@ describe("createRun", () => {
         await run(invocation("plan-and-implement"))
 
         // then
-        expect(errors).toContain("afk: implementing is not implemented yet")
+        expect(errors).toContain("afk: merging is not implemented yet")
     })
 })

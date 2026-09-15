@@ -39,4 +39,11 @@ export type Git = {
      * replacing whatever is at `path` — the gate worktree is re-created at every process start.
      */
     checkoutWorktree: (root: string, request: WorktreeRequest) => Promise<WorktreeResult>
+    /** The commit `rev` names, or undefined when the repository has no such rev. */
+    revision: (root: string, rev: string) => Promise<string | undefined>
+    /**
+     * Whether `commit` is an ancestor of `rev` — a question about where a branch is, which is the
+     * only kind afk asks. Nothing measures what moved while an agent ran (ADR-0011).
+     */
+    contains: (root: string, query: { rev: string; commit: string }) => Promise<boolean>
 }

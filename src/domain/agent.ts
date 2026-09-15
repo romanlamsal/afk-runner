@@ -6,9 +6,6 @@ import type { z } from "zod"
  * prompt and the schema, and both are arguments.
  */
 
-/** One hour, for every external invocation afk makes. A wedged agent holds a slot for an hour, not a night. */
-export const AGENT_TIMEOUT_MS = 60 * 60 * 1000
-
 export type AgentInvocation = {
     /** Composed in the domain. */
     prompt: string
@@ -20,6 +17,12 @@ export type AgentInvocation = {
     transcriptPath: string
     /** The session to continue. Only ever an id that was observed in a stream (ADR-0017). */
     resumeSessionId: string | undefined
+    /**
+     * Called with this attempt's session id the moment the stream carries one, which is before any
+     * model work. It is what lets the start event record a session that exists rather than one the
+     * runner intended to create (ADR-0011, ADR-0017).
+     */
+    onSessionId: ((sessionId: string) => void) | undefined
     /** The role's structured output schema, handed to the agent inline. */
     outputSchema: z.core.JSONSchema.BaseSchema | undefined
 }

@@ -2,7 +2,9 @@ import { spawn } from "node:child_process"
 import { createWriteStream } from "node:fs"
 import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
-import { AGENT_TIMEOUT_MS, type AgentInvocation, type AgentResult, type AgentRunner } from "../domain/agent.ts"
+import type { AgentInvocation, AgentResult, AgentRunner } from "../domain/agent.ts"
+import { INVOCATION_TIMEOUT_MS } from "../domain/timeout.ts"
+import { minutes } from "./process.ts"
 import { createStreamReader } from "./stream-json.ts"
 
 /**
@@ -39,9 +41,11 @@ const commandLine = (invocation: AgentInvocation): string[] => [
     ...(invocation.resumeSessionId === undefined ? [] : ["--resume", invocation.resumeSessionId]),
 ]
 
-const minutes = (elapsedMs: number): string => `${Math.round(elapsedMs / 60_000)}m`
-
-export const createClaudeAgentRunner = ({ timeoutMs = AGENT_TIMEOUT_MS }: { timeoutMs?: number } = {}): AgentRunner => {
+export const createClaudeAgentRunner = ({
+    timeoutMs = INVOCATION_TIMEOUT_MS,
+}: {
+    timeoutMs?: number
+} = {}): AgentRunner => {
     return async invocation => {
         const transcript = join(invocation.root, invocation.transcriptPath)
         await mkdir(dirname(transcript), { recursive: true })
@@ -59,6 +63,17 @@ export const createClaudeAgentRunner = ({ timeoutMs = AGENT_TIMEOUT_MS }: { time
 
             let pending = ""
             let stderr = ""
+            let announced = false
+
+            // The id is handed on the moment the stream carries one, which is before any model work:
+            // what is recorded is then a session that exists rather than one afk meant to create.
+            const announce = (): void => {
+                const { sessionId } = reader.reading()
+                if (sessionId !== undefined && !announced) {
+                    announced = true
+                    invocation.onSessionId?.(sessionId)
+                }
+            }
 
             // The timeout is owned here rather than inferred from how long the process ran: an
             // agent killed from outside is not a timeout, and an agent that ignores the first
@@ -78,6 +93,7 @@ export const createClaudeAgentRunner = ({ timeoutMs = AGENT_TIMEOUT_MS }: { time
                 for (const line of lines) {
                     reader.read(line)
                 }
+                announce()
             })
 
             child.stderr.setEncoding("utf8")

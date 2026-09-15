@@ -30,6 +30,7 @@ export const createPlanService =
             cwd: ".",
             transcriptPath: transcriptPath(spec, "planner", now()),
             resumeSessionId: undefined,
+            onSessionId: undefined,
             outputSchema: manifestJsonSchema(),
         })
 

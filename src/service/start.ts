@@ -1,4 +1,5 @@
 import { specBranch } from "../domain/branches.ts"
+import type { CopyEnvironmentFiles } from "../domain/environment.ts"
 import type { Git } from "../domain/git.ts"
 import type { Manifest, ManifestStore } from "../domain/manifest.ts"
 import type { Mode } from "../domain/mode.ts"
@@ -6,22 +7,8 @@ import type { Commands, ConfirmationScreen, Operator } from "../domain/operator.
 import { gateWorktree } from "../domain/paths.ts"
 import { trunkNotices } from "../domain/preflight.ts"
 import { type RunRecordStore, refusalToStart } from "../domain/records.ts"
+import type { PreparedRun } from "../domain/run.ts"
 import type { PlanSpec } from "./plan.ts"
-
-/** A run that is ready to implement: everything a ticket needs in order to be handed to an implementer. */
-export type PreparedRun = {
-    /** The target repository's top level. */
-    root: string
-    spec: number
-    /** The local branch the spec branch was cut from. */
-    trunk: string
-    /** The spec branch. */
-    branch: string
-    /** The gate worktree, relative to the root: the spec branch's sole writer (ADR-0006). */
-    gate: string
-    /** The manifest as confirmed — the commands in it are the ones that will run. */
-    manifest: Manifest
-}
 
 export type StartResult =
     | { outcome: "planned"; manifest: Manifest }
@@ -38,6 +25,8 @@ export type StartRun = (request: StartRequest) => Promise<StartResult>
 export type StartDeps = {
     /** Where afk was invoked. The target repository is this directory's git top level. */
     cwd: string
+    /** The gate runs the operator's own commands, so it needs the operator's own environment. */
+    environment: CopyEnvironmentFiles
     git: Git
     manifests: ManifestStore
     operator: Operator
@@ -70,7 +59,7 @@ const decide = async (operator: Operator, mode: Mode, screen: ConfirmationScreen
  * run forbids, what being behind means. What is left here is the order the ports are called in.
  */
 export const createStartService =
-    ({ cwd, git, manifests, operator, plan, records }: StartDeps): StartRun =>
+    ({ cwd, environment, git, manifests, operator, plan, records }: StartDeps): StartRun =>
     async ({ spec, mode, consented }) => {
         const root = await git.topLevel(cwd)
         if (root === undefined) {
@@ -131,6 +120,7 @@ export const createStartService =
         if (!checkout.ok) {
             return refused(`the gate worktree could not be created: ${checkout.reason}`)
         }
+        await environment(root, gate)
 
         return { outcome: "prepared", run: { root, spec, trunk: trunk.branch, branch, gate, manifest } }
     }

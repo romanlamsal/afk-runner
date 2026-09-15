@@ -3,6 +3,10 @@ import type { AgentInvocation, AgentResult, AgentRunner } from "../../src/domain
 /**
  * The agent port's fake. It has no real counterpart in the contract suite knowingly: a real run
  * would cost a model call per assertion, so this adapter is covered by review.
+ *
+ * It announces its session id before it returns, the way the real adapter does, because that is
+ * what the port promises — an id reaches the caller as soon as the stream carries one, and a fake
+ * that skipped it would let a caller pass an assertion the real stream never grants (ADR-0017).
  */
 export type FakeAgent = {
     run: AgentRunner
@@ -16,13 +20,17 @@ export const createFakeAgent = (reply: Partial<AgentResult> = {}): FakeAgent => 
         invocations,
         run: async invocation => {
             invocations.push(invocation)
-            return {
+            const result: AgentResult = {
                 outcome: "ok",
                 sessionId: "session-from-the-stream",
                 structuredOutput: undefined,
                 detail: "",
                 ...reply,
             }
+            if (result.sessionId !== undefined) {
+                invocation.onSessionId?.(result.sessionId)
+            }
+            return result
         },
     }
 }

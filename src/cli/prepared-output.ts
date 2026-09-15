@@ -1,4 +1,4 @@
-import type { PreparedRun } from "../service/start.ts"
+import type { PreparedRun } from "../domain/run.ts"
 
 /**
  * What a prepared run leaves on screen: where its branch came from, where its gate worktree is, and

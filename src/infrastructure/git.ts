@@ -1,7 +1,7 @@
-import { spawn } from "node:child_process"
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
 import type { Git, TrunkState, WorktreeResult } from "../domain/git.ts"
+import { type Ran, run } from "./process.ts"
 
 /**
  * The git port, against the git binary.
@@ -18,26 +18,7 @@ const REMOTE = "origin"
 /** Where a repository with no `origin/HEAD` is looked for, in the order git itself would guess. */
 const TRUNK_CANDIDATES = ["main", "master"] as const
 
-type Ran = { ok: boolean; stdout: string; stderr: string }
-
-const git = (cwd: string, ...args: string[]): Promise<Ran> =>
-    new Promise(resolve => {
-        const child = spawn("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"] })
-        let stdout = ""
-        let stderr = ""
-
-        child.stdout.setEncoding("utf8")
-        child.stdout.on("data", (chunk: string) => {
-            stdout += chunk
-        })
-        child.stderr.setEncoding("utf8")
-        child.stderr.on("data", (chunk: string) => {
-            stderr += chunk
-        })
-
-        child.on("error", error => resolve({ ok: false, stdout: "", stderr: error.message }))
-        child.on("close", code => resolve({ ok: code === 0, stdout: stdout.trim(), stderr: stderr.trim() }))
-    })
+const git = (cwd: string, ...args: string[]): Promise<Ran> => run("git", args, { cwd })
 
 const hasBranch = async (root: string, branch: string): Promise<boolean> =>
     (await git(root, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`)).ok
@@ -114,4 +95,11 @@ export const createGit = (): Git => ({
 
         return added.ok ? { ok: true } : { ok: false, reason: added.stderr === "" ? added.stdout : added.stderr }
     },
+
+    revision: async (root, rev) => {
+        const resolved = await git(root, "rev-parse", "--verify", "--quiet", `${rev}^{commit}`)
+        return resolved.ok && resolved.stdout !== "" ? resolved.stdout : undefined
+    },
+
+    contains: async (root, { rev, commit }) => (await git(root, "merge-base", "--is-ancestor", commit, rev)).ok,
 })

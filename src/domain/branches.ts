@@ -5,3 +5,6 @@
 
 /** The single branch every ticket lands on, and the only branch a run writes to (ADR-0006). */
 export const specBranch = (spec: number): string => `afk/${spec}/spec`
+
+/** The branch one implementer commits on, and the only thing it is allowed to write to. */
+export const ticketBranch = (spec: number, ticket: number): string => `afk/${spec}/t${ticket}`

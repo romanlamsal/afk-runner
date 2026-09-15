@@ -8,6 +8,8 @@ import type { Commands } from "../../src/domain/operator.ts"
 import { createPlanService } from "../../src/service/plan.ts"
 import { createStartService } from "../../src/service/start.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
+import { createStubDrive } from "../fakes/drive.ts"
+import { createFakeEnvironment } from "../fakes/environment.ts"
 import { createFakeGit } from "../fakes/git.ts"
 import { createFakeManifestStore } from "../fakes/manifest-store.ts"
 import { createFakeOperator } from "../fakes/operator.ts"
@@ -27,6 +29,7 @@ const MANIFEST: Manifest = {
 const harness = ({ trunk, answer }: { trunk?: TrunkState; answer?: Commands } = {}) => {
     const agent = createFakeAgent({ structuredOutput: MANIFEST })
     const manifests = createFakeManifestStore()
+    const environment = createFakeEnvironment()
     const git = createFakeGit(trunk === undefined ? {} : { trunk })
     const operator = createFakeOperator(answer)
     const records = createFakeRunRecords()
@@ -36,8 +39,10 @@ const harness = ({ trunk, answer }: { trunk?: TrunkState; answer?: Commands } = 
         isInteractive: () => true,
         printError: line => errors.push(line),
         run: createRun({
+            drive: createStubDrive(),
             start: createStartService({
                 cwd: "/repo",
+                environment: environment.copy,
                 git: git.git,
                 manifests: manifests.store,
                 operator: operator.operator,

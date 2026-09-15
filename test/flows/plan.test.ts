@@ -6,6 +6,8 @@ import type { Manifest } from "../../src/domain/manifest.ts"
 import { createPlanService } from "../../src/service/plan.ts"
 import { createStartService } from "../../src/service/start.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
+import { createStubDrive } from "../fakes/drive.ts"
+import { createFakeEnvironment } from "../fakes/environment.ts"
 import { createFakeGit } from "../fakes/git.ts"
 import { createFakeManifestStore } from "../fakes/manifest-store.ts"
 import { createFakeOperator } from "../fakes/operator.ts"
@@ -32,6 +34,7 @@ const MANIFEST: Manifest = {
 const harness = (reply: { structuredOutput: unknown } = { structuredOutput: MANIFEST }) => {
     const agent = createFakeAgent(reply)
     const manifests = createFakeManifestStore()
+    const environment = createFakeEnvironment()
     const git = createFakeGit()
     const operator = createFakeOperator()
     const records = createFakeRunRecords()
@@ -39,6 +42,7 @@ const harness = (reply: { structuredOutput: unknown } = { structuredOutput: MANI
     const errors: string[] = []
     const start = createStartService({
         cwd: "/repo",
+        environment: environment.copy,
         git: git.git,
         manifests: manifests.store,
         operator: operator.operator,
@@ -52,7 +56,12 @@ const harness = (reply: { structuredOutput: unknown } = { structuredOutput: MANI
     const cli = createCli({
         isInteractive: () => true,
         printError: line => errors.push(line),
-        run: createRun({ start, print: line => printed.push(line), printError: line => errors.push(line) }),
+        run: createRun({
+            start,
+            drive: createStubDrive(),
+            print: line => printed.push(line),
+            printError: line => errors.push(line),
+        }),
     })
     return { cli, agent, git, manifests, operator, printed, errors }
 }

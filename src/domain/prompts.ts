@@ -35,3 +35,42 @@ export const plannerPrompt = (spec: number): string =>
         "Report the manifest as structured output and nothing else. Change no file, and write",
         "nothing to the issue tracker.",
     ].join("\n")
+
+/**
+ * The implementer. It works in a worktree of its own, on a branch of its own, and the one thing it
+ * must do beyond the ticket is run `verify` on its own work before it reports — the cheap place to
+ * catch work that does not build, rather than the serial merge track (ADR-0015).
+ *
+ * It is told nothing about the spec branch, because it never touches one: afk rebases and merges.
+ */
+export const implementerPrompt = ({
+    spec,
+    ticket,
+    title,
+    branch,
+    verify,
+}: {
+    spec: number
+    ticket: number
+    title: string
+    branch: string
+    verify: string
+}): string =>
+    [
+        `Implement ticket #${ticket} of spec #${spec}: ${title}.`,
+        "",
+        `You are in a worktree of your own, checked out on ${branch}. Read the ticket and the spec`,
+        "issue, and read this repository's own documentation of how it wants code and tests written",
+        "before you write any.",
+        "",
+        "Then:",
+        `1. Implement the ticket, and commit your work on ${branch}. Several commits are fine.`,
+        `2. Run \`${verify}\` and act on what it says. Fix what you broke, and commit the fix.`,
+        "3. Report what you did.",
+        "",
+        `Only report success once \`${verify}\` is green. Commit everything you want kept: work that`,
+        "is not committed does not exist as far as the rest of the run is concerned.",
+        "",
+        `Stay on ${branch}: do not merge, do not rebase, do not push, and do not touch another`,
+        "branch or another worktree. Write nothing to the issue tracker.",
+    ].join("\n")

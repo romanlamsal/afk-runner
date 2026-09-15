@@ -4,6 +4,7 @@ import type { Manifest } from "../../src/domain/manifest.ts"
 import type { Mode } from "../../src/domain/mode.ts"
 import type { Commands } from "../../src/domain/operator.ts"
 import { createStartService, type StartResult } from "../../src/service/start.ts"
+import { createFakeEnvironment } from "../fakes/environment.ts"
 import { createFakeGit, type FakeGit } from "../fakes/git.ts"
 import { createFakeManifestStore, type FakeManifestStore } from "../fakes/manifest-store.ts"
 import { createFakeOperator, type FakeOperator } from "../fakes/operator.ts"
@@ -42,6 +43,7 @@ type Harness = {
 }
 
 const harness = (setup: Setup = {}): Harness => {
+    const environment = createFakeEnvironment()
     const git = createFakeGit(setup.repository ?? {})
     const manifests = createFakeManifestStore(
         setup.stored === undefined ? undefined : { ok: true, manifest: setup.stored },
@@ -52,6 +54,7 @@ const harness = (setup: Setup = {}): Harness => {
 
     const service = createStartService({
         cwd: "/repo/packages/thing",
+        environment: environment.copy,
         git: git.git,
         manifests: manifests.store,
         operator: operator.operator,

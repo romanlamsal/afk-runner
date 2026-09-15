@@ -7,17 +7,32 @@ status: accepted
 An earlier runner stored a status enum per ticket *and* asked GitHub what had landed. Two
 representations of one fact is how they came to disagree.
 
-**Decision: `state.json` holds, per ticket, an append-only log of lifecycle events** — the step, its
-outcome, a timestamp, the attempt's `sessionId`, free-text detail, and a pointer to the agent
-transcript. **Status is the last event. It is derived on read and never stored.**
+**Decision: `events.jsonl` holds an append-only log of lifecycle events** — the ticket, the step, its
+outcome, a timestamp, the attempt's `sessionId`, the `baseSha` a worktree was cut from, free-text
+detail, and a pointer to the agent transcript. **Status is the last event. It is derived on read and
+never stored.**
+
+**The format is one JSON object per line, opened for append** — not one JSON document rewritten on
+every change. The format *is* the durability argument: a line is written whole or it is not, so a
+run killed mid-write costs the last line and never the file, and a line that does not parse is
+dropped on read rather than failing everything before it. Rewriting a whole document to record one
+event puts the entire history in the crash window, every time.
 
 `step` is closed: `implement → rebase → resolve → merge → gate`, plus `revert` when the gate goes
-red. `outcome` is `running | ok | failed | skipped`.
+red and `prepare` when a step is recovered (ADR-0012). `outcome` is `running | ok | failed | skipped`.
 
 **An event is appended when a step starts, and a second when it ends.** The start event carries
 `running` and the attempt's `sessionId` as soon as that id is observed (ADR-0017); the end event
 carries the settled outcome. Nothing is ever rewritten — settling an outcome means appending, not
 editing.
+
+**Exactly two events per attempt, which is what makes the start event's `sessionId` possible at
+all.** Append-only and "the start event carries the id" can only both hold if the start event is
+written at the moment the id is observed — which is before any model work, because every line of
+the stream carries it, including the first. An attempt whose stream carried no id never started one,
+and still gets its start event, so the pair is invariant. A step killed before its agent was spawned
+leaves no event and reads as untouched, which is correct: there is no session to resume and nothing
+was attempted.
 
 **`sessionId` belongs to the attempt, not to the ticket.** An implementer's session is not its
 conflict resolver's, and a retried implementer's is not its first attempt's.
@@ -36,7 +51,10 @@ conflict resolver's, and a retried implementer's is not its first attempt's.
 
 - **A killed run leaves `running`, which is a visible state rather than an inferred one.** That is
   what a resumed run dispatches on for a ticket that was mid-step, and it is the case a resumed run
-  most often finds.
+  most often finds. A `running` event is *only* stale when the driver's live action set says so
+  (ADR-0019) — the log alone cannot tell a step that is running from one that was.
+- **Attempt counts are derived by counting start events.** Nothing stores a counter, so nothing can
+  hold one that disagrees with the log.
 - The `step` enum being closed is what makes recovery dispatchable (ADR-0012). Adding to it is a
   deliberate act, not a convenience.
 - **The event log is the record of what was attempted and how far it got.** The spec branch's log,
