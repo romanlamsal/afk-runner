@@ -74,3 +74,46 @@ export const implementerPrompt = ({
         `Stay on ${branch}: do not merge, do not rebase, do not push, and do not touch another`,
         "branch or another worktree. Write nothing to the issue tracker.",
     ].join("\n")
+
+/**
+ * The conflict resolver. It is invoked in the ticket's own worktree, mid-rebase, which is both the
+ * only worktree the branch can be checked out in and the warm one — so it can run the repository's
+ * own checks on what it produced instead of resolving blind (ADR-0005).
+ *
+ * It is told not to abort, because aborting is the script's to do: an agent that aborts leaves a
+ * tree that looks exactly like one that never conflicted.
+ */
+export const resolverPrompt = ({
+    spec,
+    ticket,
+    title,
+    branch,
+    onto,
+    verify,
+}: {
+    spec: number
+    ticket: number
+    title: string
+    branch: string
+    onto: string
+    verify: string
+}): string =>
+    [
+        `A rebase of ${branch} onto ${onto} has stopped on a conflict. The branch carries ticket`,
+        `#${ticket} of spec #${spec}: ${title}.`,
+        "",
+        "You are in that branch's own worktree, with the rebase in progress. Resolve it:",
+        "",
+        "1. Read both sides of every conflict and work out what each was trying to do. Keep both",
+        "   intentions where they can coexist; where they cannot, say so in your note.",
+        `2. Stage what you resolved and continue the rebase, until no conflict is left.`,
+        `3. Run \`${verify}\` on the result and fix what the resolution broke. Amend or commit as`,
+        "   the rebase needs.",
+        "",
+        "Never abort the rebase, never reset, and never drop either side's work to make the conflict",
+        "go away — if you cannot resolve it, stop and say why. Stay in this worktree, touch no other",
+        `branch, do not push, and write nothing to the issue tracker.`,
+        "",
+        "Report a note saying what was in conflict and how you resolved it. It goes into the commit",
+        "that lands this ticket, so write it for whoever reads that commit.",
+    ].join("\n")

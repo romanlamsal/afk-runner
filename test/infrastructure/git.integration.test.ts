@@ -209,6 +209,8 @@ describe("createGit().checkoutWorktree", () => {
         expect(await sh(root, "rev-parse", "afk/4/spec")).toBe(landed)
     })
 
+    // The regression this pins: a dead run leaves its worktree registered with git, and the next
+    // run must be able to cut the same ticket a worktree again rather than fail on the leftover.
     it("should replace a worktree a killed run left registered", async () => {
         // given
         const root = await repository()
@@ -242,6 +244,9 @@ describe("createGit().checkoutWorktree", () => {
         expect(checkout).toEqual({ ok: true })
     })
 
+    // The regression this pins: git refuses a second checkout of a branch, which is why the
+    // conflict resolver is called into the ticket's own worktree rather than one of its own
+    // (ADR-0005). A resolver with a worktree of its own is a path that could never work.
     it("should say what git said when the branch is checked out somewhere else already", async () => {
         // given
         const root = await repository()
@@ -268,5 +273,62 @@ describe("createGit().checkoutWorktree", () => {
 
         // then
         expect(await sh(root, "rev-parse", "--abbrev-ref", "HEAD")).toBe(before)
+    })
+})
+
+/** A spec branch and a ticket branch, each in a worktree of its own, both touching one file. */
+const colliding = async (): Promise<string> => {
+    const root = await repository()
+    for (const [branch, path, text] of [
+        ["afk/4/spec", ".afk/4/gate", "theirs"],
+        ["afk/4/t7", ".afk/4/t7", "ours"],
+    ] as const) {
+        await git.checkoutWorktree(root, { path, branch, startPoint: "main" })
+        await writeFile(join(root, path, "collision.txt"), `${text}\n`, "utf8")
+        await sh(join(root, path), "add", ".")
+        await sh(join(root, path), "commit", "-m", text)
+    }
+    return root
+}
+
+describe("createGit().rebase", () => {
+    it("should report a rebase git refused to start as failed rather than conflicted", async () => {
+        // given
+        const root = await repository()
+        await git.checkoutWorktree(root, { path: ".afk/4/t7", branch: "afk/4/t7", startPoint: "main" })
+
+        // when
+        const rebased = await git.rebase(root, { path: ".afk/4/t7", onto: "afk/4/nothing-named-this" })
+
+        // then
+        expect(rebased).toEqual({ outcome: "failed", reason: expect.stringContaining("afk/4/nothing-named-this") })
+    })
+
+    it("should call a rebase whose conflicts are staged but never continued conflicted still", async () => {
+        // given — what an agent that resolved the files and stopped there leaves behind
+        const root = await colliding()
+        await git.rebase(root, { path: ".afk/4/t7", onto: "afk/4/spec" })
+        await sh(join(root, ".afk/4/t7"), "add", ".")
+
+        // when
+        const conflicted = await git.conflicted(root, ".afk/4/t7")
+
+        // then
+        expect(conflicted).toBe(true)
+    })
+
+    // Where the branch itself ends up is the contract suite's to pin; this is about the other
+    // branch — the one nothing in the merge track may move until the ticket lands (ADR-0006).
+    it("should leave the spec branch untouched by a rebase that could not land", async () => {
+        // given
+        const root = await colliding()
+        const before = await sh(root, "rev-parse", "afk/4/spec")
+        await git.rebase(root, { path: ".afk/4/t7", onto: "afk/4/spec" })
+
+        // when
+        await git.abortRebase(root, ".afk/4/t7")
+
+        // then
+        expect(await sh(root, "rev-parse", "afk/4/spec")).toBe(before)
     })
 })

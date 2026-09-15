@@ -11,7 +11,7 @@ import type { Git } from "../../src/domain/git.ts"
  * flag a test set would prove nothing at all.
  */
 
-/** A repository to run the contract against: the port, and the two things a test cannot ask it for. */
+/** A repository to run the contract against: the port, and the things a test cannot ask it for. */
 export type GitWorld = {
     git: Git
     root: string
@@ -21,6 +21,12 @@ export type GitWorld = {
     commit: (branch: string) => Promise<string>
     /** Commit on `branch`, which shares no history with trunk, and return the commit. */
     orphan: (branch: string) => Promise<string>
+    /** Where `branch` is checked out, relative to the root — a branch has exactly one worktree. */
+    worktree: (branch: string) => Promise<string>
+    /** Commit on `branch` and on `onto` in a way that the two cannot both apply. */
+    collide: (branch: string, onto: string) => Promise<void>
+    /** Leave something uncommitted in the worktree at `path`. */
+    soil: (path: string) => Promise<void>
 }
 
 export const describeGitContract = (name: string, create: () => Promise<GitWorld>): void => {
@@ -129,6 +135,156 @@ export const describeGitContract = (name: string, create: () => Promise<GitWorld
 
             // then
             expect(onBase).toBe(false)
+        })
+    })
+
+    describe(`${name}: isClean`, () => {
+        it("should call a worktree with nothing uncommitted in it clean", async () => {
+            // given
+            const world = await create()
+            await world.commit("afk/4/t7")
+
+            // when
+            const clean = await world.git.isClean(world.root, await world.worktree("afk/4/t7"))
+
+            // then
+            expect(clean).toBe(true)
+        })
+
+        it("should call a worktree with uncommitted work in it dirty, because a rebase would bury it", async () => {
+            // given
+            const world = await create()
+            await world.commit("afk/4/t7")
+            const path = await world.worktree("afk/4/t7")
+            await world.soil(path)
+
+            // when
+            const clean = await world.git.isClean(world.root, path)
+
+            // then
+            expect(clean).toBe(false)
+        })
+    })
+
+    describe(`${name}: rebase`, () => {
+        /** A spec branch a sibling landed on, and a ticket branch cut before that happened. */
+        const behind = async (world: GitWorld): Promise<string> => {
+            await world.commit("afk/4/spec")
+            await world.commit("afk/4/t7")
+            return world.worktree("afk/4/t7")
+        }
+
+        it("should land a branch whose commits apply to the tip it was rebased onto", async () => {
+            // given
+            const world = await create()
+            const path = await behind(world)
+
+            // when
+            const rebased = await world.git.rebase(world.root, { path, onto: "afk/4/spec" })
+
+            // then
+            expect(rebased).toEqual({ outcome: "landed" })
+        })
+
+        it("should leave the rebased branch containing the tip it was rebased onto", async () => {
+            // given
+            const world = await create()
+            const path = await behind(world)
+            const tip = await world.git.revision(world.root, "afk/4/spec")
+
+            // when
+            await world.git.rebase(world.root, { path, onto: "afk/4/spec" })
+
+            // then
+            expect(await world.git.contains(world.root, { rev: "afk/4/t7", commit: tip ?? "" })).toBe(true)
+        })
+
+        it("should stop on a conflict rather than fail, because a conflict is what an agent is for", async () => {
+            // given
+            const world = await create()
+            const path = await behind(world)
+            await world.collide("afk/4/t7", "afk/4/spec")
+
+            // when
+            const rebased = await world.git.rebase(world.root, { path, onto: "afk/4/spec" })
+
+            // then
+            expect(rebased).toEqual({ outcome: "conflicted" })
+        })
+
+        it("should leave the worktree conflicted for the resolver that is called into it", async () => {
+            // given
+            const world = await create()
+            const path = await behind(world)
+            await world.collide("afk/4/t7", "afk/4/spec")
+            await world.git.rebase(world.root, { path, onto: "afk/4/spec" })
+
+            // when
+            const conflicted = await world.git.conflicted(world.root, path)
+
+            // then
+            expect(conflicted).toBe(true)
+        })
+
+        it("should leave nothing conflicted where the rebase landed", async () => {
+            // given
+            const world = await create()
+            const path = await behind(world)
+            await world.git.rebase(world.root, { path, onto: "afk/4/spec" })
+
+            // when
+            const conflicted = await world.git.conflicted(world.root, path)
+
+            // then
+            expect(conflicted).toBe(false)
+        })
+    })
+
+    describe(`${name}: abortRebase`, () => {
+        const stopped = async (world: GitWorld): Promise<string> => {
+            await world.commit("afk/4/spec")
+            await world.commit("afk/4/t7")
+            const path = await world.worktree("afk/4/t7")
+            await world.collide("afk/4/t7", "afk/4/spec")
+            await world.git.rebase(world.root, { path, onto: "afk/4/spec" })
+            return path
+        }
+
+        it("should take the worktree out of the rebase git stopped in", async () => {
+            // given
+            const world = await create()
+            const path = await stopped(world)
+
+            // when
+            await world.git.abortRebase(world.root, path)
+
+            // then
+            expect(await world.git.conflicted(world.root, path)).toBe(false)
+        })
+
+        it("should leave the branch where it started, which is why an abort cannot pass for a landing", async () => {
+            // given
+            const world = await create()
+            const path = await stopped(world)
+            const tip = await world.git.revision(world.root, "afk/4/spec")
+
+            // when
+            await world.git.abortRebase(world.root, path)
+
+            // then
+            expect(await world.git.contains(world.root, { rev: "afk/4/t7", commit: tip ?? "" })).toBe(false)
+        })
+
+        it("should accept a worktree with no rebase in it, so that every failure path can abort", async () => {
+            // given
+            const world = await create()
+            await world.commit("afk/4/t7")
+
+            // when
+            const aborted = await world.git.abortRebase(world.root, await world.worktree("afk/4/t7"))
+
+            // then
+            expect(aborted).toEqual({ ok: true })
         })
     })
 }

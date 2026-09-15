@@ -11,6 +11,7 @@ import { createFileManifestStore } from "./repository/manifest-store.ts"
 import { createFileRunRecordStore } from "./repository/run-records.ts"
 import { createDriveService } from "./service/drive.ts"
 import { createImplementService } from "./service/implement.ts"
+import { createMergeService } from "./service/merge.ts"
 import { createPlanService } from "./service/plan.ts"
 import { createStartService } from "./service/start.ts"
 
@@ -56,6 +57,7 @@ export const assembleCli = (): Cli => {
             now,
             tracker: createGitHubTracker(),
         }),
+        merge: createMergeService({ agent, events, git, now }),
         now,
     })
 

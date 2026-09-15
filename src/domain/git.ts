@@ -24,7 +24,23 @@ export type WorktreeRequest = {
     startPoint: string
 }
 
-export type WorktreeResult = { ok: true } | { ok: false; reason: string }
+/** What a git invocation that moves a ref came to. Nothing afk asks for goes unchecked (ADR-0005). */
+export type GitResult = { ok: true } | { ok: false; reason: string }
+
+export type RebaseRequest = {
+    /** The worktree the branch is checked out in, relative to the repository root. */
+    path: string
+    /** What the branch is rebased onto: the spec branch, always at its tip (ADR-0005). */
+    onto: string
+}
+
+export type RebaseResult =
+    /** The branch's commits sit on the tip it was rebased onto. */
+    | { outcome: "landed" }
+    /** git stopped part-way: the rebase is in progress and the tree needs resolving. */
+    | { outcome: "conflicted" }
+    /** It never got as far as a conflict — there was nothing to rebase, or git refused. */
+    | { outcome: "failed"; reason: string }
 
 export type Git = {
     /** The git top level of `cwd`, or undefined when `cwd` is not inside a worktree. */
@@ -38,7 +54,7 @@ export type Git = {
      * Check `branch` out at `path`, creating the branch from `startPoint` when it does not exist and
      * replacing whatever is at `path` — the gate worktree is re-created at every process start.
      */
-    checkoutWorktree: (root: string, request: WorktreeRequest) => Promise<WorktreeResult>
+    checkoutWorktree: (root: string, request: WorktreeRequest) => Promise<GitResult>
     /** The commit `rev` names, or undefined when the repository has no such rev. */
     revision: (root: string, rev: string) => Promise<string | undefined>
     /**
@@ -46,4 +62,21 @@ export type Git = {
      * only kind afk asks. Nothing measures what moved while an agent ran (ADR-0011).
      */
     contains: (root: string, query: { rev: string; commit: string }) => Promise<boolean>
+    /**
+     * Whether the worktree at `path` has nothing uncommitted in it. Asked before every rebase:
+     * rebasing over uncommitted work buries it (ADR-0005).
+     */
+    isClean: (root: string, path: string) => Promise<boolean>
+    /** Rebase the branch checked out at `path`, in that worktree and no other (ADR-0005). */
+    rebase: (root: string, request: RebaseRequest) => Promise<RebaseResult>
+    /**
+     * Whether a rebase is still under way at `path` — paths git could not merge, or a rebase it was
+     * never told to finish. This is what the script asks after the conflict resolver exits.
+     */
+    conflicted: (root: string, path: string) => Promise<boolean>
+    /**
+     * Put the worktree at `path` back on its branch. The resolver never aborts; the script does
+     * (ADR-0005). Asking for one where there is no rebase is not a failure.
+     */
+    abortRebase: (root: string, path: string) => Promise<GitResult>
 }

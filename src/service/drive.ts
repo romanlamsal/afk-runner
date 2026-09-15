@@ -2,7 +2,9 @@ import type { Clock } from "../domain/clock.ts"
 import { type Action, nextActions } from "../domain/decide.ts"
 import { type EventLog, type Progress, progressOf, skipped } from "../domain/events.ts"
 import type { PreparedRun } from "../domain/run.ts"
-import type { ImplementResult, ImplementTicket } from "./implement.ts"
+import type { StepResult } from "./attempt.ts"
+import type { ImplementTicket } from "./implement.ts"
+import type { MergeTicket } from "./merge.ts"
 
 /** The driving port of a run: work the slate until nothing is left to start and nothing is running. */
 export type DriveRun = (run: PreparedRun, options: { maxParallel: number }) => Promise<DriveResult>
@@ -17,10 +19,11 @@ export type DriveResult = {
 export type DriveDeps = {
     events: EventLog
     implement: ImplementTicket
+    merge: MergeTicket
     now: Clock
 }
 
-type Settled = { action: Action; result: ImplementResult }
+type Settled = { action: Action; result: StepResult }
 
 /**
  * The loop, and deliberately nothing else: ask the decision function what to start, start it, wait
@@ -33,7 +36,7 @@ type Settled = { action: Action; result: ImplementResult }
  * recognisable at all.
  */
 export const createDriveService =
-    ({ events, implement, now }: DriveDeps): DriveRun =>
+    ({ events, implement, merge, now }: DriveDeps): DriveRun =>
     async (run, { maxParallel }) => {
         const { root, spec, manifest } = run
         const inFlight = new Map<Action, Promise<Settled>>()
@@ -63,11 +66,20 @@ export const createDriveService =
                 continue
             }
 
+            // Which service serves which action is all this knows about them. That at most one
+            // merge is ever handed out is the decision function's rule, not a lock held here
+            // (ADR-0006).
             for (const action of actions) {
                 if (action.kind === "implement") {
                     inFlight.set(
                         action,
                         implement(run, action).then(result => ({ action, result })),
+                    )
+                }
+                if (action.kind === "merge") {
+                    inFlight.set(
+                        action,
+                        merge(run, action).then(result => ({ action, result })),
                     )
                 }
             }

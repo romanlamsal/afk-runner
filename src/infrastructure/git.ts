@@ -1,6 +1,6 @@
-import { rm } from "node:fs/promises"
-import { join } from "node:path"
-import type { Git, TrunkState, WorktreeResult } from "../domain/git.ts"
+import { access, rm } from "node:fs/promises"
+import { isAbsolute, join, resolve } from "node:path"
+import type { Git, GitResult, RebaseResult, TrunkState } from "../domain/git.ts"
 import { type Ran, run } from "./process.ts"
 
 /**
@@ -46,6 +46,42 @@ const trunkBranch = async (root: string): Promise<string | undefined> => {
     return undefined
 }
 
+/** What git said went wrong, preferring what it said on stderr. */
+const complaint = (ran: Ran): string => (ran.stderr === "" ? ran.stdout : ran.stderr)
+
+const there = async (path: string): Promise<boolean> => {
+    try {
+        await access(path)
+        return true
+    } catch {
+        return false
+    }
+}
+
+/**
+ * Whether a rebase is still under way in `cwd`. Two questions, because a rebase git stopped in is
+ * still in progress after every conflicted path has been staged: the tree is the ticket's again
+ * only once the rebase has been continued or aborted.
+ */
+const rebasing = async (cwd: string): Promise<boolean> => {
+    const unmerged = await git(cwd, "ls-files", "--unmerged")
+    if (unmerged.ok && unmerged.stdout !== "") {
+        return true
+    }
+
+    for (const state of ["rebase-merge", "rebase-apply"]) {
+        const named = await git(cwd, "rev-parse", "--git-path", state)
+        // `--git-path` answers relative to the worktree it was asked in, unless the repository puts
+        // its git directory somewhere else.
+        const path = named.stdout
+        if (named.ok && path !== "" && (await there(isAbsolute(path) ? path : resolve(cwd, path)))) {
+            return true
+        }
+    }
+
+    return false
+}
+
 /** The comparison against the remote trunk, or nothing to compare with. */
 const compare = async (root: string, trunk: string): Promise<{ ahead: number; behind: number; compared: boolean }> => {
     const nothing = { ahead: 0, behind: 0, compared: false }
@@ -81,7 +117,7 @@ export const createGit = (): Git => ({
         return state
     },
 
-    checkoutWorktree: async (root, { path, branch, startPoint }): Promise<WorktreeResult> => {
+    checkoutWorktree: async (root, { path, branch, startPoint }): Promise<GitResult> => {
         // A run that was killed leaves its worktree registered, and a worktree git no longer knows
         // about leaves its directory behind. Both are ordinary, and neither may fail a start.
         const absolute = join(root, path)
@@ -93,7 +129,7 @@ export const createGit = (): Git => ({
             ? await git(root, "worktree", "add", absolute, branch)
             : await git(root, "worktree", "add", "-b", branch, absolute, startPoint)
 
-        return added.ok ? { ok: true } : { ok: false, reason: added.stderr === "" ? added.stdout : added.stderr }
+        return added.ok ? { ok: true } : { ok: false, reason: complaint(added) }
     },
 
     revision: async (root, rev) => {
@@ -102,4 +138,35 @@ export const createGit = (): Git => ({
     },
 
     contains: async (root, { rev, commit }) => (await git(root, "merge-base", "--is-ancestor", commit, rev)).ok,
+
+    isClean: async (root, path) => {
+        const status = await git(join(root, path), "status", "--porcelain")
+        return status.ok && status.stdout === ""
+    },
+
+    rebase: async (root, { path, onto }): Promise<RebaseResult> => {
+        const cwd = join(root, path)
+        const rebased = await git(cwd, "rebase", onto)
+        if (rebased.ok) {
+            return { outcome: "landed" }
+        }
+
+        // git exits non-zero both for a conflict it wants resolved and for a rebase it refused to
+        // start. Only the tree can tell them apart, and only one of them is worth an agent.
+        return (await rebasing(cwd)) ? { outcome: "conflicted" } : { outcome: "failed", reason: complaint(rebased) }
+    },
+
+    conflicted: async (root, path) => rebasing(join(root, path)),
+
+    abortRebase: async (root, path): Promise<GitResult> => {
+        const cwd = join(root, path)
+        // Asking git to abort where there is no rebase is an error, and a worktree with nothing to
+        // abort is the ordinary case on every failure that happened before the rebase started.
+        if (!(await rebasing(cwd))) {
+            return { ok: true }
+        }
+
+        const aborted = await git(cwd, "rebase", "--abort")
+        return aborted.ok ? { ok: true } : { ok: false, reason: complaint(aborted) }
+    },
 })

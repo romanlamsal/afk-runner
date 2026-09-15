@@ -29,25 +29,57 @@ const world = async (): Promise<GitWorld> => {
     await commitHere(root, "first")
 
     const git = createGit()
+    const checkedOut = new Set<string>()
     let made = 0
+
+    /**
+     * Where a branch is checked out. Created once and kept, because real git refuses a second
+     * checkout of a branch — and re-creating it would throw away the rebase in progress.
+     */
+    const worktree = async (branch: string): Promise<string> => {
+        const path = `wt/${branch}`
+        if (!checkedOut.has(branch)) {
+            await git.checkoutWorktree(root, { path, branch, startPoint: "main" })
+            checkedOut.add(branch)
+        }
+        return path
+    }
+
+    const commit = async (branch: string): Promise<string> => {
+        // Through the port, and in a worktree of the branch's own — which is the only way real git
+        // will have it, because a branch cannot be checked out twice.
+        const path = await worktree(branch)
+        made += 1
+        return commitHere(join(root, path), `work-${made}`)
+    }
 
     return {
         git,
         root,
         trunk: "main",
-        commit: async branch => {
-            // Through the port, and in a worktree of the branch's own — which is the only way real
-            // git will have it, because a branch cannot be checked out twice.
-            await git.checkoutWorktree(root, { path: `wt/${branch}`, branch, startPoint: "main" })
-            made += 1
-            return commitHere(join(root, "wt", branch), `work-${made}`)
-        },
+        commit,
+        worktree,
         orphan: async branch => {
             made += 1
             await sh(root, "checkout", "--orphan", branch)
             const sha = await commitHere(root, `elsewhere-${made}`)
             await sh(root, "checkout", "main")
             return sha
+        },
+        collide: async (branch, onto) => {
+            // One file, added on both sides with different content: the plainest conflict there is.
+            for (const [side, text] of [
+                [onto, "theirs"],
+                [branch, "ours"],
+            ] as const) {
+                const path = join(root, await worktree(side))
+                await writeFile(join(path, "collision.txt"), `${text}\n`, "utf8")
+                await sh(path, "add", ".")
+                await sh(path, "commit", "-m", `collision-${text}`)
+            }
+        },
+        soil: async path => {
+            await writeFile(join(root, path, "uncommitted.txt"), "in progress\n", "utf8")
         },
     }
 }

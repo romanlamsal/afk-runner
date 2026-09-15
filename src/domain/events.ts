@@ -37,7 +37,11 @@ const eventSchema = z.object({
     baseSha: z.string().optional(),
     /** Where the attempt's transcript is, relative to the repository root. */
     transcriptPath: z.string().optional(),
-    /** Free text. There is no closed enum of failure reasons, and nothing ever branches on this. */
+    /**
+     * Free text: why a step ended as it did, or what an agent wants the reader of a commit to know.
+     * There is no closed enum of failure reasons. It is quoted — the conflict resolver's note
+     * reaches the squash body this way — but nothing ever branches on it.
+     */
     detail: z.string().optional(),
 })
 
@@ -75,6 +79,15 @@ export const attempts = (events: readonly LifecycleEvent[], ticket: number, step
 export const verified = (events: readonly LifecycleEvent[], ticket: number): boolean => {
     const last = statusOf(events, ticket)
     return last?.step === "gate" && last.outcome === "ok"
+}
+
+/**
+ * A ticket whose implementer reported back and whose work has not been taken any further: what the
+ * merge track draws from, exactly as the slate draws from verified blockers.
+ */
+export const implemented = (events: readonly LifecycleEvent[], ticket: number): boolean => {
+    const last = statusOf(events, ticket)
+    return last?.step === "implement" && last.outcome === "ok"
 }
 
 /** A ticket nothing more will happen to: it failed for good, or it was skipped. */

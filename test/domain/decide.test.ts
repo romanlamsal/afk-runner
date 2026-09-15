@@ -35,6 +35,8 @@ const decide = (
 
 const implementing = (ticket: number, attempt = 1): Action => ({ kind: "implement", ticket, attempt })
 
+const merging = (ticket: number, attempt = 1): Action => ({ kind: "merge", ticket, attempt })
+
 describe("nextActions: the slate", () => {
     it("should start a ticket nothing blocks", () => {
         // given
@@ -151,6 +153,105 @@ describe("nextActions: attempts", () => {
 
         // then
         expect(actions).toEqual([implementing(10, 1)])
+    })
+
+    it("should number a rebase attempt from the rebases the log already carries", () => {
+        // given
+        const tickets = [ticket(10)]
+        const events = [event(10, "rebase", "running"), event(10, "rebase", "failed"), event(10, "implement", "ok")]
+
+        // when
+        const actions = decide(tickets, events)
+
+        // then
+        expect(actions).toEqual([merging(10, 2)])
+    })
+})
+
+describe("nextActions: the merge track", () => {
+    it("should take an implemented ticket into the merge track", () => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, [event(10, "implement", "ok")])
+
+        // then
+        expect(actions).toEqual([merging(10)])
+    })
+
+    it.each([
+        ["it is still being implemented", [event(10, "implement", "running")]],
+        ["its rebase already landed", [event(10, "implement", "ok"), event(10, "rebase", "ok")]],
+        ["its rebase failed", [event(10, "implement", "ok"), event(10, "rebase", "failed")]],
+        ["it is verified", [event(10, "implement", "ok"), event(10, "gate", "ok")]],
+    ] as const)("should leave a ticket out of the merge track because %s", (_name, events) => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, events)
+
+        // then
+        expect(actions.some(action => action.kind === "merge")).toBe(false)
+    })
+
+    it("should never merge two tickets at once, because one worktree owns the spec branch", () => {
+        // given
+        const tickets = [ticket(10), ticket(11)]
+        const events = [event(10, "implement", "ok"), event(11, "implement", "ok")]
+
+        // when
+        const actions = decide(tickets, events, { inFlight: [merging(10)] })
+
+        // then
+        expect(actions.filter(action => action.kind === "merge")).toEqual([])
+    })
+
+    it("should merge the most-blocking ticket first, so that the slate moves soonest", () => {
+        // given
+        const tickets = [ticket(10), ticket(11), ticket(12, [11])]
+        const events = [event(10, "implement", "ok"), event(11, "implement", "ok")]
+
+        // when
+        const actions = decide(tickets, events)
+
+        // then
+        expect(actions.filter(action => action.kind === "merge")).toEqual([merging(11)])
+    })
+
+    it("should keep handing out implementers while a ticket is in the merge track", () => {
+        // given
+        const tickets = [ticket(10), ticket(11)]
+
+        // when
+        const actions = decide(tickets, [event(10, "implement", "ok")], { inFlight: [merging(10)] })
+
+        // then
+        expect(actions).toEqual([implementing(11)])
+    })
+
+    it("should skip rather than merge a ticket whose blocker died while it was being implemented", () => {
+        // given
+        const tickets = [ticket(11), ticket(12, [11])]
+        const events = [event(11, "implement", "failed"), event(12, "implement", "ok")]
+
+        // when
+        const actions = decide(tickets, events)
+
+        // then
+        expect(actions).toEqual([{ kind: "skip", ticket: 12 }])
+    })
+
+    it("should start no merge once the run is draining", () => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, [event(10, "implement", "ok")], { draining: true })
+
+        // then
+        expect(actions).toEqual([{ kind: "finish" }])
     })
 })
 

@@ -7,6 +7,7 @@ import type { LifecycleEvent } from "../../src/domain/events.ts"
 import type { Ticket } from "../../src/domain/manifest.ts"
 import { createDriveService } from "../../src/service/drive.ts"
 import { createImplementService } from "../../src/service/implement.ts"
+import { createMergeService, type MergeTicket } from "../../src/service/merge.ts"
 import { createStartService } from "../../src/service/start.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
 import { createFakeCommands } from "../fakes/commands.ts"
@@ -32,14 +33,29 @@ type Setup = {
     tickets: readonly Ticket[]
     /** The tickets whose implementer commits nothing, and so fails its two assertions. */
     idle?: readonly number[]
+    /** The tickets whose rebase onto the spec branch stops on a conflict. */
+    colliding?: readonly number[]
+    /** Whether the conflict resolver finishes the rebase it was called for. */
+    resolving?: boolean
     tracker?: FakeTrackerSetup
     maxParallel?: number
 }
 
-const harness = ({ tickets, idle = [], tracker: trackerSetup = {}, maxParallel = 3 }: Setup) => {
+const harness = ({
+    tickets,
+    idle = [],
+    colliding = [],
+    resolving = true,
+    tracker: trackerSetup = {},
+    maxParallel = 3,
+}: Setup) => {
     const manifest = manifestOf(tickets)
-    const git = createFakeGit({ branches: { "afk/4/spec": ["spec-tip"] } })
+    const git = createFakeGit({
+        branches: { "afk/4/spec": ["spec-tip"] },
+        colliding: colliding.map(number => `afk/4/t${number}`),
+    })
     const agent = createFakeAgent()
+    const resolver = createFakeAgent()
     const commands = createFakeCommands()
     const environment = createFakeEnvironment()
     const events = createFakeEventLog()
@@ -51,8 +67,33 @@ const harness = ({ tickets, idle = [], tracker: trackerSetup = {}, maxParallel =
     const errors: string[] = []
     /** The most implementers that were ever in flight at once, which is what a slot count means. */
     const concurrency = { running: 0, peak: 0 }
+    /** The same for the merge track, where the only correct answer is one (ADR-0006). */
+    const merging = { running: 0, peak: 0 }
 
     const now = (): Date => new Date("2026-09-15T11:18:38.314Z")
+
+    const mergeTrack = createMergeService({
+        // A conflict resolver that finishes the rebase it was called for, unless this scenario says
+        // it is one that cannot.
+        agent: async invocation => {
+            const result = await resolver.run(invocation)
+            if (resolving) {
+                git.resolve(invocation.cwd)
+            }
+            return result
+        },
+        events: events.log,
+        git: git.git,
+        now,
+    })
+
+    const merge: MergeTicket = async (run, action) => {
+        merging.running += 1
+        merging.peak = Math.max(merging.peak, merging.running)
+        const result = await mergeTrack(run, action)
+        merging.running -= 1
+        return result
+    }
 
     const cli = createCli({
         isInteractive: () => true,
@@ -90,6 +131,7 @@ const harness = ({ tickets, idle = [], tracker: trackerSetup = {}, maxParallel =
                     now,
                     tracker: tracker.tracker,
                 }),
+                merge,
                 now,
             }),
             print: line => printed.push(line),
@@ -102,6 +144,8 @@ const harness = ({ tickets, idle = [], tracker: trackerSetup = {}, maxParallel =
         concurrency,
         events,
         git,
+        merging,
+        resolver,
         printed,
         errors,
         tracker,
@@ -124,7 +168,12 @@ describe("a run that works its slate", () => {
         await run()
 
         // then
-        expect(settled(events.appended)).toEqual(["#10 implement ok", "#11 implement ok"])
+        expect(settled(events.appended)).toEqual([
+            "#10 implement ok",
+            "#11 implement ok",
+            "#10 rebase ok",
+            "#11 rebase ok",
+        ])
     })
 
     it("should give each ticket a worktree of its own, cut from the spec branch", async () => {
@@ -184,6 +233,86 @@ describe("a run that works its slate", () => {
 
         // then
         expect(agent.invocations.map(workingOn)).toEqual([11, 10])
+    })
+})
+
+describe("a run's merge track", () => {
+    it("should rebase every implemented ticket onto the spec branch", async () => {
+        // given
+        const { run, git } = harness({ tickets: [ticket(10), ticket(11)] })
+
+        // when
+        await run()
+
+        // then
+        expect(git.rebases).toEqual([
+            { path: ".afk/4/t10", onto: "afk/4/spec" },
+            { path: ".afk/4/t11", onto: "afk/4/spec" },
+        ])
+    })
+
+    it("should never have two tickets in the merge track at once", async () => {
+        // given
+        const { run, merging } = harness({ tickets: [ticket(10), ticket(11), ticket(12)] })
+
+        // when
+        await run()
+
+        // then
+        expect(merging.peak).toBe(1)
+    })
+
+    it("should resolve a conflicting ticket in that ticket's own worktree", async () => {
+        // given
+        const { run, resolver } = harness({ tickets: [ticket(10)], colliding: [10] })
+
+        // when
+        await run()
+
+        // then
+        expect(resolver.invocations.map(invocation => invocation.cwd)).toEqual([".afk/4/t10"])
+    })
+
+    it("should spend no resolver on a ticket that rebased by itself", async () => {
+        // given
+        const { run, resolver } = harness({ tickets: [ticket(10)] })
+
+        // when
+        await run()
+
+        // then
+        expect(resolver.invocations).toEqual([])
+    })
+
+    it("should fail a ticket whose conflict the resolver could not land, and skip its dependents", async () => {
+        // given
+        const { run, events } = harness({
+            tickets: [ticket(11), ticket(12, [11])],
+            colliding: [11],
+            resolving: false,
+        })
+
+        // when
+        await run()
+
+        // then
+        expect(settled(events.appended)).toEqual([
+            "#11 implement ok",
+            "#11 resolve failed",
+            "#11 rebase failed",
+            "#12 implement skipped",
+        ])
+    })
+
+    it("should leave the spec branch where it was when a rebase could not land", async () => {
+        // given
+        const { run, git } = harness({ tickets: [ticket(10)], colliding: [10], resolving: false })
+
+        // when
+        await run()
+
+        // then
+        expect(git.commitsOn("afk/4/spec")).toEqual(["spec-tip"])
     })
 })
 

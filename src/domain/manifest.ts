@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { manifestPath } from "./paths.ts"
 import { deadlocked } from "./schedule.ts"
+import { inlineJsonSchema } from "./schema.ts"
 
 /**
  * The manifest is the whole contract between the planner and the run. It carries the spec, the two
@@ -42,15 +43,7 @@ export type ManifestStore = {
     write: (root: string, spec: number, manifest: Manifest) => Promise<void>
 }
 
-/**
- * The agent is handed this inline, generated at runtime. `$schema` is dropped because the CLI
- * validates against a validator with no meta-schema registered for the draft it names, and rejects
- * a document carrying one outright.
- */
-export const manifestJsonSchema = (): z.core.JSONSchema.BaseSchema => {
-    const { $schema, ...schema } = z.toJSONSchema(manifestSchema)
-    return schema
-}
+export const manifestJsonSchema = (): z.core.JSONSchema.BaseSchema => inlineJsonSchema(manifestSchema)
 
 const refuse = (reason: string): ManifestRead => ({ ok: false, reason })
 

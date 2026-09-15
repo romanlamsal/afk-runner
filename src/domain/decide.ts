@@ -1,4 +1,4 @@
-import { attempts, type LifecycleEvent, running, settled, unattempted, verified } from "./events.ts"
+import { attempts, implemented, type LifecycleEvent, running, settled, unattempted, verified } from "./events.ts"
 import type { Manifest, Ticket } from "./manifest.ts"
 import { slateOrder } from "./schedule.ts"
 
@@ -13,6 +13,11 @@ import { slateOrder } from "./schedule.ts"
 export type Action =
     /** Give a ticket to an implementer. `attempt` is counted from the log, never stored. */
     | { kind: "implement"; ticket: number; attempt: number }
+    /**
+     * Take an implemented ticket through the merge track: rebase onto the spec branch's tip, and
+     * land it there. At most one of these is ever in flight (ADR-0006).
+     */
+    | { kind: "merge"; ticket: number; attempt: number }
     /** Record that a ticket will not land, because something it is blocked by will not either. */
     | { kind: "skip"; ticket: number }
     /** Nothing is running and nothing more can start. */
@@ -61,6 +66,10 @@ const doomed = (manifest: Manifest, events: readonly LifecycleEvent[]): Readonly
  * A ticket is on the slate once every blocker of its is **verified** — merged but not gated does not
  * count — and the slate is handed out most-dependents-first so that starting a blocker late never
  * stalls the pool (ADR-0001).
+ *
+ * Beside the implement track runs the merge track, and it is serial by correctness rather than by
+ * taste: one worktree owns the spec branch, so nothing can land between a ticket's rebase and its
+ * merge (ADR-0006).
  */
 export const nextActions = (
     manifest: Manifest,
@@ -108,6 +117,22 @@ export const nextActions = (
             attempt: attempts(events, ticket.number, "implement") + 1,
         }))
 
-    const actions = [...skips, ...starts]
+    // One at a time, and never a doomed ticket: a ticket whose blocker died finishes its
+    // implementer and is skipped, rather than spending the merge track on work that cannot land
+    // (ADR-0010).
+    const merges: Action[] = inFlight.some(action => action.kind === "merge")
+        ? []
+        : slateOrder(manifest.tickets)
+              .filter(
+                  ticket => !busy.has(ticket.number) && !dead.has(ticket.number) && implemented(events, ticket.number),
+              )
+              .slice(0, 1)
+              .map(ticket => ({
+                  kind: "merge",
+                  ticket: ticket.number,
+                  attempt: attempts(events, ticket.number, "rebase") + 1,
+              }))
+
+    const actions = [...skips, ...merges, ...starts]
     return actions.length > 0 ? actions : idle()
 }

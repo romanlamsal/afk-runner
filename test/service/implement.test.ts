@@ -3,7 +3,8 @@ import type { AgentResult } from "../../src/domain/agent.ts"
 import type { LifecycleEvent } from "../../src/domain/events.ts"
 import type { Manifest } from "../../src/domain/manifest.ts"
 import type { PreparedRun } from "../../src/domain/run.ts"
-import { createImplementService, type ImplementResult } from "../../src/service/implement.ts"
+import type { StepResult } from "../../src/service/attempt.ts"
+import { createImplementService } from "../../src/service/implement.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
 import { createFakeCommands } from "../fakes/commands.ts"
 import { createFakeEnvironment } from "../fakes/environment.ts"
@@ -76,7 +77,7 @@ const harness = ({ reply, repository, failing, refusal, commits = true }: Setup 
         events,
         git,
         tracker,
-        implement: (): Promise<ImplementResult> => implement(RUN, { ticket: 7, attempt: 1 }),
+        implement: (): Promise<StepResult> => implement(RUN, { ticket: 7, attempt: 1 }),
     }
 }
 
