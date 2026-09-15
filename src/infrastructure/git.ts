@@ -198,6 +198,29 @@ export const createGit = (): Git => ({
         return committed.ok ? { ok: true } : undo(committed)
     },
 
+    revert: async (root, { path, from, message }): Promise<GitResult> => {
+        const cwd = join(root, path)
+
+        // A revert git refused leaves a staged half of one behind, and putting the worktree back
+        // means discarding both the index and the tree. HEAD does not move, so nothing that already
+        // landed is at risk.
+        const undo = async (ran: Ran): Promise<GitResult> => {
+            await git(cwd, "revert", "--quit")
+            await git(cwd, "reset", "--hard", "HEAD")
+            return { ok: false, reason: complaint(ran) }
+        }
+
+        // The whole range, which git reverts newest first — the only order that applies — and
+        // `--no-commit` is what makes it one commit rather than one per commit being undone.
+        const reverted = await git(cwd, "revert", "--no-commit", `${from}^..HEAD`)
+        if (!reverted.ok) {
+            return undo(reverted)
+        }
+
+        const committed = await git(cwd, "commit", "-m", message)
+        return committed.ok ? { ok: true } : undo(committed)
+    },
+
     conflicted: async (root, path) => rebasing(join(root, path)),
 
     abortRebase: async (root, path): Promise<GitResult> => {

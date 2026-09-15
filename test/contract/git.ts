@@ -253,6 +253,76 @@ export const describeGitContract = (name: string, create: () => Promise<GitWorld
         })
     })
 
+    describe(`${name}: revert`, () => {
+        /** A spec branch in its own worktree with one ticket landed on it, and where that landed. */
+        const landed = async (world: GitWorld): Promise<{ gate: string; merge: string }> => {
+            const gate = await world.worktree("afk/4/spec")
+            const merge = await world.commit("afk/4/spec", "landed #7")
+            return { gate, merge }
+        }
+
+        it("should put a commit on the branch carrying the message it was given", async () => {
+            // given
+            const world = await create()
+            const { gate, merge } = await landed(world)
+
+            // when
+            await world.git.revert(world.root, { path: gate, from: merge, message: "Revert landing #7" })
+
+            // then
+            expect(await world.git.log(world.root, { rev: "afk/4/spec", notIn: world.trunk })).toEqual([
+                "landed #7",
+                "Revert landing #7",
+            ])
+        })
+
+        it("should leave what it undid in the branch's history, because a worktree may sit off it", async () => {
+            // given
+            const world = await create()
+            const { gate, merge } = await landed(world)
+
+            // when
+            await world.git.revert(world.root, { path: gate, from: merge, message: "Revert landing #7" })
+
+            // then
+            expect(await world.git.contains(world.root, { rev: "afk/4/spec", commit: merge })).toBe(true)
+        })
+
+        it("should undo everything from the commit it was given onwards in one commit", async () => {
+            // given — the squash, and what a fix agent committed on top of it trying to save it
+            const world = await create()
+            const { gate, merge } = await landed(world)
+            await world.commit("afk/4/spec", "an attempt at fixing #7")
+
+            // when
+            await world.git.revert(world.root, { path: gate, from: merge, message: "Revert landing #7" })
+
+            // then
+            expect(await world.git.log(world.root, { rev: "afk/4/spec", notIn: world.trunk })).toEqual([
+                "landed #7",
+                "an attempt at fixing #7",
+                "Revert landing #7",
+            ])
+        })
+
+        it("should refuse a commit the branch does not carry", async () => {
+            // given
+            const world = await create()
+            const gate = await world.worktree("afk/4/spec")
+            const elsewhere = await world.orphan("afk/4/t7")
+
+            // when
+            const reverted = await world.git.revert(world.root, {
+                path: gate,
+                from: elsewhere,
+                message: "Revert landing #7",
+            })
+
+            // then
+            expect(reverted.ok).toBe(false)
+        })
+    })
+
     describe(`${name}: removeWorktree`, () => {
         it("should free the branch it held, so that it can be checked out somewhere else", async () => {
             // given

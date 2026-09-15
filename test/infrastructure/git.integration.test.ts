@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises"
+import { access, mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
@@ -330,5 +330,82 @@ describe("createGit().rebase", () => {
 
         // then
         expect(await sh(root, "rev-parse", "afk/4/spec")).toBe(before)
+    })
+})
+
+/**
+ * A spec branch carrying a ticket's merge and a fix agent's attempt to save it, and the commit the
+ * merge landed as. Where a branch ends up after a revert is the contract suite's; what is here is
+ * the claim no fake can make — that the tree really is back.
+ */
+const merged = async (): Promise<{ root: string; landed: string }> => {
+    const root = await repository()
+    await git.checkoutWorktree(root, { path: ".afk/4/gate", branch: "afk/4/spec", startPoint: "main" })
+    const gate = join(root, ".afk/4/gate")
+
+    await commit(gate, "the-ticket")
+    const landed = await sh(gate, "rev-parse", "HEAD")
+    await commit(gate, "the-fix-attempt")
+
+    return { root, landed }
+}
+
+const there = async (path: string): Promise<boolean> => {
+    try {
+        await access(path)
+        return true
+    } catch {
+        return false
+    }
+}
+
+describe("createGit().revert", () => {
+    it.each([["the-ticket"], ["the-fix-attempt"]] as const)(
+        "should take %s's work out of the worktree, which is what the re-gate then proves",
+        async file => {
+            // given
+            const { root, landed } = await merged()
+
+            // when
+            await git.revert(root, { path: ".afk/4/gate", from: landed, message: "Revert #7" })
+
+            // then
+            expect(await there(join(root, ".afk/4/gate", `${file}.txt`))).toBe(false)
+        },
+    )
+
+    it("should leave the worktree clean, so that the next merge has somewhere to land", async () => {
+        // given
+        const { root, landed } = await merged()
+
+        // when
+        await git.revert(root, { path: ".afk/4/gate", from: landed, message: "Revert #7" })
+
+        // then
+        expect(await git.isClean(root, ".afk/4/gate")).toBe(true)
+    })
+
+    it("should report a revert git refused rather than a silent one, because a ref that moved goes unchecked otherwise", async () => {
+        // given — uncommitted work over the very file the revert has to take away
+        const { root, landed } = await merged()
+        await writeFile(join(root, ".afk/4/gate/the-ticket.txt"), "in progress\n", "utf8")
+
+        // when
+        const reverted = await git.revert(root, { path: ".afk/4/gate", from: landed, message: "Revert #7" })
+
+        // then
+        expect(reverted.ok).toBe(false)
+    })
+
+    it("should leave the worktree clean when git refused, rather than half-undone", async () => {
+        // given
+        const { root, landed } = await merged()
+        await writeFile(join(root, ".afk/4/gate/the-ticket.txt"), "in progress\n", "utf8")
+
+        // when
+        await git.revert(root, { path: ".afk/4/gate", from: landed, message: "Revert #7" })
+
+        // then
+        expect(await git.isClean(root, ".afk/4/gate")).toBe(true)
     })
 })

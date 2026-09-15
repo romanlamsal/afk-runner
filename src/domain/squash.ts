@@ -13,8 +13,14 @@
 
 const TRAILER = "afk-ticket"
 
+/** The same record, for the commit that takes a ticket back off the branch (ADR-0009). */
+const REVERT_TRAILER = "afk-reverted"
+
 /** `afk-ticket: <spec>/<n>`, and it is the body's last paragraph so that git reads it as a trailer. */
 export const ticketTrailer = (spec: number, ticket: number): string => `${TRAILER}: ${spec}/${ticket}`
+
+/** `afk-reverted: <spec>/<n>`, and the reason a reverted ticket does not read as one that landed. */
+export const revertTrailer = (spec: number, ticket: number): string => `${REVERT_TRAILER}: ${spec}/${ticket}`
 
 const paragraphs = (texts: readonly (string | undefined)[]): readonly string[] =>
     texts.flatMap(text => {
@@ -44,15 +50,47 @@ export const squashMessage = ({
     [`${title} (#${ticket})`, ...paragraphs(commits), ...resolution(note), ticketTrailer(spec, ticket)].join("\n\n")
 
 /**
+ * The commit that takes a ticket back off the spec branch, when the gate stayed red with it on
+ * there and the one fix attempt did not help (ADR-0009). It is a revert commit and never a reset
+ * and a force-push: append-only history is the only thing compatible with a pool of worktrees
+ * sitting off the tip.
+ */
+export const revertMessage = ({ spec, ticket, title }: { spec: number; ticket: number; title: string }): string =>
+    [
+        `Revert "${title} (#${ticket})"`,
+        `The gate could not prove this branch with #${ticket} on it, and the one fix attempt afk makes did not make it green. Everything that landed from that merge onwards is undone here; the ticket's own work is untouched on its own branch.`,
+        revertTrailer(spec, ticket),
+    ].join("\n\n")
+
+/** The ticket a trailer of this spec names, or nothing where the message carries no such trailer. */
+const trailed = (name: string, spec: number, message: string): number | undefined => {
+    const found = new RegExp(`^${name}: ${spec}/(\\d+)$`, "m").exec(message)
+    return found?.[1] === undefined ? undefined : Number(found[1])
+}
+
+/**
  * Which of this spec's tickets these commit messages say are on the branch. It is read as a
  * **cross-check** and never as the dispatcher: which ticket is taken through the merge track is the
  * event log's to say, and a commit can only answer whether that ticket's work is already there —
  * never which step failed, or why (ADR-0011).
+ *
+ * History is append-only, so a reverted ticket's squash is still on the branch and its revert is
+ * too. The last trailer naming a ticket is the one that says where it stands, which is what keeps
+ * "ask git which tickets landed" answerable from a fresh clone after a revert (ADR-0009).
  */
 export const mergedTickets = (spec: number, messages: readonly string[]): readonly number[] => {
-    const trailer = new RegExp(`^${TRAILER}: ${spec}/(\\d+)$`, "m")
-    return messages.flatMap(message => {
-        const found = trailer.exec(message)
-        return found?.[1] === undefined ? [] : [Number(found[1])]
-    })
+    const landed = new Set<number>()
+
+    for (const message of messages) {
+        const merged = trailed(TRAILER, spec, message)
+        const reverted = trailed(REVERT_TRAILER, spec, message)
+        if (merged !== undefined) {
+            landed.add(merged)
+        }
+        if (reverted !== undefined) {
+            landed.delete(reverted)
+        }
+    }
+
+    return [...landed]
 }

@@ -9,6 +9,7 @@ import { readResolutionNote, resolutionJsonSchema, resolverFault } from "../doma
 import type { PreparedRun } from "../domain/run.ts"
 import { mergedTickets, squashMessage } from "../domain/squash.ts"
 import { attemptWithAgent, type StepResult } from "./attempt.ts"
+import type { FixRedGate } from "./fix.ts"
 import type { RunGate } from "./gate.ts"
 
 /** One ticket through the merge track: rebased onto the spec branch, landed on it, and proven. */
@@ -21,6 +22,8 @@ export type MergeDeps = {
     gate: RunGate
     git: Git
     now: Clock
+    /** What a red gate is worth: one fix attempt, then the revert and the gate again (ADR-0009). */
+    fix: FixRedGate
 }
 
 /** Everything an event carries beyond what every event of this step carries. */
@@ -41,7 +44,7 @@ type Details = Pick<LifecycleEvent, "sessionId" | "transcriptPath" | "detail">
  * leaves the spec branch exactly as it found it — no revert, no gate.
  */
 export const createMergeService =
-    ({ agent, events, gate, git, now }: MergeDeps): MergeTicket =>
+    ({ agent, events, fix, gate, git, now }: MergeDeps): MergeTicket =>
     async (run, { ticket, attempt }) => {
         const { root, spec, manifest } = run
         const listed = manifest.tickets.find(one => one.number === ticket)
@@ -78,12 +81,14 @@ export const createMergeService =
          * directory would be a lie, and the next `checkoutWorktree` at that path force-removes what
          * is there anyway.
          *
-         * A red gate ends the ticket here. Fixing it once, reverting the merge and re-gating the
-         * reverted tip is ADR-0009, and it is not built yet — so for now a red gate leaves its
-         * squash on the spec branch and every gate after it reads red too.
+         * A red gate is not the end of the ticket by itself: the fix service spends the one fix
+         * attempt on it, and failing that takes the merge back off the branch and gates what is
+         * left, so that the blame is demonstrated rather than asserted (ADR-0009). What comes back
+         * is the ticket's fate either way.
          */
         const gated = async (): Promise<StepResult> => {
-            const result = await gate(run, ticket)
+            const proven = await gate(run, ticket)
+            const result = proven.outcome === "failed" ? await fix(run, listed) : proven
             if (result.outcome === "ok") {
                 await git.removeWorktree(root, worktree)
             }

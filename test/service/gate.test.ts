@@ -3,7 +3,7 @@ import type { LifecycleEvent } from "../../src/domain/events.ts"
 import type { Manifest } from "../../src/domain/manifest.ts"
 import type { PreparedRun } from "../../src/domain/run.ts"
 import type { StepResult } from "../../src/service/attempt.ts"
-import { createGateService } from "../../src/service/gate.ts"
+import { createGateService, createProveBranch } from "../../src/service/gate.ts"
 import { createFakeCommands } from "../fakes/commands.ts"
 import { createFakeEventLog } from "../fakes/event-log.ts"
 
@@ -33,7 +33,11 @@ const harness = (failing?: string) => {
     const commands = createFakeCommands(failing)
     const events = createFakeEventLog()
 
-    const gate = createGateService({ commands: commands.run, events: events.log, now: () => new Date() })
+    const gate = createGateService({
+        events: events.log,
+        now: () => new Date(),
+        prove: createProveBranch({ commands: commands.run }),
+    })
 
     return { commands, events, gate: (): Promise<StepResult> => gate(RUN, 7) }
 }

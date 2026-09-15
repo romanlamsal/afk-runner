@@ -43,6 +43,18 @@ export type SquashRequest = {
     message: string
 }
 
+export type RevertRequest = {
+    /** The worktree whose branch is put back: the gate worktree, always (ADR-0006). */
+    path: string
+    /**
+     * The first commit to undo — the ticket's squash. Everything from it to the tip goes, which is
+     * the squash and whatever the fix agent committed on top of it trying to save it.
+     */
+    from: string
+    /** The whole commit message, composed in the domain. */
+    message: string
+}
+
 export type RebaseResult =
     /** The branch's commits sit on the tip it was rebased onto. */
     | { outcome: "landed" }
@@ -100,6 +112,13 @@ export type Git = {
      * can land in between, because the merge track is serial and single-writer (ADR-0006).
      */
     squashMerge: (root: string, request: SquashRequest) => Promise<GitResult>
+    /**
+     * Undo everything from `from` to the tip of the branch checked out at `path`, as **one revert
+     * commit** — never a reset and a force-push. Append-only history is the only thing compatible
+     * with a pool of worktrees sitting off the tip, and the revert pair vanishes in the spec PR's
+     * squash anyway (ADR-0009).
+     */
+    revert: (root: string, request: RevertRequest) => Promise<GitResult>
     /**
      * Whether a rebase is still under way at `path` — paths git could not merge, or a rebase it was
      * never told to finish. This is what the script asks after the conflict resolver exits.

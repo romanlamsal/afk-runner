@@ -254,6 +254,30 @@ describe("nextActions: the merge track", () => {
         expect(actions).toEqual([{ kind: "skip", ticket: 12 }])
     })
 
+    it("should skip rather than merge a ticket whose blocker was reverted while it was being implemented", () => {
+        // given — ADR-0010: the implementer's time is spent, but the tree it built on is gone
+        const tickets = [ticket(11), ticket(12, [11])]
+        const events = [event(11, "gate", "failed"), event(11, "revert", "failed"), event(12, "implement", "ok")]
+
+        // when
+        const actions = decide(tickets, events)
+
+        // then
+        expect(actions).toEqual([{ kind: "skip", ticket: 12 }])
+    })
+
+    it("should never take a reverted ticket back into the merge track, because its merge is undone", () => {
+        // given
+        const tickets = [ticket(11)]
+        const events = [event(11, "merge", "ok"), event(11, "gate", "failed"), event(11, "revert", "failed")]
+
+        // when
+        const actions = decide(tickets, events)
+
+        // then
+        expect(actions).toEqual([{ kind: "finish" }])
+    })
+
     it("should start no merge once the run is draining", () => {
         // given
         const tickets = [ticket(10)]

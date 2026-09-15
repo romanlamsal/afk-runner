@@ -4,9 +4,12 @@ import { EXIT } from "../../src/cli/exit-codes.ts"
 import { createRun } from "../../src/cli/run.ts"
 import type { AgentInvocation } from "../../src/domain/agent.ts"
 import type { LifecycleEvent } from "../../src/domain/events.ts"
+import type { Git } from "../../src/domain/git.ts"
 import type { Ticket } from "../../src/domain/manifest.ts"
+import { mergedTickets } from "../../src/domain/squash.ts"
 import { createDriveService } from "../../src/service/drive.ts"
-import { createGateService } from "../../src/service/gate.ts"
+import { createFixService } from "../../src/service/fix.ts"
+import { createGateService, createProveBranch } from "../../src/service/gate.ts"
 import { createImplementService } from "../../src/service/implement.ts"
 import { createMergeService, type MergeTicket } from "../../src/service/merge.ts"
 import { createStartService } from "../../src/service/start.ts"
@@ -40,6 +43,10 @@ type Setup = {
     resolving?: boolean
     /** The operator's command that goes red in this repository, if one does. */
     failing?: string
+    /** What a red gate is the fault of: the merge that just landed, or the branch itself. */
+    red?: "the merge" | "the branch"
+    /** Whether the one fix attempt makes a red gate green. */
+    fixing?: boolean
     tracker?: FakeTrackerSetup
     maxParallel?: number
 }
@@ -50,6 +57,8 @@ const harness = ({
     colliding = [],
     resolving = true,
     failing,
+    red = "the branch",
+    fixing = false,
     tracker: trackerSetup = {},
     maxParallel = 3,
 }: Setup) => {
@@ -60,6 +69,7 @@ const harness = ({
     })
     const agent = createFakeAgent()
     const resolver = createFakeAgent()
+    const fixer = createFakeAgent()
     const commands = createFakeCommands(failing)
     const environment = createFakeEnvironment()
     const events = createFakeEventLog()
@@ -75,6 +85,25 @@ const harness = ({
     const merging = { running: 0, peak: 0 }
 
     const now = (): Date => new Date("2026-09-15T11:18:38.314Z")
+    const prove = createProveBranch({ commands: commands.run })
+
+    /**
+     * A repository whose checks go green again once the merge that broke them is off the branch,
+     * which is the whole of what the gate on a reverted tip is asked to demonstrate (ADR-0009).
+     */
+    const gitForFix: Git =
+        red === "the merge"
+            ? {
+                  ...git.git,
+                  revert: async (root, request) => {
+                      const reverted = await git.git.revert(root, request)
+                      if (reverted.ok) {
+                          commands.mend()
+                      }
+                      return reverted
+                  },
+              }
+            : git.git
 
     const mergeTrack = createMergeService({
         // A conflict resolver that finishes the rebase it was called for, unless this scenario says
@@ -87,9 +116,25 @@ const harness = ({
             return result
         },
         events: events.log,
-        gate: createGateService({ commands: commands.run, events: events.log, now }),
+        gate: createGateService({ events: events.log, now, prove }),
         git: git.git,
         now,
+        // A fix agent that commits a fix on the spec branch and makes the repository green again,
+        // unless this scenario says it is one that cannot.
+        fix: createFixService({
+            agent: async invocation => {
+                const result = await fixer.run(invocation)
+                if (fixing) {
+                    git.commit("afk/4/spec", "the-fix")
+                    commands.mend()
+                }
+                return result
+            },
+            events: events.log,
+            git: gitForFix,
+            now,
+            prove,
+        }),
     })
 
     const merge: MergeTicket = async (run, action) => {
@@ -149,6 +194,7 @@ const harness = ({
         commands,
         concurrency,
         events,
+        fixer,
         git,
         merging,
         resolver,
@@ -345,11 +391,26 @@ describe("a run that lands its tickets", () => {
 })
 
 describe("a run whose gate goes red", () => {
-    it("should fail the ticket whose merge the gate could not prove, and skip its dependents", async () => {
+    /** A ticket whose merge is what broke the branch, and the one fix attempt cannot save it. */
+    const blamed = { failing: "npm run check", red: "the merge" } as const
+
+    it("should spend one fix attempt on it before anything else", async () => {
+        // given
+        const { run, fixer } = harness({ tickets: [ticket(11)], ...blamed })
+
+        // when
+        await run()
+
+        // then
+        expect(fixer.invocations.map(invocation => invocation.cwd)).toEqual([".afk/4/gate"])
+    })
+
+    it("should verify the ticket the fix attempt made green, and carry on to its dependents", async () => {
         // given
         const { run, events } = harness({
             tickets: [ticket(11), ticket(12, [11])],
             failing: "npm run check",
+            fixing: true,
         })
 
         // when
@@ -361,19 +422,106 @@ describe("a run whose gate goes red", () => {
             "#11 rebase ok",
             "#11 merge ok",
             "#11 gate failed",
+            "#11 gate ok",
+            "#12 implement ok",
+            "#12 rebase ok",
+            "#12 merge ok",
+            "#12 gate ok",
+        ])
+    })
+
+    it("should revert the merge the fix attempt could not save, and skip the ticket's dependents", async () => {
+        // given
+        const { run, events } = harness({ tickets: [ticket(11), ticket(12, [11])], ...blamed })
+
+        // when
+        await run()
+
+        // then
+        expect(settled(events.appended)).toEqual([
+            "#11 implement ok",
+            "#11 rebase ok",
+            "#11 merge ok",
+            "#11 gate failed",
+            "#11 gate failed",
+            "#11 revert failed",
             "#12 implement skipped",
         ])
     })
 
+    it("should leave the reverted ticket's work off the spec branch, under a revert commit", async () => {
+        // given
+        const { run, git } = harness({ tickets: [ticket(11)], ...blamed })
+
+        // when
+        await run()
+
+        // then
+        expect(git.commitsOn("afk/4/spec")).toEqual(["spec-tip", "squash-afk/4/t11", "revert-squash-afk/4/t11"])
+    })
+
+    it("should let git be asked which tickets landed and be told this one did not", async () => {
+        // given
+        const { run, git } = harness({ tickets: [ticket(11)], ...blamed })
+
+        // when
+        await run()
+
+        // then
+        expect(
+            mergedTickets(4, [git.messageOf("squash-afk/4/t11") ?? "", git.messageOf("revert-squash-afk/4/t11") ?? ""]),
+        ).toEqual([])
+    })
+
     it("should keep the failed ticket's worktree, because that is what a reader has to go on", async () => {
         // given
-        const { run, git } = harness({ tickets: [ticket(11)], failing: "npm run check" })
+        const { run, git } = harness({ tickets: [ticket(11)], ...blamed })
 
         // when
         await run()
 
         // then
         expect(git.removed).toEqual([])
+    })
+})
+
+describe("a run whose spec branch is broken independently of any ticket", () => {
+    /** Nothing the fix agent or the revert does makes this repository green again. */
+    const broken = { failing: "npm run check", red: "the branch" } as const
+
+    it("should halt rather than revert every ticket in turn against a branch that was already red", async () => {
+        // given
+        const { run, events } = harness({ tickets: [ticket(11), ticket(12)], ...broken })
+
+        // when
+        await run()
+
+        // then
+        expect(settled(events.appended).filter(said => said.includes("revert"))).toEqual(["#11 revert failed"])
+    })
+
+    it("should exit halted, so that one line says to look at git before anything else", async () => {
+        // given
+        const { run } = harness({ tickets: [ticket(11)], ...broken })
+
+        // when
+        const code = await run()
+
+        // then
+        expect(code).toBe(EXIT.halted)
+    })
+
+    it("should name the spec branch as the broken thing on the way out", async () => {
+        // given
+        const { run, errors } = harness({ tickets: [ticket(11)], ...broken })
+
+        // when
+        await run()
+
+        // then
+        expect(errors).toContain(
+            "afk: afk/4/spec is broken independently of any ticket: it is still red with #11 reverted off it",
+        )
     })
 })
 

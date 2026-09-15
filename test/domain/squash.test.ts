@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { mergedTickets, squashMessage, ticketTrailer } from "../../src/domain/squash.ts"
+import { mergedTickets, revertMessage, squashMessage, ticketTrailer } from "../../src/domain/squash.ts"
 
 /**
  * The squash body is what a reviewer of the spec PR reads, so everything here is a question about
@@ -79,6 +79,40 @@ describe("squashMessage", () => {
     })
 })
 
+describe("revertMessage", () => {
+    const reverted = (): string => revertMessage({ spec: 4, ticket: 9, title: "Squash-merge and gate" })
+
+    it("should name the commit it undoes, the way git itself writes a revert", () => {
+        // given — the ticket whose merge the gate could not prove
+
+        // when
+        const composed = reverted()
+
+        // then
+        expect(composed.split("\n")[0]).toBe('Revert "Squash-merge and gate (#9)"')
+    })
+
+    it("should carry the trailer that says this ticket is no longer on the branch", () => {
+        // given — history is append-only, so the squash is still there to be read
+
+        // when
+        const composed = reverted()
+
+        // then
+        expect(composed.split("\n\n").at(-1)).toBe("afk-reverted: 4/9")
+    })
+
+    it("should say why it was reverted, for whoever reads the branch rather than the log", () => {
+        // given — the reader of a spec PR never opens the event log
+
+        // when
+        const composed = reverted()
+
+        // then
+        expect(composed).toContain("the one fix attempt afk makes did not make it green")
+    })
+})
+
 describe("mergedTickets", () => {
     it("should read back the ticket a squash commit afk composed says it carried", () => {
         // given
@@ -111,6 +145,43 @@ describe("mergedTickets", () => {
 
         // then
         expect(merged).toEqual([])
+    })
+
+    it("should not name a ticket whose merge was reverted off the branch again", () => {
+        // given
+        const messages = [message(), revertMessage({ spec: 4, ticket: 9, title: "Squash-merge and gate" })]
+
+        // when
+        const merged = mergedTickets(4, messages)
+
+        // then
+        expect(merged).toEqual([])
+    })
+
+    it("should still name the tickets a revert left alone", () => {
+        // given
+        const messages = [
+            message({ ticket: 7 }),
+            message({ ticket: 9 }),
+            revertMessage({ spec: 4, ticket: 9, title: "Squash-merge and gate" }),
+        ]
+
+        // when
+        const merged = mergedTickets(4, messages)
+
+        // then
+        expect(merged).toEqual([7])
+    })
+
+    it("should ignore a revert of another spec's ticket, which is not this run's work", () => {
+        // given
+        const messages = [message(), revertMessage({ spec: 5, ticket: 9, title: "Something else" })]
+
+        // when
+        const merged = mergedTickets(4, messages)
+
+        // then
+        expect(merged).toEqual([9])
     })
 
     it("should ignore a commit nothing of afk's landed", () => {

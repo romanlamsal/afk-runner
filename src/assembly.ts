@@ -10,7 +10,8 @@ import { createFileEventLog } from "./repository/event-log.ts"
 import { createFileManifestStore } from "./repository/manifest-store.ts"
 import { createFileRunRecordStore } from "./repository/run-records.ts"
 import { createDriveService } from "./service/drive.ts"
-import { createGateService } from "./service/gate.ts"
+import { createFixService } from "./service/fix.ts"
+import { createGateService, createProveBranch } from "./service/gate.ts"
 import { createImplementService } from "./service/implement.ts"
 import { createMergeService } from "./service/merge.ts"
 import { createPlanService } from "./service/plan.ts"
@@ -48,6 +49,10 @@ export const assembleCli = (): Cli => {
         records: createFileRunRecordStore(),
     })
 
+    // Asked twice, for different reasons: by the gate, about a ticket, and by the revert, about the
+    // branch that ticket was taken back off (ADR-0009).
+    const prove = createProveBranch({ commands })
+
     const drive = createDriveService({
         events,
         implement: createImplementService({
@@ -62,9 +67,10 @@ export const assembleCli = (): Cli => {
         merge: createMergeService({
             agent,
             events,
-            gate: createGateService({ commands, events, now }),
+            gate: createGateService({ events, now, prove }),
             git,
             now,
+            fix: createFixService({ agent, events, git, now, prove }),
         }),
         now,
     })

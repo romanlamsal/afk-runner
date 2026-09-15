@@ -41,6 +41,8 @@ export type FakeRepository = {
     root?: string | undefined
     trunk?: TrunkState | undefined
     checkout?: GitResult
+    /** What a revert comes to, for a repository where git refuses one. */
+    revert?: GitResult
     /** Branch name to the commits on it, oldest first. The last one is the tip. */
     branches?: Record<string, readonly string[]>
     /** Commit to what it says, for the commits whose message a scenario cares about. */
@@ -195,6 +197,25 @@ export const createFakeGit = (repository: FakeRepository = {}): FakeGit => {
                 branches.set(onto, [...historyOf(onto), squash])
                 return { ok: true }
             },
+            // History is append-only: the reverted commits stay where they are and one more commit
+            // is put on top of them, which is the only thing a revert does to where a branch is.
+            revert: async (_root, { path, from, message }) => {
+                const branch = checkouts.get(path)
+                if (branch === undefined) {
+                    return { ok: false, reason: `no worktree at ${path}` }
+                }
+                if (!historyOf(branch).includes(from)) {
+                    return { ok: false, reason: `${from} is not on ${branch}` }
+                }
+                if (repository.revert !== undefined && !repository.revert.ok) {
+                    return repository.revert
+                }
+                const commit = `revert-${from}`
+                messages.set(commit, message)
+                branches.set(branch, [...historyOf(branch), commit])
+                return { ok: true }
+            },
+
             conflicted: async (_root, path) => stopped.has(path),
             abortRebase: async (_root, path) => {
                 stopped.delete(path)

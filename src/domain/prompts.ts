@@ -76,6 +76,53 @@ export const implementerPrompt = ({
     ].join("\n")
 
 /**
+ * The fix agent: the gate's one attempt at a red verify, in the gate worktree, on the spec branch
+ * itself (ADR-0009). It gets a single attempt — a budget, not a retry policy — so the prompt says
+ * what to do when the fix is beyond it rather than leaving it to guess.
+ *
+ * The hard constraint is the whole point of the role. Everything else afk asks an agent is work it
+ * could have done itself; this is the one place where an agent could buy a green run by deleting
+ * the test that went red, and the only thing standing in the way is what it is told here and the
+ * reviewer of the spec PR.
+ */
+export const fixerPrompt = ({
+    spec,
+    ticket,
+    title,
+    branch,
+    verify,
+    detail,
+}: {
+    spec: number
+    ticket: number
+    title: string
+    branch: string
+    verify: string
+    /** What the gate said when it went red, quoted for the agent that has to reproduce it. */
+    detail: string | undefined
+}): string =>
+    [
+        `\`${verify}\` is red on ${branch} after ticket #${ticket} of spec #${spec} merged into it:`,
+        `${title}.`,
+        ...(detail === undefined || detail.trim() === "" ? [] : ["", "The gate reported:", "", detail.trim()]),
+        "",
+        `You are in that branch's own worktree. Reproduce the failure with \`${verify}\`, find what`,
+        "the merge broke, and fix it. Commit the fix on this branch.",
+        "",
+        "Fix the cause, never the signal. Do not delete, skip or weaken a failing test, do not loosen",
+        "a type or a lint rule, and do not widen a tolerance to make a red thing green. If the only",
+        "way you can find to make it pass is one of those, stop and report that instead: afk will",
+        "take the merge back off this branch, which is the right outcome and costs nothing but time.",
+        "",
+        `You get one attempt. Only report success once \`${verify}\` is green and your fix is`,
+        "committed — work that is not committed does not exist as far as the rest of the run is",
+        "concerned.",
+        "",
+        "Stay in this worktree, touch no other branch, do not push, and write nothing to the issue",
+        "tracker.",
+    ].join("\n")
+
+/**
  * The conflict resolver. It is invoked in the ticket's own worktree, mid-rebase, which is both the
  * only worktree the branch can be checked out in and the warm one — so it can run the repository's
  * own checks on what it produced instead of resolving blind (ADR-0005).

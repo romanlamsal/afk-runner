@@ -47,6 +47,12 @@ _Avoid_: base commit, fork point, merge base
 which ticket landed.
 _Avoid_: marker, tag, annotation
 
+**afk-reverted trailer**:
+`afk-reverted: <spec>/<n>`, carried by the revert commit that takes a ticket back off the spec
+branch. The last trailer naming a ticket is the one that says where it stands, which is what keeps
+"ask git which tickets landed" answerable after a revert (ADR-0009).
+_Avoid_: rollback marker, undo tag
+
 **Spec PR**:
 The one pull request a run opens — spec branch into the repository's default branch, squash-merged.
 _Avoid_: layer PR, ticket PR, stack
@@ -70,6 +76,12 @@ _Avoid_: pre-check, validation, smoke test
 Setup then verify, run on the spec branch after a ticket merges into it. It asserts the integrity of
 everything merged so far, and it is the only thing that produces `verified`.
 _Avoid_: verification step, integration test, CI run
+
+**Proving the branch**:
+Running setup then verify in the gate worktree with nothing written down. It is what the gate does
+before it records a verdict, and what the revert asks about the tip it leaves behind — where a green
+is a statement about the ticket that just failed rather than one that passed (ADR-0009).
+_Avoid_: re-gating, checking, validating
 
 **Gate worktree**:
 The single long-lived worktree holding the spec branch checked out, and the sole writer to it.
@@ -120,6 +132,12 @@ _Avoid_: landed, integrated, shipped
 A ticket a step got through that the gate has not proven — implemented, or merged. What a run
 reports beside verified, so that a partial run never reads as a finished one.
 _Avoid_: pending, unproven, in progress
+
+**Reverted**:
+A ticket whose merge was taken back off the spec branch by a revert commit, after the gate stayed
+red through the one fix attempt. It is a failed ticket: nothing more happens to it, and its
+dependents are skipped.
+_Avoid_: rolled back, undone, backed out
 
 **Skipped**:
 A ticket that will not land, because a blocker failed or was reverted.

@@ -23,6 +23,20 @@ status: accepted
 
 ## Consequences
 
-- The fix agent gets exactly one attempt. This is a budget, not a retry policy.
+- The fix agent gets exactly one attempt. This is a budget, not a retry policy. There is no loop to
+  bound: the recovery is called once, by the merge track, for one red gate.
+- **The revert undoes the fix attempt along with the merge.** Everything from the squash to the tip
+  goes, in one revert commit, so that the tip the gate is then re-run on is the tree that was green
+  before the ticket merged. Without that the re-gate would be asking about a tree nothing has ever
+  proven, and the localisation claim would be weaker than it reads.
+- **The trigger for the revert is *still red*, never the fix agent's own exit.** An attempt the agent
+  reported as failed is proven like any other: a session that died after committing a fix that works
+  leaves a green branch, and the branch is what afk proves. A failed attempt only changes what the
+  log says when the branch turns out to be red anyway.
+- The fix attempt is recorded as a second **gate** attempt against the ticket, and the gate on the
+  reverted tip is recorded as the **revert**'s outcome rather than as a gate. Recording it as a gate
+  would make a reverted ticket's last event read `gate: ok`, which is `verified` (ADR-0011).
+- The revert commit carries an `afk-reverted` trailer, so that the spec branch's log still answers
+  which tickets landed once history contains both the squash and its undoing.
 - A red gate is more expensive than a rebase that would not land (ADR-0005), where nothing was
   merged and the branch is never touched. That asymmetry is deliberate and stays visible.

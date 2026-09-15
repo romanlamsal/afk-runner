@@ -138,6 +138,21 @@ export const skipped = (ticket: number, at: Date): LifecycleEvent => ({
     detail: "a ticket it is blocked by will not land",
 })
 
+/**
+ * What a reverted ticket is written down as. The outcome is `failed` because **the ticket** failed —
+ * its merge was taken back off the spec branch and it will not land — rather than because the
+ * revert did. A revert afk could not perform halts the run, and the detail is where the two are
+ * told apart, which is the only place they ever need telling apart: to the schedule they are one
+ * thing, a ticket nothing more will happen to (ADR-0009).
+ */
+export const reverted = (ticket: number, at: Date, detail: string): LifecycleEvent => ({
+    ticket,
+    step: "revert",
+    outcome: "failed",
+    at: at.toISOString(),
+    detail,
+})
+
 export type Progress = {
     /** Tickets whose gate went green. Nothing else proves a ticket landed sound (ADR-0008). */
     verified: readonly number[]
