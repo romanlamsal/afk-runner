@@ -273,3 +273,43 @@ describe("createRun: the end of a run", () => {
         expect(code).toBe(EXIT.halted)
     })
 })
+
+describe("createRun: a run the operator interrupted", () => {
+    const INTERRUPTED: DriveResult = { ...WORKED, outcome: "interrupted" }
+
+    it("should say that what it is reporting on is a run that was stopped", async () => {
+        // given
+        const { run, printed } = worked(PREPARED, { driven: INTERRUPTED })
+
+        // when
+        await run(invocation("plan-and-implement"))
+
+        // then
+        expect(printed).toContain("afk: the run was interrupted, so it stopped at what was already in flight")
+    })
+
+    it("should finish with what the drain landed, because a stopped run is a partial one", async () => {
+        // given
+        const { run, ended } = worked(PREPARED, { driven: INTERRUPTED })
+
+        // when
+        await run(invocation("plan-and-implement"))
+
+        // then
+        expect(ended).toEqual([INTERRUPTED.progress])
+    })
+
+    it("should exit 1 for the draft pull request a stopped run comes to", async () => {
+        // given
+        const { run } = worked(PREPARED, {
+            driven: INTERRUPTED,
+            finished: { outcome: "opened", draft: true, url: undefined },
+        })
+
+        // when
+        const code = await run(invocation("plan-and-implement"))
+
+        // then
+        expect(code).toBe(EXIT.partial)
+    })
+})

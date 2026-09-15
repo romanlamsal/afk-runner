@@ -106,6 +106,13 @@ The serial, single-writer sequence taking one ticket at a time from skip-check t
 and gate.
 _Avoid_: merge queue, merge worker
 
+**Drain**:
+Stopping a run without stopping what it is already doing: nothing new starts, every in-flight step
+finishes and records its event, and the process then exits. What the first interrupt asks for, and
+what a halt does on its way out. A drained run is a partial one, and opens the pull request a
+partial run opens.
+_Avoid_: graceful shutdown, soft stop, quiesce
+
 ## State
 
 **Attempt**:

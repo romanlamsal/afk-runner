@@ -4,7 +4,7 @@ import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import type { AgentInvocation, AgentResult, AgentRunner } from "../domain/agent.ts"
 import { INVOCATION_TIMEOUT_MS } from "../domain/timeout.ts"
-import { minutes } from "./process.ts"
+import { minutes, registerChild, signalGroup } from "./process.ts"
 import { createStreamReader } from "./stream-json.ts"
 
 /**
@@ -54,7 +54,14 @@ export const createClaudeAgentRunner = ({
         const startedAt = Date.now()
 
         const result = await new Promise<AgentResult>(resolve => {
-            const child = spawn("claude", commandLine(invocation), { cwd: join(invocation.root, invocation.cwd) })
+            // Detached and registered like every other child afk starts, which matters most here:
+            // the implementer is the work the operator's first interrupt exists to spare, so it
+            // must not be in the process group their terminal signals (ADR-0016).
+            const child = spawn("claude", commandLine(invocation), {
+                cwd: join(invocation.root, invocation.cwd),
+                detached: true,
+            })
+            registerChild(child)
 
             const settle = (outcome: AgentResult["outcome"], detail: string): void => {
                 const { sessionId, structuredOutput } = reader.reading()
@@ -81,8 +88,8 @@ export const createClaudeAgentRunner = ({
             let timedOut = false
             const kill = setTimeout(() => {
                 timedOut = true
-                child.kill("SIGTERM")
-                setTimeout(() => child.kill("SIGKILL"), GRACE_MS).unref()
+                signalGroup(child, "SIGTERM")
+                setTimeout(() => signalGroup(child, "SIGKILL"), GRACE_MS).unref()
             }, timeoutMs)
 
             child.stdout.setEncoding("utf8")

@@ -1,6 +1,7 @@
 import type { Clock } from "../domain/clock.ts"
 import { type Action, nextActions } from "../domain/decide.ts"
 import { type EventLog, type Progress, progressOf, skipped } from "../domain/events.ts"
+import type { Interrupts } from "../domain/interrupts.ts"
 import type { PreparedRun } from "../domain/run.ts"
 import type { StepResult } from "./attempt.ts"
 import type { ImplementTicket } from "./implement.ts"
@@ -11,8 +12,12 @@ import type { PrepareTicket } from "./prepare.ts"
 export type DriveRun = (run: PreparedRun, options: { maxParallel: number }) => Promise<DriveResult>
 
 export type DriveResult = {
-    /** `halted` names a run that stopped itself; the reason is the operator's whole explanation. */
-    outcome: "done" | "halted"
+    /**
+     * `halted` names a run that stopped itself; the reason is the operator's whole explanation.
+     * `interrupted` names one the operator stopped, which is a partial run like any other: it
+     * drained what was in flight, and what that landed still becomes a pull request (ADR-0016).
+     */
+    outcome: "done" | "interrupted" | "halted"
     reason: string | undefined
     progress: Progress
 }
@@ -20,6 +25,8 @@ export type DriveResult = {
 export type DriveDeps = {
     events: EventLog
     implement: ImplementTicket
+    /** The operator's stop signal, read once per pass — never trapped by a step (ADR-0016). */
+    interrupts: Interrupts
     merge: MergeTicket
     /** The pass a ticket a step left broken gets, mid-run and on a resumed run alike (ADR-0012). */
     prepare: PrepareTicket
@@ -39,7 +46,7 @@ type Settled = { action: Action; result: StepResult }
  * recognisable at all.
  */
 export const createDriveService =
-    ({ events, implement, merge, now, prepare }: DriveDeps): DriveRun =>
+    ({ events, implement, interrupts, merge, now, prepare }: DriveDeps): DriveRun =>
     async (run, { maxParallel }) => {
         const { root, spec, manifest } = run
         const inFlight = new Map<Action, Promise<Settled>>()
@@ -50,8 +57,9 @@ export const createDriveService =
             const actions = nextActions(manifest, log, {
                 inFlight: [...inFlight.keys()],
                 maxParallel,
-                // A halt drains: nothing new starts, and what is running finishes and records.
-                draining: halt !== undefined,
+                // Two things drain, for one reason: nothing new starts, and what is running
+                // finishes and records. The run stopping itself, and the operator stopping it.
+                draining: halt !== undefined || interrupts.draining(),
             })
 
             if (actions.some(action => action.kind === "finish")) {
@@ -110,5 +118,13 @@ export const createDriveService =
             manifest.tickets.map(ticket => ticket.number),
             await events.read(root, spec),
         )
-        return { outcome: halt === undefined ? "done" : "halted", reason: halt, progress }
+        // A run that halted itself says so first: it is the one with something to explain, and an
+        // interrupt that arrived after it changes nothing about what stopped the run.
+        const outcome = (): DriveResult["outcome"] => {
+            if (halt !== undefined) {
+                return "halted"
+            }
+            return interrupts.draining() ? "interrupted" : "done"
+        }
+        return { outcome: outcome(), reason: halt, progress }
     }

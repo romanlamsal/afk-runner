@@ -55,6 +55,13 @@ export const createRun =
                 }
 
                 const driven = await drive(started.run, { maxParallel: invocation.maxParallel })
+                // An interrupted run is a partial one: it drained, so what follows is everything
+                // that was in flight when the operator stopped it and nothing that came after. It
+                // still opens its pull request, because a draft naming what is missing is what a
+                // partial run is worth — and what did not land is the next start's work either way.
+                if (driven.outcome === "interrupted") {
+                    print("afk: the run was interrupted, so it stopped at what was already in flight")
+                }
                 for (const line of progressOutput(driven.progress)) {
                     print(line)
                 }

@@ -1,10 +1,13 @@
 import { type Cli, createCli } from "./cli/cli.ts"
+import { EXIT } from "./cli/exit-codes.ts"
 import { createTerminalOperator } from "./cli/operator.ts"
 import { createRun } from "./cli/run.ts"
 import { createClaudeAgentRunner } from "./infrastructure/claude-agent-runner.ts"
 import { createShellCommandRunner } from "./infrastructure/commands.ts"
 import { createEnvironmentFiles } from "./infrastructure/environment-files.ts"
 import { createGit } from "./infrastructure/git.ts"
+import { createSignalInterrupts } from "./infrastructure/interrupts.ts"
+import { killEveryChild } from "./infrastructure/process.ts"
 import { createGitHubTracker } from "./infrastructure/tracker.ts"
 import { createFileEventLog } from "./repository/event-log.ts"
 import { createFileManifestStore } from "./repository/manifest-store.ts"
@@ -37,6 +40,19 @@ export const assembleCli = (): Cli => {
     const environment = createEnvironmentFiles()
     const events = createFileEventLog()
     const git = createGit()
+    // Registered once for the whole process, which is the point: no step traps the signal, and the
+    // loop reads a flag (ADR-0016). A termination request is the same request, so it drains too.
+    const interrupts = createSignalInterrupts({
+        listen: handler => {
+            process.on("SIGINT", handler)
+            process.on("SIGTERM", handler)
+        },
+        kill: () => {
+            killEveryChild()
+            process.exit(EXIT.interrupted)
+        },
+        notify: printError,
+    })
     const now = (): Date => new Date()
     // Both writes a whole run makes to GitHub go through it: the claim, and the spec pull request
     // at the end (ADR-0013).
@@ -60,6 +76,7 @@ export const assembleCli = (): Cli => {
 
     const drive = createDriveService({
         events,
+        interrupts,
         implement: createImplementService({
             agent,
             commands,

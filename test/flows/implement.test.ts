@@ -20,6 +20,7 @@ import { createFakeCommands } from "../fakes/commands.ts"
 import { createFakeEnvironment } from "../fakes/environment.ts"
 import { createFakeEventLog } from "../fakes/event-log.ts"
 import { createFakeGit } from "../fakes/git.ts"
+import { createFakeInterrupts } from "../fakes/interrupts.ts"
 import { createFakeManifestStore } from "../fakes/manifest-store.ts"
 import { createFakeOperator } from "../fakes/operator.ts"
 import { createFakeRunRecords } from "../fakes/run-records.ts"
@@ -53,6 +54,8 @@ type Setup = {
     recovering?: readonly number[]
     /** Whether the prepare pass itself succeeds. */
     preparing?: boolean
+    /** The ticket whose implementer the operator interrupts the run during, where one does. */
+    interruptedDuring?: number
     /** What a killed run left in the log, for the runs that are a continuation of one. */
     log?: readonly LifecycleEvent[]
     /** The worktrees a killed run left registered, path to the branch checked out in it. */
@@ -71,6 +74,7 @@ const harness = ({
     fixing = false,
     recovering = [],
     preparing = true,
+    interruptedDuring,
     log = [],
     worktrees = {},
     tracker: trackerSetup = {},
@@ -92,6 +96,7 @@ const harness = ({
     const commands = createFakeCommands(failing)
     const environment = createFakeEnvironment()
     const events = createFakeEventLog(log)
+    const interrupts = createFakeInterrupts()
     const manifests = createFakeManifestStore({ ok: true, manifest })
     const operator = createFakeOperator()
     const records = createFakeRunRecords()
@@ -179,6 +184,7 @@ const harness = ({
             }),
             drive: createDriveService({
                 events: events.log,
+                interrupts: interrupts.interrupts,
                 implement: createImplementService({
                     // An implementer that does its job: it commits on the branch it was given,
                     // unless this scenario says it is one of the ones that does not.
@@ -187,6 +193,11 @@ const harness = ({
                         concurrency.peak = Math.max(concurrency.peak, concurrency.running)
                         const result = await agent.run(invocation)
                         const number = workingOn(invocation)
+                        // The one moment worth interrupting at: this implementer and everything
+                        // beside it is in flight, and the slate still has work on it.
+                        if (number === interruptedDuring) {
+                            interrupts.interrupt()
+                        }
                         const attempt = (attempted.get(number) ?? 0) + 1
                         attempted.set(number, attempt)
                         // An implementer that commits nothing fails its two assertions, and one
@@ -1000,5 +1011,81 @@ describe("a run that ends in a pull request", () => {
 
         // then
         expect(code).toBe(EXIT.halted)
+    })
+})
+
+describe("a run the operator interrupted", () => {
+    it("should let every implementer that was already running finish and record", async () => {
+        // given — both slots are busy when the interrupt arrives, and #12 is still on the slate
+        const { run, events } = harness({
+            tickets: [ticket(10), ticket(11), ticket(12)],
+            maxParallel: 2,
+            interruptedDuring: 10,
+        })
+
+        // when
+        await run()
+
+        // then
+        expect(settled(events.appended)).toEqual(["#10 implement ok", "#11 implement ok"])
+    })
+
+    it("should give no further ticket an implementer once the operator has interrupted", async () => {
+        // given
+        const { run, agent } = harness({
+            tickets: [ticket(10), ticket(11), ticket(12)],
+            maxParallel: 2,
+            interruptedDuring: 10,
+        })
+
+        // when
+        await run()
+
+        // then
+        expect(agent.invocations.map(workingOn)).toEqual([10, 11])
+    })
+
+    it("should say that the run stopped at what was in flight rather than at the end of the slate", async () => {
+        // given
+        const { run, printed } = harness({ tickets: [ticket(10), ticket(11)], interruptedDuring: 10 })
+
+        // when
+        await run()
+
+        // then
+        expect(printed).toContain("afk: the run was interrupted, so it stopped at what was already in flight")
+    })
+
+    it("should still land the ticket the merge track was already taking through", async () => {
+        // given — #10 merges while #11's implementer, which the interrupt arrives during, runs
+        const { run, events } = harness({ tickets: [ticket(10), ticket(11)], maxParallel: 1, interruptedDuring: 11 })
+
+        // when
+        await run()
+
+        // then
+        expect(settled(events.appended)).toContain("#10 gate ok")
+    })
+
+    it("should open a draft pull request over what the drain landed", async () => {
+        // given
+        const { run, tracker } = harness({ tickets: [ticket(10), ticket(11)], maxParallel: 1, interruptedDuring: 11 })
+
+        // when
+        await run()
+
+        // then
+        expect(tracker.opened.at(0)?.draft).toBe(true)
+    })
+
+    it("should exit 1, because a run stopped part-way through is a partial one", async () => {
+        // given
+        const { run } = harness({ tickets: [ticket(10), ticket(11)], maxParallel: 1, interruptedDuring: 11 })
+
+        // when
+        const code = await run()
+
+        // then
+        expect(code).toBe(EXIT.partial)
     })
 })

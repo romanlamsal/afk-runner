@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process"
+import { type ChildProcess, spawn } from "node:child_process"
 
 /**
  * Running another program, which is the one thing every adapter in this layer does. It is here
@@ -6,6 +6,50 @@ import { spawn } from "node:child_process"
  * captured, exit code read, and a process that will not start reported as a failure rather than
  * thrown.
  */
+
+/** Every child still running, which is what a second interrupt has to take with it (ADR-0016). */
+const live = new Set<ChildProcess>()
+
+/**
+ * Every child afk starts is `detached`, so that it leads a process group of its own: a terminal
+ * sends its interrupt to the whole foreground group, and an implementer six minutes into its work
+ * being killed by the operator's *first* interrupt is the one thing draining exists to prevent
+ * (ADR-0016). Registering it here is what lets the second interrupt take it back down.
+ *
+ * It is not unref'd — the run still waits for what it started.
+ */
+export const registerChild = (child: ChildProcess): void => {
+    live.add(child)
+    child.on("error", () => live.delete(child))
+    child.on("close", () => live.delete(child))
+}
+
+/**
+ * Signalling a child afk started means signalling the group it leads, so that what it started in
+ * turn — an agent's own subprocesses — goes with it rather than outliving the run.
+ */
+export const signalGroup = (child: ChildProcess, signal: NodeJS.Signals): void => {
+    if (child.pid === undefined) {
+        return
+    }
+    try {
+        process.kill(-child.pid, signal)
+    } catch {
+        // No group to signal, because the child is already gone or never got one.
+        child.kill(signal)
+    }
+}
+
+/**
+ * Kill everything afk started. This is the second interrupt's whole shutdown: nothing is unwound,
+ * because a lifecycle event is written when a step *starts* and the next start dispatches on what
+ * that left (ADR-0016).
+ */
+export const killEveryChild = (): void => {
+    for (const child of live) {
+        signalGroup(child, "SIGKILL")
+    }
+}
 
 export type Ran = {
     ok: boolean
@@ -35,7 +79,8 @@ export const run = (
     { cwd, timeoutMs }: { cwd: string; timeoutMs?: number },
 ): Promise<Ran> =>
     new Promise(resolve => {
-        const child = spawn(command, [...args], { cwd, stdio: ["ignore", "pipe", "pipe"] })
+        const child = spawn(command, [...args], { cwd, detached: true, stdio: ["ignore", "pipe", "pipe"] })
+        registerChild(child)
         let stdout = ""
         let stderr = ""
         let timedOut = false
@@ -48,8 +93,8 @@ export const run = (
                 ? undefined
                 : setTimeout(() => {
                       timedOut = true
-                      child.kill("SIGTERM")
-                      setTimeout(() => child.kill("SIGKILL"), GRACE_MS).unref()
+                      signalGroup(child, "SIGTERM")
+                      setTimeout(() => signalGroup(child, "SIGKILL"), GRACE_MS).unref()
                   }, timeoutMs)
 
         child.stdout.setEncoding("utf8")
