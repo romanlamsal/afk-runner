@@ -1,24 +1,26 @@
 # afk
 
-afk runs a whole spec's tickets unattended: it plans a DAG from the spec's sub-issues, implements
+afk runs a whole spec's tickets unattended: it plans a DAG from the spec's tickets, implements
 tickets in parallel, merges each onto one branch, resolves conflicts, verifies the assembled result
 after every merge, and opens one pull request at the end.
 
 ## Work
 
 **Spec**:
-The GitHub issue whose sub-issues are the tickets of one run. Its number is the `<spec>` in every
+The GitHub issue whose tickets are the work of one run. Its number is the `<spec>` in every
 branch and path afk creates.
 _Avoid_: epic, feature, spec document
 
 **Ticket**:
-A sub-issue of the spec; the unit of work one implementer takes.
+An issue belonging to the spec — how that belonging is recorded is the repository's own convention
+(native sub-issues, a task list, a `Part of #<spec>` line in the body). The unit of work one
+implementer takes.
 _Avoid_: task, subtask, story
 
 **Slate**:
-The set of tickets whose every blocker is verified, ordered most-dependents-first and recomputed
-after each verification. Not `docs/agents/issue-tracker.md`'s *Frontier query*, which keys on closed
-blockers and unassigned issues.
+The set of tickets whose every blocker is verified, ordered by transitive dependent count — most
+first — and recomputed after each verification. Not `docs/agents/issue-tracker.md`'s *Frontier
+query*, which keys on closed blockers and unassigned issues.
 _Avoid_: frontier, ready queue, wave, batch
 
 ## Git
@@ -86,6 +88,11 @@ One invocation of an agent for one step of one ticket, carrying its own session.
 implementer attempt is a different attempt from its first.
 _Avoid_: try, run, invocation
 
+**Event log**:
+`events.jsonl` in the run directory — the append-only record of every lifecycle event, one per line.
+It is the record of what was attempted and how far it got.
+_Avoid_: state file, journal, history
+
 **Lifecycle event**:
 One appended record of a step, its outcome and the attempt's session, for one ticket. Appended when
 a step starts and again when it ends. Never rewritten.
@@ -113,8 +120,8 @@ A ticket that was attempted, could not land, and that a later resume may repair.
 _Avoid_: errored, broken, stuck
 
 **`.afk/`**:
-The run directory — state, worktrees, agent transcripts. Machine-local; nothing in it is expected to
-exist on another machine.
+The run directory — the event log, worktrees, agent transcripts. Machine-local; nothing in it is
+expected to exist on another machine.
 _Avoid_: cache, workspace, scratch
 
 ## Tracker
