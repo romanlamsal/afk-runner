@@ -90,6 +90,25 @@ export const implemented = (events: readonly LifecycleEvent[], ticket: number): 
     return last?.step === "implement" && last.outcome === "ok"
 }
 
+/**
+ * A ticket squashed onto the spec branch whose gate has not yet run. It is what a run killed between
+ * a merge and its gate leaves behind, and the merge track draws from it as readily as from an
+ * implemented ticket: the gate runs after every merge without exception, and a process boundary is
+ * not an exception (ADR-0008).
+ */
+export const merged = (events: readonly LifecycleEvent[], ticket: number): boolean => {
+    const last = statusOf(events, ticket)
+    return last?.step === "merge" && last.outcome === "ok"
+}
+
+/**
+ * What the ticket's conflict resolver said it did, where there was a conflict at all. The note is
+ * kept as the resolve event's detail and read back from there, so that a merge landing work an
+ * earlier process resolved still quotes it in the squash body (ADR-0007).
+ */
+export const resolutionNote = (events: readonly LifecycleEvent[], ticket: number): string | undefined =>
+    events.findLast(event => event.ticket === ticket && event.step === "resolve" && event.outcome === "ok")?.detail
+
 /** A ticket nothing more will happen to: it failed for good, or it was skipped. */
 export const settled = (events: readonly LifecycleEvent[], ticket: number): boolean => {
     const outcome = statusOf(events, ticket)?.outcome
@@ -120,7 +139,10 @@ export const skipped = (ticket: number, at: Date): LifecycleEvent => ({
 })
 
 export type Progress = {
-    implemented: readonly number[]
+    /** Tickets whose gate went green. Nothing else proves a ticket landed sound (ADR-0008). */
+    verified: readonly number[]
+    /** Tickets a step got through that the gate has not proven: implemented, or merged. */
+    unverified: readonly number[]
     failed: readonly number[]
     skipped: readonly number[]
 }
@@ -130,5 +152,11 @@ export const progressOf = (tickets: readonly number[], events: readonly Lifecycl
     const withOutcome = (outcome: Outcome): readonly number[] =>
         tickets.filter(ticket => statusOf(events, ticket)?.outcome === outcome)
 
-    return { implemented: withOutcome("ok"), failed: withOutcome("failed"), skipped: withOutcome("skipped") }
+    const wentWell = withOutcome("ok")
+    return {
+        verified: wentWell.filter(ticket => verified(events, ticket)),
+        unverified: wentWell.filter(ticket => !verified(events, ticket)),
+        failed: withOutcome("failed"),
+        skipped: withOutcome("skipped"),
+    }
 }

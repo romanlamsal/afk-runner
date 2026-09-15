@@ -1,20 +1,24 @@
 import type { AgentRunner } from "../domain/agent.ts"
 import { ticketBranch } from "../domain/branches.ts"
 import type { Clock } from "../domain/clock.ts"
-import type { EventLog, LifecycleEvent, Outcome, Step } from "../domain/events.ts"
+import { type EventLog, type LifecycleEvent, type Outcome, resolutionNote, type Step } from "../domain/events.ts"
 import type { Git } from "../domain/git.ts"
 import { ticketWorktree, transcriptPath } from "../domain/paths.ts"
 import { resolverPrompt } from "../domain/prompts.ts"
 import { readResolutionNote, resolutionJsonSchema, resolverFault } from "../domain/resolution.ts"
 import type { PreparedRun } from "../domain/run.ts"
+import { mergedTickets, squashMessage } from "../domain/squash.ts"
 import { attemptWithAgent, type StepResult } from "./attempt.ts"
+import type { RunGate } from "./gate.ts"
 
-/** One ticket through the merge track: onto the spec branch's tip, conflicts and all. */
+/** One ticket through the merge track: rebased onto the spec branch, landed on it, and proven. */
 export type MergeTicket = (run: PreparedRun, action: { ticket: number; attempt: number }) => Promise<StepResult>
 
 export type MergeDeps = {
     agent: AgentRunner
     events: EventLog
+    /** The gate's driving port: every merge is followed by one, without exception (ADR-0008). */
+    gate: RunGate
     git: Git
     now: Clock
 }
@@ -23,7 +27,9 @@ export type MergeDeps = {
 type Details = Pick<LifecycleEvent, "sessionId" | "transcriptPath" | "detail">
 
 /**
- * Put a ticket on the spec branch's tip.
+ * Land a ticket on the spec branch and prove it: rebase onto the tip, squash onto the branch, gate.
+ * It is the only thing that produces a **verified** ticket, and the driver hands it one ticket at a
+ * time — serial by correctness, because one worktree owns the branch (ADR-0006).
  *
  * Every ticket is rebased, always, and in the ticket's **own** worktree — the branch is checked out
  * there, and git will not check one branch out twice, so a resolver with a worktree of its own is a
@@ -35,7 +41,7 @@ type Details = Pick<LifecycleEvent, "sessionId" | "transcriptPath" | "detail">
  * leaves the spec branch exactly as it found it — no revert, no gate.
  */
 export const createMergeService =
-    ({ agent, events, git, now }: MergeDeps): MergeTicket =>
+    ({ agent, events, gate, git, now }: MergeDeps): MergeTicket =>
     async (run, { ticket, attempt }) => {
         const { root, spec, manifest } = run
         const listed = manifest.tickets.find(one => one.number === ticket)
@@ -61,6 +67,82 @@ export const createMergeService =
             return { outcome: "failed" }
         }
 
+        /**
+         * The gate, and what a green one entitles the run to tidy away. A verified ticket's worktree
+         * has nothing left to say — its work is on the spec branch — while a failed or a skipped one
+         * keeps branch, worktree and transcripts, because that is what a reader and the prepare
+         * agent have to go on (ADR-0012).
+         *
+         * A removal that fails is deliberately not checked and not recorded. It costs disk and
+         * nothing else: the ticket's work is on the branch either way, so un-verifying it over a
+         * directory would be a lie, and the next `checkoutWorktree` at that path force-removes what
+         * is there anyway.
+         *
+         * A red gate ends the ticket here. Fixing it once, reverting the merge and re-gating the
+         * reverted tip is ADR-0009, and it is not built yet — so for now a red gate leaves its
+         * squash on the spec branch and every gate after it reads red too.
+         */
+        const gated = async (): Promise<StepResult> => {
+            const result = await gate(run, ticket)
+            if (result.outcome === "ok") {
+                await git.removeWorktree(root, worktree)
+            }
+            return result
+        }
+
+        const failedToMerge = async (detail: string): Promise<StepResult> => {
+            await record("merge", "failed", { detail })
+            return { outcome: "failed" }
+        }
+
+        /**
+         * Squash the ticket onto the spec branch, in the gate worktree, which is its sole writer.
+         * The body is the implementer's own commit messages and the resolver's note, both read back
+         * rather than carried along: the note belongs to the resolve event, and a merge landing work
+         * an earlier process resolved must quote it just the same (ADR-0007).
+         */
+        const land = async (): Promise<StepResult> => {
+            await record("merge", "running")
+
+            const commits = await git.log(root, { rev: branch, notIn: run.branch })
+            if (commits === undefined) {
+                return failedToMerge(`what ${branch} carries could not be read, so #${ticket} has no commit body`)
+            }
+
+            const message = squashMessage({
+                spec,
+                ticket,
+                title: listed.title,
+                commits,
+                note: resolutionNote(await events.read(root, spec), ticket),
+            })
+
+            const squashed = await git.squashMerge(root, { path: run.gate, branch, message })
+            if (!squashed.ok) {
+                return failedToMerge(`#${ticket} could not be squashed onto ${run.branch}: ${squashed.reason}`)
+            }
+
+            await record("merge", "ok")
+            return gated()
+        }
+
+        // The spec branch's own log, queried by the ticket trailer, is the cross-check for what
+        // landed: a git fact, checkable from a fresh clone with no state file. The decision function
+        // hands a merged ticket back to this track so that a run killed between a squash and its
+        // gate still gets one (ADR-0008), and that ticket's work is already on the branch — rebasing
+        // and squashing it a second time would replay it. It is a cross-check and not a dispatcher:
+        // it says whether this ticket's work is there, never which ticket to take (ADR-0011).
+        const onSpecBranch = await git.log(root, { rev: run.branch, notIn: run.trunk })
+        if (onSpecBranch === undefined) {
+            await record("merge", "running")
+            return failedToMerge(`what has landed on ${run.branch} could not be read`)
+        }
+        if (mergedTickets(spec, onSpecBranch).includes(ticket)) {
+            await record("merge", "running")
+            await record("merge", "ok", { detail: `#${ticket} was already on ${run.branch}` })
+            return gated()
+        }
+
         await record("rebase", "running")
 
         if (!(await git.isClean(root, worktree))) {
@@ -82,7 +164,7 @@ export const createMergeService =
         }
         if (rebased.outcome === "landed") {
             await record("rebase", "ok")
-            return { outcome: "ok" }
+            return land()
         }
 
         const transcript = transcriptPath(spec, `t${ticket}-resolve-${attempt}`, now())
@@ -133,5 +215,5 @@ export const createMergeService =
             detail: readResolutionNote(attempted.structuredOutput),
         })
         await record("rebase", "ok")
-        return { outcome: "ok" }
+        return land()
     }

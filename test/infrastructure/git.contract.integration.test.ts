@@ -45,12 +45,12 @@ const world = async (): Promise<GitWorld> => {
         return path
     }
 
-    const commit = async (branch: string): Promise<string> => {
+    const commit = async (branch: string, message?: string): Promise<string> => {
         // Through the port, and in a worktree of the branch's own — which is the only way real git
         // will have it, because a branch cannot be checked out twice.
         const path = await worktree(branch)
         made += 1
-        return commitHere(join(root, path), `work-${made}`)
+        return commitHere(join(root, path), message ?? `work-${made}`)
     }
 
     return {

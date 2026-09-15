@@ -18,11 +18,11 @@ const world = async (): Promise<GitWorld> => {
         return path
     }
 
-    const commit = async (branch: string): Promise<string> => {
+    const commit = async (branch: string, message?: string): Promise<string> => {
         await worktree(branch)
         made += 1
         const sha = `commit-${made}`
-        fake.commit(branch, sha)
+        fake.commit(branch, sha, message)
         return sha
     }
 

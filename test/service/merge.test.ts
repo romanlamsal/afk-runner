@@ -7,6 +7,7 @@ import type { StepResult } from "../../src/service/attempt.ts"
 import { createMergeService } from "../../src/service/merge.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
 import { createFakeEventLog } from "../fakes/event-log.ts"
+import { createFakeGate } from "../fakes/gate.ts"
 import { createFakeGit, type FakeRepository } from "../fakes/git.ts"
 
 /**
@@ -32,8 +33,8 @@ const RUN: PreparedRun = {
 
 /** A spec branch a sibling already landed on, and a ticket branch cut before that happened. */
 const REPOSITORY: FakeRepository = {
-    branches: { "afk/4/spec": ["cut", "a-sibling"], "afk/4/t7": ["cut", "the-work"] },
-    checkouts: { ".afk/4/t7": "afk/4/t7" },
+    branches: { main: ["cut"], "afk/4/spec": ["cut", "a-sibling"], "afk/4/t7": ["cut", "the-work"] },
+    checkouts: { ".afk/4/t7": "afk/4/t7", ".afk/4/gate": "afk/4/spec" },
 }
 
 type Setup = {
@@ -42,12 +43,15 @@ type Setup = {
     repository?: FakeRepository
     /** What the resolver did to the worktree. The default is one that finishes the rebase. */
     resolver?: "finishes" | "aborts" | "skips everything" | "gives up"
+    /** The tickets whose gate goes red. */
+    red?: readonly number[]
 }
 
-const harness = ({ reply, repository = REPOSITORY, resolver = "finishes" }: Setup = {}) => {
+const harness = ({ reply, repository = REPOSITORY, resolver = "finishes", red = [] }: Setup = {}) => {
     const git = createFakeGit(repository)
     const agent = createFakeAgent(reply)
     const events = createFakeEventLog()
+    const gate = createFakeGate(red)
 
     const merge = createMergeService({
         agent: async invocation => {
@@ -64,6 +68,7 @@ const harness = ({ reply, repository = REPOSITORY, resolver = "finishes" }: Setu
             return result
         },
         events: events.log,
+        gate: gate.gate,
         git: git.git,
         now: () => new Date("2026-09-15T11:18:38.314Z"),
     })
@@ -71,6 +76,7 @@ const harness = ({ reply, repository = REPOSITORY, resolver = "finishes" }: Setu
     return {
         agent,
         events,
+        gate,
         git,
         merge: (ticket = 7): Promise<StepResult> => merge(RUN, { ticket, attempt: 1 }),
     }
@@ -105,8 +111,8 @@ describe("the merge service: a ticket that rebases cleanly", () => {
         // given — the ticket branch is already on the tip, so a fast path would skip the rebase
         const { merge, git } = harness({
             repository: {
-                branches: { "afk/4/spec": ["cut"], "afk/4/t7": ["cut"] },
-                checkouts: { ".afk/4/t7": "afk/4/t7" },
+                branches: { main: ["cut"], "afk/4/spec": ["cut"], "afk/4/t7": ["cut", "the-work"] },
+                checkouts: { ".afk/4/t7": "afk/4/t7", ".afk/4/gate": "afk/4/spec" },
             },
         })
 
@@ -117,7 +123,7 @@ describe("the merge service: a ticket that rebases cleanly", () => {
         expect(git.rebases).toHaveLength(1)
     })
 
-    it("should write one start event and one end event for the rebase", async () => {
+    it("should write one start event and one end event for every step it took", async () => {
         // given
         const { merge, events } = harness()
 
@@ -125,7 +131,7 @@ describe("the merge service: a ticket that rebases cleanly", () => {
         await merge()
 
         // then
-        expect(steps(events.appended)).toEqual(["rebase running", "rebase ok"])
+        expect(steps(events.appended)).toEqual(["rebase running", "rebase ok", "merge running", "merge ok"])
     })
 
     it("should spend no resolver on a rebase that landed by itself", async () => {
@@ -235,7 +241,179 @@ describe("the merge service: a ticket that conflicts", () => {
         await merge()
 
         // then
-        expect(steps(events.appended)).toEqual(["rebase running", "resolve running", "resolve ok", "rebase ok"])
+        expect(steps(events.appended)).toEqual([
+            "rebase running",
+            "resolve running",
+            "resolve ok",
+            "rebase ok",
+            "merge running",
+            "merge ok",
+        ])
+    })
+})
+
+describe("the merge service: landing a ticket on the spec branch", () => {
+    it("should squash the ticket onto the spec branch in the gate worktree, its sole writer", async () => {
+        // given
+        const { merge, git } = harness()
+
+        // when
+        await merge()
+
+        // then
+        expect(git.commitsOn("afk/4/spec")).toEqual(["cut", "a-sibling", "squash-afk/4/t7"])
+    })
+
+    it.each([
+        ["the implementer's own commit messages", "the-work"],
+        ["the ticket trailer, which is the git-side record of what landed", "afk-ticket: 4/7"],
+        ["the resolver's note, so that a reviewer learns an agent judged it", "Conflict resolution: kept both"],
+    ] as const)("should give the squash %s", async (_name, expected) => {
+        // given — a conflicting ticket, so that there is a note as well as commits
+        const { merge, git } = harness({
+            repository: { ...REPOSITORY, colliding: ["afk/4/t7"] },
+            reply: { structuredOutput: { note: "kept both" } },
+        })
+
+        // when
+        await merge()
+
+        // then
+        expect(git.messageOf("squash-afk/4/t7")).toContain(expected)
+    })
+
+    it("should fail the ticket rather than squash a body it could not read the commits for", async () => {
+        // given
+        const { merge, events } = harness({ repository: { ...REPOSITORY, unreadable: ["afk/4/t7"] } })
+
+        // when
+        await merge()
+
+        // then
+        expect(steps(events.appended)).toEqual(["rebase running", "rebase ok", "merge running", "merge failed"])
+    })
+
+    it("should never squash a ticket whose body it could not read", async () => {
+        // given
+        const { merge, git } = harness({ repository: { ...REPOSITORY, unreadable: ["afk/4/t7"] } })
+
+        // when
+        await merge()
+
+        // then
+        expect(git.commitsOn("afk/4/spec")).toEqual(["cut", "a-sibling"])
+    })
+
+    it("should run the gate after the merge, because a red result must name one merge", async () => {
+        // given
+        const { merge, gate } = harness()
+
+        // when
+        await merge()
+
+        // then
+        expect(gate.gated).toEqual([7])
+    })
+
+    it("should remove a verified ticket's worktree, whose work is on the spec branch now", async () => {
+        // given
+        const { merge, git } = harness()
+
+        // when
+        await merge()
+
+        // then
+        expect(git.removed).toEqual([".afk/4/t7"])
+    })
+
+    it("should keep the worktree of a ticket whose gate went red, because somebody has to read it", async () => {
+        // given
+        const { merge, git } = harness({ red: [7] })
+
+        // when
+        await merge()
+
+        // then
+        expect(git.removed).toEqual([])
+    })
+
+    it("should report the gate's verdict as the merge track's own", async () => {
+        // given
+        const { merge } = harness({ red: [7] })
+
+        // when
+        const result = await merge()
+
+        // then
+        expect(result).toEqual({ outcome: "failed" })
+    })
+})
+
+describe("the merge service: a ticket the spec branch already carries", () => {
+    /** What a run killed between a squash and its lifecycle event leaves behind. */
+    const landed: FakeRepository = {
+        ...REPOSITORY,
+        branches: {
+            main: ["cut"],
+            "afk/4/spec": ["cut", "a-sibling", "already-squashed"],
+            "afk/4/t7": ["cut", "the-work"],
+        },
+        messages: { "already-squashed": "Implement the slate (#7)\n\nafk-ticket: 4/7" },
+    }
+
+    it("should never rebase it again, because the branch already carries its work", async () => {
+        // given
+        const { merge, git } = harness({ repository: landed })
+
+        // when
+        await merge()
+
+        // then
+        expect(git.rebases).toEqual([])
+    })
+
+    it("should leave the spec branch exactly where it is rather than squash it twice", async () => {
+        // given
+        const { merge, git } = harness({ repository: landed })
+
+        // when
+        await merge()
+
+        // then
+        expect(git.commitsOn("afk/4/spec")).toEqual(["cut", "a-sibling", "already-squashed"])
+    })
+
+    it("should still gate it, because the gate runs after every merge without exception", async () => {
+        // given
+        const { merge, gate } = harness({ repository: landed })
+
+        // when
+        await merge()
+
+        // then
+        expect(gate.gated).toEqual([7])
+    })
+
+    it("should record the merge it found, so that the log says what git says", async () => {
+        // given
+        const { merge, events } = harness({ repository: landed })
+
+        // when
+        await merge()
+
+        // then
+        expect(steps(events.appended)).toEqual(["merge running", "merge ok"])
+    })
+
+    it("should fail the ticket rather than guess when it cannot read what the branch carries", async () => {
+        // given
+        const { merge, events } = harness({ repository: { ...REPOSITORY, unreadable: ["afk/4/spec"] } })
+
+        // when
+        await merge()
+
+        // then
+        expect(steps(events.appended)).toEqual(["merge running", "merge failed"])
     })
 })
 

@@ -1,4 +1,13 @@
-import { attempts, implemented, type LifecycleEvent, running, settled, unattempted, verified } from "./events.ts"
+import {
+    attempts,
+    implemented,
+    type LifecycleEvent,
+    merged,
+    running,
+    settled,
+    unattempted,
+    verified,
+} from "./events.ts"
 import type { Manifest, Ticket } from "./manifest.ts"
 import { slateOrder } from "./schedule.ts"
 
@@ -120,12 +129,17 @@ export const nextActions = (
     // One at a time, and never a doomed ticket: a ticket whose blocker died finishes its
     // implementer and is skipped, rather than spending the merge track on work that cannot land
     // (ADR-0010).
+    //
+    // A merged ticket is taken back through it as readily as an implemented one. A run killed
+    // between a squash and its gate leaves one, and nothing else would ever dispatch it again — so
+    // without this the gate would have an exception, which it does not have (ADR-0008). The merge
+    // service asks git what is already on the branch rather than doing the work twice.
+    const waiting = (ticket: number): boolean => implemented(events, ticket) || merged(events, ticket)
+
     const merges: Action[] = inFlight.some(action => action.kind === "merge")
         ? []
         : slateOrder(manifest.tickets)
-              .filter(
-                  ticket => !busy.has(ticket.number) && !dead.has(ticket.number) && implemented(events, ticket.number),
-              )
+              .filter(ticket => !busy.has(ticket.number) && !dead.has(ticket.number) && waiting(ticket.number))
               .slice(0, 1)
               .map(ticket => ({
                   kind: "merge",

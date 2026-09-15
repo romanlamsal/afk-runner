@@ -18,7 +18,7 @@ export type GitWorld = {
     /** The branch every world starts with, carrying one commit. */
     trunk: string
     /** Commit on `branch`, creating it from trunk when it does not exist, and return the commit. */
-    commit: (branch: string) => Promise<string>
+    commit: (branch: string, message?: string) => Promise<string>
     /** Commit on `branch`, which shares no history with trunk, and return the commit. */
     orphan: (branch: string) => Promise<string>
     /** Where `branch` is checked out, relative to the root — a branch has exactly one worktree. */
@@ -135,6 +135,158 @@ export const describeGitContract = (name: string, create: () => Promise<GitWorld
 
             // then
             expect(onBase).toBe(false)
+        })
+    })
+
+    describe(`${name}: log`, () => {
+        it("should be what the branch's own commits say, oldest first", async () => {
+            // given
+            const world = await create()
+            await world.commit("afk/4/t7", "the first thing")
+            await world.commit("afk/4/t7", "the second thing")
+
+            // when
+            const messages = await world.git.log(world.root, { rev: "afk/4/t7", notIn: world.trunk })
+
+            // then
+            expect(messages).toEqual(["the first thing", "the second thing"])
+        })
+
+        it("should be empty for a branch carrying nothing the other does not", async () => {
+            // given
+            const world = await create()
+            await world.worktree("afk/4/t7")
+
+            // when
+            const messages = await world.git.log(world.root, { rev: "afk/4/t7", notIn: world.trunk })
+
+            // then
+            expect(messages).toEqual([])
+        })
+
+        it("should be nothing at all for a rev the repository does not have, which is not an empty range", async () => {
+            // given
+            const world = await create()
+
+            // when
+            const messages = await world.git.log(world.root, { rev: "afk/4/never", notIn: world.trunk })
+
+            // then
+            expect(messages).toBeUndefined()
+        })
+    })
+
+    describe(`${name}: squashMerge`, () => {
+        /** A spec branch in its own worktree, and a ticket branch with work waiting to land. */
+        const landing = async (world: GitWorld): Promise<string> => {
+            const gate = await world.worktree("afk/4/spec")
+            await world.commit("afk/4/t7", "the ticket's own work")
+            return gate
+        }
+
+        it("should put one commit on the receiving branch, carrying the message it was given", async () => {
+            // given
+            const world = await create()
+            const gate = await landing(world)
+
+            // when
+            await world.git.squashMerge(world.root, { path: gate, branch: "afk/4/t7", message: "landed #7" })
+
+            // then
+            expect(await world.git.log(world.root, { rev: "afk/4/spec", notIn: world.trunk })).toEqual(["landed #7"])
+        })
+
+        it("should leave the folded branch exactly where it was", async () => {
+            // given
+            const world = await create()
+            const gate = await landing(world)
+            const tip = await world.git.revision(world.root, "afk/4/t7")
+
+            // when
+            await world.git.squashMerge(world.root, { path: gate, branch: "afk/4/t7", message: "landed #7" })
+
+            // then
+            expect(await world.git.revision(world.root, "afk/4/t7")).toBe(tip)
+        })
+
+        it("should put none of the folded branch's own history on the receiving branch", async () => {
+            // given
+            const world = await create()
+            const gate = await landing(world)
+            const tip = await world.git.revision(world.root, "afk/4/t7")
+
+            // when
+            await world.git.squashMerge(world.root, { path: gate, branch: "afk/4/t7", message: "landed #7" })
+
+            // then
+            expect(await world.git.contains(world.root, { rev: "afk/4/spec", commit: tip ?? "" })).toBe(false)
+        })
+
+        it("should keep a body with blank lines in it whole, which is what a squash body is", async () => {
+            // given
+            const world = await create()
+            const gate = await landing(world)
+            const body = "Squash-merge and gate (#7)\n\nfeat: the ticket's own work\n\nafk-ticket: 4/7"
+
+            // when
+            await world.git.squashMerge(world.root, { path: gate, branch: "afk/4/t7", message: body })
+
+            // then
+            expect(await world.git.log(world.root, { rev: "afk/4/spec", notIn: world.trunk })).toEqual([body])
+        })
+
+        it("should refuse a branch carrying nothing the receiving one does not already have", async () => {
+            // given
+            const world = await create()
+            const gate = await world.worktree("afk/4/spec")
+            await world.worktree("afk/4/t8")
+
+            // when
+            const merged = await world.git.squashMerge(world.root, {
+                path: gate,
+                branch: "afk/4/t8",
+                message: "landed #8",
+            })
+
+            // then
+            expect(merged.ok).toBe(false)
+        })
+    })
+
+    describe(`${name}: removeWorktree`, () => {
+        it("should free the branch it held, so that it can be checked out somewhere else", async () => {
+            // given
+            const world = await create()
+            await world.commit("afk/4/t7")
+            await world.git.removeWorktree(world.root, await world.worktree("afk/4/t7"))
+
+            // when
+            const added = await world.git.checkoutWorktree(world.root, {
+                path: "wt/elsewhere",
+                branch: "afk/4/t7",
+                startPoint: world.trunk,
+            })
+
+            // then
+            expect(added).toEqual({ ok: true })
+        })
+    })
+
+    describe(`${name}: checkoutWorktree`, () => {
+        it("should refuse a second worktree for a branch another already holds (ADR-0006)", async () => {
+            // given
+            const world = await create()
+            await world.commit("afk/4/t7")
+
+            // when
+            const added = await world.git.checkoutWorktree(world.root, {
+                path: "wt/elsewhere",
+                branch: "afk/4/t7",
+                startPoint: world.trunk,
+            })
+
+            // then
+            expect(added.ok).toBe(false)
         })
     })
 

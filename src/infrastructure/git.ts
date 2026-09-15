@@ -132,6 +132,13 @@ export const createGit = (): Git => ({
         return added.ok ? { ok: true } : { ok: false, reason: complaint(added) }
     },
 
+    removeWorktree: async (root, path): Promise<GitResult> => {
+        const absolute = join(root, path)
+        const removed = await git(root, "worktree", "remove", "--force", absolute)
+        await git(root, "worktree", "prune")
+        return removed.ok ? { ok: true } : { ok: false, reason: complaint(removed) }
+    },
+
     revision: async (root, rev) => {
         const resolved = await git(root, "rev-parse", "--verify", "--quiet", `${rev}^{commit}`)
         return resolved.ok && resolved.stdout !== "" ? resolved.stdout : undefined
@@ -144,6 +151,21 @@ export const createGit = (): Git => ({
         return status.ok && status.stdout === ""
     },
 
+    // One NUL after each message, because a commit message contains blank lines and nothing else
+    // separates them reliably.
+    log: async (root, { rev, notIn }) => {
+        const logged = await git(root, "log", "--reverse", "--format=%B%x00", `${notIn}..${rev}`)
+        // A rev git cannot resolve is a refusal, not an empty range, and the caller must tell them
+        // apart.
+        if (!logged.ok) {
+            return undefined
+        }
+        return logged.stdout
+            .split("\0")
+            .map(message => message.trim())
+            .filter(message => message !== "")
+    },
+
     rebase: async (root, { path, onto }): Promise<RebaseResult> => {
         const cwd = join(root, path)
         const rebased = await git(cwd, "rebase", onto)
@@ -154,6 +176,26 @@ export const createGit = (): Git => ({
         // git exits non-zero both for a conflict it wants resolved and for a rebase it refused to
         // start. Only the tree can tell them apart, and only one of them is worth an agent.
         return (await rebasing(cwd)) ? { outcome: "conflicted" } : { outcome: "failed", reason: complaint(rebased) }
+    },
+
+    squashMerge: async (root, { path, branch, message }): Promise<GitResult> => {
+        const cwd = join(root, path)
+
+        // `--squash` records no MERGE_HEAD, so there is no merge to abort: what a half-finished one
+        // leaves is an index and a tree, and putting the worktree back means discarding both. HEAD
+        // does not move, so nothing that already landed is at risk.
+        const undo = async (ran: Ran): Promise<GitResult> => {
+            await git(cwd, "reset", "--hard", "HEAD")
+            return { ok: false, reason: complaint(ran) }
+        }
+
+        const merged = await git(cwd, "merge", "--squash", branch)
+        if (!merged.ok) {
+            return undo(merged)
+        }
+
+        const committed = await git(cwd, "commit", "-m", message)
+        return committed.ok ? { ok: true } : undo(committed)
     },
 
     conflicted: async (root, path) => rebasing(join(root, path)),

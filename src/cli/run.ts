@@ -17,9 +17,9 @@ export type RunDeps = {
  * The boundary between an accepted invocation and the use cases that serve it. It calls a service,
  * turns what came back into lines and an exit code, and holds no rule about a run.
  *
- * Merging is the ticket after this one: a run whose tickets are implemented and cannot yet land
- * halts, because exiting `0` over work that did not happen is the failure mode this whole rewrite
- * exists to remove.
+ * The spec pull request is the ticket after this one: a run whose tickets landed and were verified
+ * still halts, because exiting `0` over a pull request that was never opened is the failure mode
+ * this whole rewrite exists to remove.
  */
 export const createRun =
     ({ start, drive, print, printError }: RunDeps) =>
@@ -60,7 +60,7 @@ export const createRun =
                     return EXIT.halted
                 }
 
-                printError("afk: merging is not implemented yet")
+                printError("afk: opening the spec pull request is not implemented yet")
                 return EXIT.halted
             }
         }

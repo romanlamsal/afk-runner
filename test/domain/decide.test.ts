@@ -180,6 +180,17 @@ describe("nextActions: the merge track", () => {
         expect(actions).toEqual([merging(10)])
     })
 
+    it("should take a merged ticket back into the merge track, so that its gate still runs", () => {
+        // given — what a run killed between a squash and its gate leaves behind (ADR-0008)
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, [event(10, "implement", "ok"), event(10, "merge", "ok")])
+
+        // then
+        expect(actions).toEqual([merging(10)])
+    })
+
     it.each([
         ["it is still being implemented", [event(10, "implement", "running")]],
         ["its rebase already landed", [event(10, "implement", "ok"), event(10, "rebase", "ok")]],

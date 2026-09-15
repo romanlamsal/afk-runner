@@ -6,6 +6,7 @@ import type { AgentInvocation } from "../../src/domain/agent.ts"
 import type { LifecycleEvent } from "../../src/domain/events.ts"
 import type { Ticket } from "../../src/domain/manifest.ts"
 import { createDriveService } from "../../src/service/drive.ts"
+import { createGateService } from "../../src/service/gate.ts"
 import { createImplementService } from "../../src/service/implement.ts"
 import { createMergeService, type MergeTicket } from "../../src/service/merge.ts"
 import { createStartService } from "../../src/service/start.ts"
@@ -37,6 +38,8 @@ type Setup = {
     colliding?: readonly number[]
     /** Whether the conflict resolver finishes the rebase it was called for. */
     resolving?: boolean
+    /** The operator's command that goes red in this repository, if one does. */
+    failing?: string
     tracker?: FakeTrackerSetup
     maxParallel?: number
 }
@@ -46,17 +49,18 @@ const harness = ({
     idle = [],
     colliding = [],
     resolving = true,
+    failing,
     tracker: trackerSetup = {},
     maxParallel = 3,
 }: Setup) => {
     const manifest = manifestOf(tickets)
     const git = createFakeGit({
-        branches: { "afk/4/spec": ["spec-tip"] },
+        branches: { main: ["spec-tip"], "afk/4/spec": ["spec-tip"] },
         colliding: colliding.map(number => `afk/4/t${number}`),
     })
     const agent = createFakeAgent()
     const resolver = createFakeAgent()
-    const commands = createFakeCommands()
+    const commands = createFakeCommands(failing)
     const environment = createFakeEnvironment()
     const events = createFakeEventLog()
     const manifests = createFakeManifestStore({ ok: true, manifest })
@@ -83,6 +87,7 @@ const harness = ({
             return result
         },
         events: events.log,
+        gate: createGateService({ commands: commands.run, events: events.log, now }),
         git: git.git,
         now,
     })
@@ -141,6 +146,7 @@ const harness = ({
 
     return {
         agent,
+        commands,
         concurrency,
         events,
         git,
@@ -172,7 +178,11 @@ describe("a run that works its slate", () => {
             "#10 implement ok",
             "#11 implement ok",
             "#10 rebase ok",
+            "#10 merge ok",
+            "#10 gate ok",
             "#11 rebase ok",
+            "#11 merge ok",
+            "#11 gate ok",
         ])
     })
 
@@ -192,14 +202,14 @@ describe("a run that works its slate", () => {
     })
 
     it("should claim every ticket it starts, and only those", async () => {
-        // given — 12 waits on 11, which never becomes verified, because nothing gates yet
+        // given — 12 waits on 11, so it is claimed only once 11's gate has verified it
         const { run, tracker } = harness({ tickets: [ticket(11), ticket(12, [11])] })
 
         // when
         await run()
 
         // then
-        expect(tracker.claimed).toEqual([11])
+        expect(tracker.claimed).toEqual([11, 12])
     })
 
     it("should never have more implementers in flight at once than it has slots", async () => {
@@ -232,7 +242,138 @@ describe("a run that works its slate", () => {
         await run()
 
         // then
-        expect(agent.invocations.map(workingOn)).toEqual([11, 10])
+        expect(agent.invocations.map(workingOn)).toEqual([11, 10, 12])
+    })
+
+    it("should start a blocked ticket only once its blocker's gate has verified it", async () => {
+        // given — 11's verify goes red, so nothing ever verifies it
+        const { run, agent } = harness({
+            tickets: [ticket(11), ticket(12, [11])],
+            failing: "npm run check",
+        })
+
+        // when
+        await run()
+
+        // then
+        expect(agent.invocations.map(workingOn)).toEqual([11])
+    })
+})
+
+describe("a run that lands its tickets", () => {
+    it("should put one commit per ticket on the spec branch", async () => {
+        // given
+        const { run, git } = harness({ tickets: [ticket(10), ticket(11)] })
+
+        // when
+        await run()
+
+        // then
+        expect(git.commitsOn("afk/4/spec")).toEqual(["spec-tip", "squash-afk/4/t10", "squash-afk/4/t11"])
+    })
+
+    it("should give each of those commits the trailer naming the ticket it carried", async () => {
+        // given
+        const { run, git } = harness({ tickets: [ticket(10)] })
+
+        // when
+        await run()
+
+        // then
+        expect(git.messageOf("squash-afk/4/t10")).toContain("afk-ticket: 4/10")
+    })
+
+    it("should give each of those commits the implementer's own commit message", async () => {
+        // given
+        const { run, git } = harness({ tickets: [ticket(10)] })
+
+        // when
+        await run()
+
+        // then
+        expect(git.messageOf("squash-afk/4/t10")).toContain("work-for-10")
+    })
+
+    it("should gate after every single merge, so that a red result names one of them", async () => {
+        // given
+        const { run, commands } = harness({ tickets: [ticket(10), ticket(11)] })
+
+        // when
+        await run()
+
+        // then
+        expect(commands.ran.filter(ran => ran.cwd === ".afk/4/gate")).toEqual([
+            { cwd: ".afk/4/gate", command: "npm ci" },
+            { cwd: ".afk/4/gate", command: "npm run check" },
+            { cwd: ".afk/4/gate", command: "npm ci" },
+            { cwd: ".afk/4/gate", command: "npm run check" },
+        ])
+    })
+
+    it("should reuse the one gate worktree across every merge rather than cut a fresh one", async () => {
+        // given
+        const { run, git } = harness({ tickets: [ticket(10), ticket(11)] })
+
+        // when
+        await run()
+
+        // then
+        expect(git.worktrees.filter(request => request.path === ".afk/4/gate")).toHaveLength(1)
+    })
+
+    it("should remove a verified ticket's worktree, and keep the gate's", async () => {
+        // given
+        const { run, git } = harness({ tickets: [ticket(10), ticket(11)] })
+
+        // when
+        await run()
+
+        // then
+        expect(git.removed).toEqual([".afk/4/t10", ".afk/4/t11"])
+    })
+
+    it("should say on screen which tickets were verified", async () => {
+        // given
+        const { run, printed } = harness({ tickets: [ticket(10), ticket(11)] })
+
+        // when
+        await run()
+
+        // then
+        expect(printed).toContain("verified:     #10, #11")
+    })
+})
+
+describe("a run whose gate goes red", () => {
+    it("should fail the ticket whose merge the gate could not prove, and skip its dependents", async () => {
+        // given
+        const { run, events } = harness({
+            tickets: [ticket(11), ticket(12, [11])],
+            failing: "npm run check",
+        })
+
+        // when
+        await run()
+
+        // then
+        expect(settled(events.appended)).toEqual([
+            "#11 implement ok",
+            "#11 rebase ok",
+            "#11 merge ok",
+            "#11 gate failed",
+            "#12 implement skipped",
+        ])
+    })
+
+    it("should keep the failed ticket's worktree, because that is what a reader has to go on", async () => {
+        // given
+        const { run, git } = harness({ tickets: [ticket(11)], failing: "npm run check" })
+
+        // when
+        await run()
+
+        // then
+        expect(git.removed).toEqual([])
     })
 })
 
@@ -434,6 +575,32 @@ describe("a run resumed over a log that is not empty", () => {
 
         // then
         expect(agent.invocations.map(workingOn)).toEqual([11])
+    })
+
+    it("should gate a ticket a killed run merged but never gated", async () => {
+        // given — the squash is on the spec branch, and the log stops at the merge
+        const { run, events, git } = harness({ tickets: [ticket(10)] })
+        git.commit("afk/4/spec", "squash-afk/4/t10", "Ticket 10 (#10)\n\nafk-ticket: 4/10")
+        events.appended.push({ ticket: 10, step: "merge", outcome: "ok", at: "2026-09-15T10:00:00.000Z" })
+
+        // when
+        await run()
+
+        // then — the first is what the killed run left; the second is afk finding it already there
+        expect(settled(events.appended)).toEqual(["#10 merge ok", "#10 merge ok", "#10 gate ok"])
+    })
+
+    it("should never squash a ticket the spec branch already carries a second time", async () => {
+        // given
+        const { run, git, events } = harness({ tickets: [ticket(10)] })
+        git.commit("afk/4/spec", "squash-afk/4/t10", "Ticket 10 (#10)\n\nafk-ticket: 4/10")
+        events.appended.push({ ticket: 10, step: "merge", outcome: "ok", at: "2026-09-15T10:00:00.000Z" })
+
+        // when
+        await run()
+
+        // then
+        expect(git.commitsOn("afk/4/spec")).toEqual(["spec-tip", "squash-afk/4/t10"])
     })
 
     it("should leave a ticket a killed run left mid-step alone, rather than start it twice", async () => {

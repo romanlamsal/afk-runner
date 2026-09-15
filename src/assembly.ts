@@ -10,6 +10,7 @@ import { createFileEventLog } from "./repository/event-log.ts"
 import { createFileManifestStore } from "./repository/manifest-store.ts"
 import { createFileRunRecordStore } from "./repository/run-records.ts"
 import { createDriveService } from "./service/drive.ts"
+import { createGateService } from "./service/gate.ts"
 import { createImplementService } from "./service/implement.ts"
 import { createMergeService } from "./service/merge.ts"
 import { createPlanService } from "./service/plan.ts"
@@ -29,6 +30,7 @@ export const assembleCli = (): Cli => {
 
     const manifests = createFileManifestStore()
     const agent = createClaudeAgentRunner()
+    const commands = createShellCommandRunner()
     const environment = createEnvironmentFiles()
     const events = createFileEventLog()
     const git = createGit()
@@ -50,14 +52,20 @@ export const assembleCli = (): Cli => {
         events,
         implement: createImplementService({
             agent,
-            commands: createShellCommandRunner(),
+            commands,
             environment,
             events,
             git,
             now,
             tracker: createGitHubTracker(),
         }),
-        merge: createMergeService({ agent, events, git, now }),
+        merge: createMergeService({
+            agent,
+            events,
+            gate: createGateService({ commands, events, now }),
+            git,
+            now,
+        }),
         now,
     })
 

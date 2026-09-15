@@ -34,6 +34,15 @@ export type RebaseRequest = {
     onto: string
 }
 
+export type SquashRequest = {
+    /** The worktree whose branch receives the commit: the gate worktree, always (ADR-0006). */
+    path: string
+    /** The ticket branch being folded in, already rebased onto that branch's tip (ADR-0005). */
+    branch: string
+    /** The whole commit message, composed in the domain. */
+    message: string
+}
+
 export type RebaseResult =
     /** The branch's commits sit on the tip it was rebased onto. */
     | { outcome: "landed" }
@@ -55,6 +64,11 @@ export type Git = {
      * replacing whatever is at `path` — the gate worktree is re-created at every process start.
      */
     checkoutWorktree: (root: string, request: WorktreeRequest) => Promise<GitResult>
+    /**
+     * Take a worktree away, freeing the branch it held. Asked once a ticket is verified: what is in
+     * a verified ticket's worktree is on the spec branch, and a failed one's is kept (ADR-0012).
+     */
+    removeWorktree: (root: string, path: string) => Promise<GitResult>
     /** The commit `rev` names, or undefined when the repository has no such rev. */
     revision: (root: string, rev: string) => Promise<string | undefined>
     /**
@@ -67,8 +81,25 @@ export type Git = {
      * rebasing over uncommitted work buries it (ADR-0005).
      */
     isClean: (root: string, path: string) => Promise<boolean>
+    /**
+     * The messages of the commits `rev` carries that `notIn` does not, oldest first. Two callers:
+     * the squash body, which quotes the implementer's own messages, and the spec branch's log, which
+     * is the cross-check for what landed (ADR-0011).
+     *
+     * Undefined when the range could not be read at all. A range that is genuinely empty is an empty
+     * list, and the two must not be confused: one is a ticket with nothing new on it, the other is a
+     * question git refused, and answering the second with the first composes an empty squash body
+     * and a cross-check that says nothing landed.
+     */
+    log: (root: string, range: { rev: string; notIn: string }) => Promise<readonly string[] | undefined>
     /** Rebase the branch checked out at `path`, in that worktree and no other (ADR-0005). */
     rebase: (root: string, request: RebaseRequest) => Promise<RebaseResult>
+    /**
+     * Fold everything `branch` carries that the worktree at `path` does not into one commit on the
+     * branch checked out there. It cannot conflict: the ticket was rebased onto that tip and nothing
+     * can land in between, because the merge track is serial and single-writer (ADR-0006).
+     */
+    squashMerge: (root: string, request: SquashRequest) => Promise<GitResult>
     /**
      * Whether a rebase is still under way at `path` — paths git could not merge, or a rebase it was
      * never told to finish. This is what the script asks after the conflict resolver exits.

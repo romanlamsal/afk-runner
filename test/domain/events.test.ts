@@ -131,16 +131,17 @@ describe("progressOf", () => {
     it("should sort the tickets by what their last event says", () => {
         // given
         const events = [
+            event(9, "gate", "ok"),
             event(10, "implement", "ok"),
             event(11, "implement", "failed"),
             event(12, "implement", "skipped"),
         ]
 
         // when
-        const progress = progressOf([10, 11, 12], events)
+        const progress = progressOf([9, 10, 11, 12], events)
 
         // then
-        expect(progress).toEqual({ implemented: [10], failed: [11], skipped: [12] })
+        expect(progress).toEqual({ verified: [9], unverified: [10], failed: [11], skipped: [12] })
     })
 })
 

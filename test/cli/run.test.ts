@@ -148,7 +148,7 @@ describe("createRun", () => {
         expect(printed).toContain("spec #4: afk/4/spec cut from main")
     })
 
-    it("should halt on a worked slate until merging exists", async () => {
+    it("should halt on a worked slate until the spec pull request exists", async () => {
         // given
         const { run, errors } = harness({ outcome: "prepared", run: PREPARED })
 
@@ -156,6 +156,6 @@ describe("createRun", () => {
         await run(invocation("plan-and-implement"))
 
         // then
-        expect(errors).toContain("afk: merging is not implemented yet")
+        expect(errors).toContain("afk: opening the spec pull request is not implemented yet")
     })
 })

@@ -116,6 +116,11 @@ _Avoid_: done, passed, green, complete
 A ticket squashed onto the spec branch whose gate has not yet run.
 _Avoid_: landed, integrated, shipped
 
+**Unverified**:
+A ticket a step got through that the gate has not proven — implemented, or merged. What a run
+reports beside verified, so that a partial run never reads as a finished one.
+_Avoid_: pending, unproven, in progress
+
 **Skipped**:
 A ticket that will not land, because a blocker failed or was reverted.
 _Avoid_: cancelled, dropped, blocked

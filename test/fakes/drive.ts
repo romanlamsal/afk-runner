@@ -8,5 +8,5 @@ import type { DriveRun } from "../../src/service/drive.ts"
 export const createStubDrive = (): DriveRun => async () => ({
     outcome: "done",
     reason: undefined,
-    progress: { implemented: [], failed: [], skipped: [] },
+    progress: { verified: [], unverified: [], failed: [], skipped: [] },
 })
