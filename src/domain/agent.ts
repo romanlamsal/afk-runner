@@ -12,6 +12,8 @@ export const AGENT_TIMEOUT_MS = 60 * 60 * 1000
 export type AgentInvocation = {
     /** Composed in the domain. */
     prompt: string
+    /** The target repository's top level, which is where afk found it rather than where it was invoked. */
+    root: string
     /** The worktree to run in, relative to the target repository. `.` is the repository itself. */
     cwd: string
     /** Where the stream is written as it arrives, relative to the target repository. */

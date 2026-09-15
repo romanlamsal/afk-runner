@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { ParsedArgs } from "../../src/cli/args.ts"
-import { type Mode, resolveInvocation } from "../../src/cli/invocation.ts"
+import { resolveInvocation } from "../../src/cli/invocation.ts"
+import type { Mode } from "../../src/domain/mode.ts"
 
 const args = (overrides: Partial<ParsedArgs> = {}): ParsedArgs => ({
     spec: "4",

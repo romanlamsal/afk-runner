@@ -1,10 +1,5 @@
+import type { Mode } from "../domain/mode.ts"
 import type { ParsedArgs } from "./args.ts"
-
-/**
- * What the invocation asked for. `plan-and-implement` is the bare invocation: plan, confirm,
- * implement.
- */
-export type Mode = "plan-and-implement" | "plan-only" | "implement-only"
 
 export type Invocation = {
     spec: number

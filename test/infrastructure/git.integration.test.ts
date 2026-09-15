@@ -1,0 +1,272 @@
+import { execFile } from "node:child_process"
+import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { promisify } from "node:util"
+import { describe, expect, it } from "vitest"
+import { createGit } from "../../src/infrastructure/git.ts"
+
+/**
+ * The git adapter against real git, in throwaway repositories. Everything here is a claim about what
+ * git does, which is exactly the half a fake cannot make.
+ */
+const run = promisify(execFile)
+
+const git = createGit()
+
+const sh = async (cwd: string, ...args: string[]): Promise<string> => (await run("git", args, { cwd })).stdout.trim()
+
+const commit = async (root: string, message: string): Promise<void> => {
+    await writeFile(join(root, `${message}.txt`), `${message}\n`, "utf8")
+    await sh(root, "add", ".")
+    await sh(root, "commit", "-m", message)
+}
+
+/** A repository with one commit on `main` and no remote. */
+const repository = async (): Promise<string> => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "afk-git-")))
+    await sh(root, "init", "-b", "main")
+    await sh(root, "config", "user.email", "afk@example.com")
+    await sh(root, "config", "user.name", "afk")
+    await commit(root, "first")
+    return root
+}
+
+/** The same, cloned from a bare origin, so that there is something to be ahead of and behind. */
+const cloned = async (): Promise<{ root: string; origin: string }> => {
+    const source = await repository()
+    const origin = await realpath(await mkdtemp(join(tmpdir(), "afk-origin-")))
+    await sh(origin, "init", "--bare", "-b", "main")
+    await sh(source, "remote", "add", "origin", origin)
+    await sh(source, "push", "-u", "origin", "main")
+
+    const parent = await realpath(await mkdtemp(join(tmpdir(), "afk-clone-")))
+    const root = join(parent, "clone")
+    await sh(parent, "clone", origin, root)
+    await sh(root, "config", "user.email", "afk@example.com")
+    await sh(root, "config", "user.name", "afk")
+    return { root, origin: source }
+}
+
+describe("createGit().topLevel", () => {
+    it("should resolve the repository from a directory inside it", async () => {
+        // given
+        const root = await repository()
+        await mkdir(join(root, "packages/thing"), { recursive: true })
+
+        // when
+        const found = await git.topLevel(join(root, "packages/thing"))
+
+        // then
+        expect(found).toBe(root)
+    })
+
+    it("should find no repository outside a worktree", async () => {
+        // given
+        const nowhere = await realpath(await mkdtemp(join(tmpdir(), "afk-nowhere-")))
+
+        // when
+        const found = await git.topLevel(nowhere)
+
+        // then
+        expect(found).toBeUndefined()
+    })
+})
+
+describe("createGit().inspectTrunk", () => {
+    it("should take the branch a repository with no origin/HEAD is usually trunked on", async () => {
+        // given
+        const root = await repository()
+
+        // when
+        const trunk = await git.inspectTrunk(root)
+
+        // then
+        expect(trunk?.branch).toBe("main")
+    })
+
+    it("should report a repository with no remote as uncompared rather than behind", async () => {
+        // given
+        const root = await repository()
+
+        // when
+        const trunk = await git.inspectTrunk(root)
+
+        // then
+        expect(trunk).toEqual(expect.objectContaining({ compared: false, ahead: 0, behind: 0 }))
+    })
+
+    it("should report a working tree with an uncommitted file as dirty", async () => {
+        // given
+        const root = await repository()
+        await writeFile(join(root, "scratch.txt"), "in progress\n", "utf8")
+
+        // when
+        const trunk = await git.inspectTrunk(root)
+
+        // then
+        expect(trunk?.dirty).toBe(true)
+    })
+
+    it("should take trunk from origin/HEAD when the repository names one", async () => {
+        // given
+        const { root } = await cloned()
+
+        // when
+        const trunk = await git.inspectTrunk(root)
+
+        // then
+        expect(trunk?.branch).toBe("main")
+    })
+
+    it("should count an unpushed commit as ahead", async () => {
+        // given
+        const { root } = await cloned()
+        await commit(root, "unpushed")
+
+        // when
+        const trunk = await git.inspectTrunk(root)
+
+        // then
+        expect(trunk).toEqual(expect.objectContaining({ ahead: 1, behind: 0, compared: true }))
+    })
+
+    it("should count a commit pushed by someone else as behind", async () => {
+        // given
+        const { root, origin } = await cloned()
+        await commit(origin, "theirs")
+        await sh(origin, "push", "origin", "main")
+
+        // when
+        const trunk = await git.inspectTrunk(root)
+
+        // then
+        expect(trunk).toEqual(expect.objectContaining({ ahead: 0, behind: 1, compared: true }))
+    })
+
+    it("should leave the local trunk where it was, having fetched only to compare", async () => {
+        // given
+        const { root, origin } = await cloned()
+        const before = await sh(root, "rev-parse", "main")
+        await commit(origin, "theirs")
+        await sh(origin, "push", "origin", "main")
+
+        // when
+        await git.inspectTrunk(root)
+
+        // then
+        expect(await sh(root, "rev-parse", "main")).toBe(before)
+    })
+
+    it("should find no trunk when the branch origin names is not in this checkout", async () => {
+        // given
+        const { root } = await cloned()
+        await sh(root, "checkout", "-q", "-b", "feature")
+        await sh(root, "branch", "-q", "-D", "main")
+
+        // when
+        const trunk = await git.inspectTrunk(root)
+
+        // then
+        expect(trunk).toBeUndefined()
+    })
+})
+
+describe("createGit().checkoutWorktree", () => {
+    it("should create the branch from the start point it was given", async () => {
+        // given
+        const root = await repository()
+
+        // when
+        await git.checkoutWorktree(root, { path: ".afk/4/gate", branch: "afk/4/spec", startPoint: "main" })
+
+        // then
+        expect(await sh(root, "rev-parse", "afk/4/spec")).toBe(await sh(root, "rev-parse", "main"))
+    })
+
+    it("should check the branch out at the path it was given", async () => {
+        // given
+        const root = await repository()
+
+        // when
+        await git.checkoutWorktree(root, { path: ".afk/4/gate", branch: "afk/4/spec", startPoint: "main" })
+
+        // then
+        expect(await sh(join(root, ".afk/4/gate"), "rev-parse", "--abbrev-ref", "HEAD")).toBe("afk/4/spec")
+    })
+
+    it("should keep the commits an earlier run put on the branch when it re-creates the worktree", async () => {
+        // given
+        const root = await repository()
+        await git.checkoutWorktree(root, { path: ".afk/4/gate", branch: "afk/4/spec", startPoint: "main" })
+        await commit(join(root, ".afk/4/gate"), "landed")
+        const landed = await sh(root, "rev-parse", "afk/4/spec")
+
+        // when
+        await git.checkoutWorktree(root, { path: ".afk/4/gate", branch: "afk/4/spec", startPoint: "main" })
+
+        // then
+        expect(await sh(root, "rev-parse", "afk/4/spec")).toBe(landed)
+    })
+
+    it("should replace a worktree a killed run left registered", async () => {
+        // given
+        const root = await repository()
+        await git.checkoutWorktree(root, { path: ".afk/4/gate", branch: "afk/4/spec", startPoint: "main" })
+
+        // when
+        const again = await git.checkoutWorktree(root, {
+            path: ".afk/4/gate",
+            branch: "afk/4/spec",
+            startPoint: "main",
+        })
+
+        // then
+        expect(again).toEqual({ ok: true })
+    })
+
+    it("should replace a directory a killed run left behind without git knowing", async () => {
+        // given
+        const root = await repository()
+        await mkdir(join(root, ".afk/4/gate"), { recursive: true })
+        await writeFile(join(root, ".afk/4/gate/leftover.txt"), "from a run that died\n", "utf8")
+
+        // when
+        const checkout = await git.checkoutWorktree(root, {
+            path: ".afk/4/gate",
+            branch: "afk/4/spec",
+            startPoint: "main",
+        })
+
+        // then
+        expect(checkout).toEqual({ ok: true })
+    })
+
+    it("should say what git said when the branch is checked out somewhere else already", async () => {
+        // given
+        const root = await repository()
+        await sh(root, "worktree", "add", join(root, "elsewhere"), "-b", "afk/4/spec")
+
+        // when
+        const checkout = await git.checkoutWorktree(root, {
+            path: ".afk/4/gate",
+            branch: "afk/4/spec",
+            startPoint: "main",
+        })
+
+        // then
+        expect(checkout).toEqual({ ok: false, reason: expect.stringContaining("already") })
+    })
+
+    it("should leave the invoking worktree on the branch it was on", async () => {
+        // given
+        const root = await repository()
+        const before = await sh(root, "rev-parse", "--abbrev-ref", "HEAD")
+
+        // when
+        await git.checkoutWorktree(root, { path: ".afk/4/gate", branch: "afk/4/spec", startPoint: "main" })
+
+        // then
+        expect(await sh(root, "rev-parse", "--abbrev-ref", "HEAD")).toBe(before)
+    })
+})

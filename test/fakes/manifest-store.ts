@@ -1,18 +1,20 @@
-import type { Manifest, ManifestStore } from "../../src/domain/manifest.ts"
+import type { Manifest, ManifestRead, ManifestStore } from "../../src/domain/manifest.ts"
 
 export type FakeManifestStore = {
     store: ManifestStore
-    /** Every manifest written, by the spec it was written for. */
-    written: { spec: number; manifest: Manifest }[]
+    /** Every manifest written, by the repository and the spec it was written for. */
+    written: { root: string; spec: number; manifest: Manifest }[]
 }
 
-export const createFakeManifestStore = (): FakeManifestStore => {
-    const written: { spec: number; manifest: Manifest }[] = []
+/** `stored` is what a spec's manifest already is on disk; undefined is a repository that has none. */
+export const createFakeManifestStore = (stored?: ManifestRead): FakeManifestStore => {
+    const written: { root: string; spec: number; manifest: Manifest }[] = []
     return {
         written,
         store: {
-            write: async (spec, manifest) => {
-                written.push({ spec, manifest })
+            read: async () => stored,
+            write: async (root, spec, manifest) => {
+                written.push({ root, spec, manifest })
             },
         },
     }

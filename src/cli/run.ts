@@ -1,38 +1,52 @@
-import type { PlanSpec } from "../service/plan.ts"
+import type { StartRun } from "../service/start.ts"
 import { EXIT, type ExitCode } from "./exit-codes.ts"
 import type { Invocation } from "./invocation.ts"
 import { planOutput } from "./plan-output.ts"
+import { preparedOutput } from "./prepared-output.ts"
 
 export type RunDeps = {
-    plan: PlanSpec
+    start: StartRun
     print: (line: string) => void
     printError: (line: string) => void
 }
 
 /**
- * The boundary between an accepted invocation and the use case that serves it. It calls one
- * service, turns what came back into lines and an exit code, and holds no rule about a run.
+ * The boundary between an accepted invocation and the use case that serves it. It calls one service,
+ * turns what came back into lines and an exit code, and holds no rule about a run.
  *
- * Confirming and implementing are the tickets after this one: a mode that cannot run yet halts,
- * because exiting `0` over work that did not happen is the failure mode this whole rewrite exists
- * to remove.
+ * Implementing is the ticket after this one: a run that is prepared and cannot yet be implemented
+ * halts, because exiting `0` over work that did not happen is the failure mode this whole rewrite
+ * exists to remove.
  */
 export const createRun =
-    ({ plan, print, printError }: RunDeps) =>
+    ({ start, print, printError }: RunDeps) =>
     async (invocation: Invocation): Promise<ExitCode> => {
-        if (invocation.mode !== "plan-only") {
-            printError(`afk: ${invocation.mode} is not implemented yet`)
-            return EXIT.halted
-        }
+        const started = await start({
+            spec: invocation.spec,
+            mode: invocation.mode,
+            consented: invocation.consented,
+        })
 
-        const planned = await plan(invocation.spec)
-        if (!planned.ok) {
-            printError(`afk: ${planned.reason}`)
-            return EXIT.halted
-        }
+        switch (started.outcome) {
+            case "refused":
+                printError(`afk: ${started.reason}`)
+                return EXIT.halted
 
-        for (const line of planOutput(planned.manifest, invocation.maxParallel)) {
-            print(line)
+            case "aborted":
+                printError("afk: the confirmation was closed, so nothing was started")
+                return EXIT.halted
+
+            case "planned":
+                for (const line of planOutput(started.manifest, invocation.maxParallel)) {
+                    print(line)
+                }
+                return EXIT.complete
+
+            case "prepared":
+                for (const line of preparedOutput(started.run)) {
+                    print(line)
+                }
+                printError("afk: implementing is not implemented yet")
+                return EXIT.halted
         }
-        return EXIT.complete
     }

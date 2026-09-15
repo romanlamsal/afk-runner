@@ -4,8 +4,12 @@ import { EXIT } from "../../src/cli/exit-codes.ts"
 import { createRun } from "../../src/cli/run.ts"
 import type { Manifest } from "../../src/domain/manifest.ts"
 import { createPlanService } from "../../src/service/plan.ts"
+import { createStartService } from "../../src/service/start.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
+import { createFakeGit } from "../fakes/git.ts"
 import { createFakeManifestStore } from "../fakes/manifest-store.ts"
+import { createFakeOperator } from "../fakes/operator.ts"
+import { createFakeRunRecords } from "../fakes/run-records.ts"
 
 /**
  * The second of the spec's three seams: the assembled run, driven through fake ports from the
@@ -28,19 +32,29 @@ const MANIFEST: Manifest = {
 const harness = (reply: { structuredOutput: unknown } = { structuredOutput: MANIFEST }) => {
     const agent = createFakeAgent(reply)
     const manifests = createFakeManifestStore()
+    const git = createFakeGit()
+    const operator = createFakeOperator()
+    const records = createFakeRunRecords()
     const printed: string[] = []
     const errors: string[] = []
-    const plan = createPlanService({
-        agent: agent.run,
+    const start = createStartService({
+        cwd: "/repo",
+        git: git.git,
         manifests: manifests.store,
-        now: () => new Date("2026-09-15T11:18:38.314Z"),
+        operator: operator.operator,
+        plan: createPlanService({
+            agent: agent.run,
+            manifests: manifests.store,
+            now: () => new Date("2026-09-15T11:18:38.314Z"),
+        }),
+        records: records.records,
     })
     const cli = createCli({
         isInteractive: () => true,
         printError: line => errors.push(line),
-        run: createRun({ plan, print: line => printed.push(line), printError: line => errors.push(line) }),
+        run: createRun({ start, print: line => printed.push(line), printError: line => errors.push(line) }),
     })
-    return { cli, agent, manifests, printed, errors }
+    return { cli, agent, git, manifests, operator, printed, errors }
 }
 
 describe("afk <spec> --plan-only", () => {
@@ -52,7 +66,7 @@ describe("afk <spec> --plan-only", () => {
         await cli(["4", "--plan-only"])
 
         // then
-        expect(manifests.written).toEqual([{ spec: 4, manifest: MANIFEST }])
+        expect(manifests.written).toEqual([{ root: "/repo", spec: 4, manifest: MANIFEST }])
     })
 
     it("should print the execution order", async () => {

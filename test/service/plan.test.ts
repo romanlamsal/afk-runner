@@ -17,6 +17,8 @@ const MANIFEST: Manifest = {
 
 const AT = new Date("2026-09-15T11:18:38.314Z")
 
+const ROOT = "/repo"
+
 type Harness = { plan: PlanSpec; agent: FakeAgent; manifests: FakeManifestStore }
 
 const harness = (reply: Partial<AgentResult> = { structuredOutput: MANIFEST }): Harness => {
@@ -35,7 +37,7 @@ describe("createPlanService", () => {
         const { plan } = harness()
 
         // when
-        const result = await plan(4)
+        const result = await plan(ROOT, 4)
 
         // then
         expect(result).toEqual({ ok: true, manifest: MANIFEST })
@@ -46,10 +48,10 @@ describe("createPlanService", () => {
         const { plan, manifests } = harness()
 
         // when
-        await plan(4)
+        await plan(ROOT, 4)
 
         // then
-        expect(manifests.written).toEqual([{ spec: 4, manifest: MANIFEST }])
+        expect(manifests.written).toEqual([{ root: ROOT, spec: 4, manifest: MANIFEST }])
     })
 
     it("should hand the planner the manifest schema, generated at runtime", async () => {
@@ -57,10 +59,21 @@ describe("createPlanService", () => {
         const { plan, agent } = harness()
 
         // when
-        await plan(4)
+        await plan(ROOT, 4)
 
         // then
         expect(agent.invocations[0]?.outputSchema).toEqual(manifestJsonSchema())
+    })
+
+    it("should run the planner in the target repository", async () => {
+        // given
+        const { plan, agent } = harness()
+
+        // when
+        await plan(ROOT, 4)
+
+        // then
+        expect(agent.invocations[0]?.root).toBe(ROOT)
     })
 
     it("should give the attempt its own transcript", async () => {
@@ -68,7 +81,7 @@ describe("createPlanService", () => {
         const { plan, agent } = harness()
 
         // when
-        await plan(4)
+        await plan(ROOT, 4)
 
         // then
         expect(agent.invocations[0]?.transcriptPath).toBe(".afk/4/transcripts/20260915T111838314Z-planner.jsonl")
@@ -79,7 +92,7 @@ describe("createPlanService", () => {
         const { plan, agent } = harness()
 
         // when
-        await plan(4)
+        await plan(ROOT, 4)
 
         // then
         expect(agent.invocations[0]?.resumeSessionId).toBeUndefined()
@@ -90,7 +103,7 @@ describe("createPlanService", () => {
         const { plan } = harness({ outcome: "failed", detail: "timed out after 60m" })
 
         // when
-        const result = await plan(4)
+        const result = await plan(ROOT, 4)
 
         // then
         expect(result).toEqual({ ok: false, reason: expect.stringContaining("timed out after 60m") })
@@ -101,7 +114,7 @@ describe("createPlanService", () => {
         const { plan } = harness({ structuredOutput: { spec: 4 } })
 
         // when
-        const result = await plan(4)
+        const result = await plan(ROOT, 4)
 
         // then
         expect(result).toEqual({ ok: false, reason: expect.stringContaining("manifest") })
@@ -112,7 +125,7 @@ describe("createPlanService", () => {
         const { plan, manifests } = harness({ structuredOutput: { spec: 4 } })
 
         // when
-        await plan(4)
+        await plan(ROOT, 4)
 
         // then
         expect(manifests.written).toEqual([])

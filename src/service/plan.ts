@@ -4,8 +4,8 @@ import { type Manifest, type ManifestStore, manifestJsonSchema, readPlannedManif
 import { transcriptPath } from "../domain/paths.ts"
 import { plannerPrompt } from "../domain/prompts.ts"
 
-/** The driving port: plan a spec, leaving a manifest behind. */
-export type PlanSpec = (spec: number) => Promise<PlanResult>
+/** The driving port: plan a spec in the target repository, leaving a manifest behind. */
+export type PlanSpec = (root: string, spec: number) => Promise<PlanResult>
 
 export type PlanResult = { ok: true; manifest: Manifest } | { ok: false; reason: string }
 
@@ -23,9 +23,10 @@ export type PlanDeps = {
  */
 export const createPlanService =
     ({ agent, manifests, now }: PlanDeps): PlanSpec =>
-    async spec => {
+    async (root, spec) => {
         const attempt = await agent({
             prompt: plannerPrompt(spec),
+            root,
             cwd: ".",
             transcriptPath: transcriptPath(spec, "planner", now()),
             resumeSessionId: undefined,
@@ -41,6 +42,6 @@ export const createPlanService =
             return { ok: false, reason: read.reason }
         }
 
-        await manifests.write(spec, read.manifest)
+        await manifests.write(root, spec, read.manifest)
         return { ok: true, manifest: read.manifest }
     }

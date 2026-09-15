@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { manifestPath, runDirectory, transcriptPath } from "../../src/domain/paths.ts"
+import {
+    eventLogPath,
+    gateWorktree,
+    manifestPath,
+    runDirectory,
+    runIgnorePath,
+    transcriptPath,
+} from "../../src/domain/paths.ts"
 
 describe("runDirectory", () => {
     it("should keep every spec's run in its own directory", () => {
@@ -24,6 +31,45 @@ describe("manifestPath", () => {
 
         // then
         expect(path).toBe(".afk/4/manifest.json")
+    })
+})
+
+describe("eventLogPath", () => {
+    it("should put the event log in the spec's run directory", () => {
+        // given
+        const spec = 4
+
+        // when
+        const path = eventLogPath(spec)
+
+        // then
+        expect(path).toBe(".afk/4/events.jsonl")
+    })
+})
+
+describe("runIgnorePath", () => {
+    it("should put the ignore file inside the directory it ignores", () => {
+        // given
+        const spec = 4
+
+        // when
+        const path = runIgnorePath(spec)
+
+        // then
+        expect(path).toBe(".afk/4/.gitignore")
+    })
+})
+
+describe("gateWorktree", () => {
+    it("should put the gate worktree in the spec's run directory", () => {
+        // given
+        const spec = 4
+
+        // when
+        const path = gateWorktree(spec)
+
+        // then
+        expect(path).toBe(".afk/4/gate")
     })
 })
 

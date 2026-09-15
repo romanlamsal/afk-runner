@@ -12,6 +12,15 @@ export const runDirectory = (spec: number): string => `${AFK_DIR}/${spec}`
 
 export const manifestPath = (spec: number): string => `${runDirectory(spec)}/manifest.json`
 
+/** The append-only record of every lifecycle event. Its presence is what makes a run an existing one. */
+export const eventLogPath = (spec: number): string => `${runDirectory(spec)}/events.jsonl`
+
+/** The run directory's own ignore file. It ignores everything beside it, itself included (ADR-0013). */
+export const runIgnorePath = (spec: number): string => `${runDirectory(spec)}/.gitignore`
+
+/** The one long-lived worktree holding the spec branch, and its sole writer (ADR-0006). */
+export const gateWorktree = (spec: number): string => `${runDirectory(spec)}/gate`
+
 /**
  * `20260915T111838314Z` — sorts chronologically as a string, and carries no character a path
  * dislikes. It keeps its milliseconds: two attempts starting in the same second must not land in

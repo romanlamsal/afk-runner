@@ -5,11 +5,7 @@ import { describe, expect, it } from "vitest"
 import type { Manifest } from "../../src/domain/manifest.ts"
 import { createFileManifestStore } from "../../src/repository/manifest-store.ts"
 
-/**
- * The real half of the manifest store, against a real directory. The port has one method today, so
- * there is nothing a two-run contract suite would assert that reading the file back does not: the
- * suite arrives with the read side, when something needs one.
- */
+/** The real half of the manifest store, against a real directory. */
 const MANIFEST: Manifest = {
     spec: 4,
     setup: "npm ci",
@@ -17,9 +13,13 @@ const MANIFEST: Manifest = {
     tickets: [{ number: 5, title: "Plan a spec", blockedBy: [] }],
 }
 
+const store = createFileManifestStore()
+
+const repository = (): Promise<string> => mkdtemp(join(tmpdir(), "afk-manifest-"))
+
 const written = async (): Promise<string> => {
-    const root = await mkdtemp(join(tmpdir(), "afk-manifest-"))
-    await createFileManifestStore({ root }).write(4, MANIFEST)
+    const root = await repository()
+    await store.write(root, 4, MANIFEST)
     return readFile(join(root, ".afk/4/manifest.json"), "utf8")
 }
 
@@ -42,5 +42,40 @@ describe("createFileManifestStore", () => {
 
         // then
         expect(contents.endsWith("}\n")).toBe(true)
+    })
+
+    it("should read back the manifest it wrote", async () => {
+        // given
+        const root = await repository()
+        await store.write(root, 4, MANIFEST)
+
+        // when
+        const read = await store.read(root, 4)
+
+        // then
+        expect(read).toEqual({ ok: true, manifest: MANIFEST })
+    })
+
+    it("should read nothing for a spec that has no manifest", async () => {
+        // given
+        const root = await repository()
+
+        // when
+        const read = await store.read(root, 4)
+
+        // then
+        expect(read).toBeUndefined()
+    })
+
+    it("should refuse a manifest that names another spec than the directory it sits in", async () => {
+        // given
+        const root = await repository()
+        await store.write(root, 9, MANIFEST)
+
+        // when
+        const read = await store.read(root, 9)
+
+        // then
+        expect(read).toEqual({ ok: false, reason: expect.stringContaining("is for spec #4, not #9") })
     })
 })

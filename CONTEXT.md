@@ -25,6 +25,11 @@ _Avoid_: frontier, ready queue, wave, batch
 
 ## Git
 
+**Trunk**:
+The local branch a spec branch is cut from — what `origin/HEAD` names, else `main`, else `master`.
+afk reads it, compares it against its remote, and never moves it (ADR-0018).
+_Avoid_: default branch, base branch, main, master
+
 **Spec branch**:
 `afk/<spec>/spec` — the single branch every ticket lands on, and the only branch a run writes to.
 _Avoid_: integration branch, layer branch, base branch

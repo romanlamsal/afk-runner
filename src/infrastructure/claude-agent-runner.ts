@@ -41,22 +41,16 @@ const commandLine = (invocation: AgentInvocation): string[] => [
 
 const minutes = (elapsedMs: number): string => `${Math.round(elapsedMs / 60_000)}m`
 
-export const createClaudeAgentRunner = ({
-    root,
-    timeoutMs = AGENT_TIMEOUT_MS,
-}: {
-    root: string
-    timeoutMs?: number
-}): AgentRunner => {
+export const createClaudeAgentRunner = ({ timeoutMs = AGENT_TIMEOUT_MS }: { timeoutMs?: number } = {}): AgentRunner => {
     return async invocation => {
-        const transcript = join(root, invocation.transcriptPath)
+        const transcript = join(invocation.root, invocation.transcriptPath)
         await mkdir(dirname(transcript), { recursive: true })
         const sink = createWriteStream(transcript, { flags: "a" })
         const reader = createStreamReader()
         const startedAt = Date.now()
 
         const result = await new Promise<AgentResult>(resolve => {
-            const child = spawn("claude", commandLine(invocation), { cwd: join(root, invocation.cwd) })
+            const child = spawn("claude", commandLine(invocation), { cwd: join(invocation.root, invocation.cwd) })
 
             const settle = (outcome: AgentResult["outcome"], detail: string): void => {
                 const { sessionId, structuredOutput } = reader.reading()

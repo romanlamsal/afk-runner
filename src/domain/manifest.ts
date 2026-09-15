@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { manifestPath } from "./paths.ts"
 import { deadlocked } from "./schedule.ts"
 
 /**
@@ -36,7 +37,9 @@ export type ManifestRead = { ok: true; manifest: Manifest } | { ok: false; reaso
 
 /** Where afk keeps the manifest. A driven port: the domain says what it needs, never how. */
 export type ManifestStore = {
-    write: (spec: number, manifest: Manifest) => Promise<void>
+    /** What this spec's manifest is, or undefined when it has none. */
+    read: (root: string, spec: number) => Promise<ManifestRead | undefined>
+    write: (root: string, spec: number, manifest: Manifest) => Promise<void>
 }
 
 /**
@@ -56,30 +59,40 @@ const duplicate = (tickets: readonly Ticket[]): Ticket | undefined =>
 
 /**
  * Everything afk knows about a manifest being usable, in one pass: the shape, that it answers the
- * question that was asked, and that it is a schedule rather than a knot. A planner is an agent, so
- * its output is read as a claim and never as a fact (ADR-0003).
+ * question that was asked, and that it is a schedule rather than a knot.
  */
-export const readPlannedManifest = (raw: unknown, spec: number): ManifestRead => {
+const readManifest = (raw: unknown, spec: number, source: string): ManifestRead => {
     const parsed = manifestSchema.safeParse(raw)
     if (!parsed.success) {
-        return refuse(`the planner's manifest does not match the schema: ${z.prettifyError(parsed.error)}`)
+        return refuse(`${source} does not match the schema: ${z.prettifyError(parsed.error)}`)
     }
 
     const manifest = parsed.data
     if (manifest.spec !== spec) {
-        return refuse(`the planner's manifest is for spec #${manifest.spec}, not #${spec}`)
+        return refuse(`${source} is for spec #${manifest.spec}, not #${spec}`)
     }
 
     const twice = duplicate(manifest.tickets)
     if (twice !== undefined) {
-        return refuse(`the planner's manifest lists ticket #${twice.number} twice`)
+        return refuse(`${source} lists ticket #${twice.number} twice`)
     }
 
     const stuck = deadlocked(manifest.tickets)
     if (stuck.length > 0) {
         const named = stuck.map(ticket => `#${ticket.number}`).join(", ")
-        return refuse(`the planner's manifest has tickets blocked by each other, so none of them can start: ${named}`)
+        return refuse(`${source} has tickets blocked by each other, so none of them can start: ${named}`)
     }
 
     return { ok: true, manifest }
 }
+
+/** A planner is an agent, so its output is read as a claim and never as a fact (ADR-0003). */
+export const readPlannedManifest = (raw: unknown, spec: number): ManifestRead =>
+    readManifest(raw, spec, "the planner's manifest")
+
+/**
+ * A manifest afk wrote itself is read back through the same rules: it was edited by hand, or written
+ * by a version of afk that is no longer this one, as readily as not.
+ */
+export const readStoredManifest = (raw: unknown, spec: number): ManifestRead =>
+    readManifest(raw, spec, `the manifest in ${manifestPath(spec)}`)
