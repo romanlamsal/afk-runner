@@ -9,7 +9,10 @@ export const EXIT = {
     partial: 1,
     /** A refused invocation: a bad flag combination, or no terminal without an explicit mode. */
     misuse: 2,
-    /** The run stopped itself: a red spec branch independent of any ticket, or a tracker failure. */
+    /**
+     * The run stopped itself: a planner that produced no usable manifest, a red spec branch
+     * independent of any ticket, or a tracker failure.
+     */
     halted: 3,
     /** A second interrupt killed the run outright. */
     interrupted: 130,

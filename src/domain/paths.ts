@@ -1,0 +1,27 @@
+/**
+ * Everything afk writes lives under one directory inside the target repository, and every path to
+ * it is derived here — relative to the repository root, so that the rules stay pure and the
+ * adapters own the only absolute path there is.
+ */
+
+/** Machine-local, and nothing in it is expected to exist on another machine (ADR-0013). */
+const AFK_DIR = ".afk"
+
+/** The run directory: one spec's manifest, event log, worktrees and transcripts. */
+export const runDirectory = (spec: number): string => `${AFK_DIR}/${spec}`
+
+export const manifestPath = (spec: number): string => `${runDirectory(spec)}/manifest.json`
+
+/**
+ * `20260915T111838314Z` — sorts chronologically as a string, and carries no character a path
+ * dislikes. It keeps its milliseconds: two attempts starting in the same second must not land in
+ * one file.
+ */
+const stamp = (at: Date): string => at.toISOString().replace(/[-:.]/g, "")
+
+/**
+ * One transcript per attempt, named for when it started and what it was doing. Chronological by
+ * name so that reading a run means listing a directory.
+ */
+export const transcriptPath = (spec: number, label: string, at: Date): string =>
+    `${runDirectory(spec)}/transcripts/${stamp(at)}-${label}.jsonl`

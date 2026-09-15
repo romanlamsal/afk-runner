@@ -22,7 +22,8 @@
     "check": "run-s typecheck lint test"
   },
   "dependencies": {
-    "cleye": "^2.6.0"
+    "cleye": "^2.6.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.13",
