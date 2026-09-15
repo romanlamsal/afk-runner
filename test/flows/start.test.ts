@@ -10,6 +10,7 @@ import { createStartService } from "../../src/service/start.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
 import { createStubDrive } from "../fakes/drive.ts"
 import { createFakeEnvironment } from "../fakes/environment.ts"
+import { createStubFinish } from "../fakes/finish.ts"
 import { createFakeGit } from "../fakes/git.ts"
 import { createFakeManifestStore } from "../fakes/manifest-store.ts"
 import { createFakeOperator } from "../fakes/operator.ts"
@@ -40,6 +41,7 @@ const harness = ({ trunk, answer }: { trunk?: TrunkState; answer?: Commands } = 
         printError: line => errors.push(line),
         run: createRun({
             drive: createStubDrive(),
+            finish: createStubFinish(),
             start: createStartService({
                 cwd: "/repo",
                 environment: environment.copy,

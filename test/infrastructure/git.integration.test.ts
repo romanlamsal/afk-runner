@@ -409,3 +409,72 @@ describe("createGit().revert", () => {
         expect(await git.isClean(root, ".afk/4/gate")).toBe(true)
     })
 })
+
+/** A clone with a spec branch carrying one commit, which is what the end of a run pushes. */
+const toPush = async (): Promise<{ root: string; landed: string }> => {
+    const { root } = await cloned()
+    await git.checkoutWorktree(root, { path: ".afk/4/gate", branch: "afk/4/spec", startPoint: "main" })
+    const gate = join(root, ".afk/4/gate")
+
+    await commit(gate, "the-ticket")
+    return { root, landed: await sh(gate, "rev-parse", "HEAD") }
+}
+
+describe("createGit().push", () => {
+    it("should put the spec branch on the remote, which is what the pull request is opened from", async () => {
+        // given
+        const { root, landed } = await toPush()
+
+        // when
+        await git.push(root, "afk/4/spec")
+
+        // then
+        expect(await sh(root, "ls-remote", "origin", "refs/heads/afk/4/spec")).toContain(landed)
+    })
+
+    it("should set the branch's upstream, so that pushing it again needs no arguments", async () => {
+        // given
+        const { root } = await toPush()
+
+        // when
+        await git.push(root, "afk/4/spec")
+
+        // then
+        expect(await sh(root, "rev-parse", "--abbrev-ref", "afk/4/spec@{upstream}")).toBe("origin/afk/4/spec")
+    })
+
+    it("should leave trunk where it was: a push moves nothing the operator can see", async () => {
+        // given
+        const { root } = await toPush()
+        const before = await sh(root, "rev-parse", "main")
+
+        // when
+        await git.push(root, "afk/4/spec")
+
+        // then
+        expect(await sh(root, "rev-parse", "main")).toBe(before)
+    })
+
+    it("should report a push there is no remote for, rather than reporting success over it", async () => {
+        // given — a repository with no origin at all
+        const root = await repository()
+        await git.checkoutWorktree(root, { path: ".afk/4/gate", branch: "afk/4/spec", startPoint: "main" })
+
+        // when
+        const pushed = await git.push(root, "afk/4/spec")
+
+        // then
+        expect(pushed.ok).toBe(false)
+    })
+
+    it("should say what git said when it refused", async () => {
+        // given
+        const root = await repository()
+
+        // when
+        const pushed = await git.push(root, "afk/4/spec")
+
+        // then
+        expect(pushed).toEqual({ ok: false, reason: expect.stringContaining("origin") })
+    })
+})

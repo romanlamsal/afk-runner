@@ -26,6 +26,9 @@ const tail = (text: string): string => text.slice(-TAIL)
 /** How long a timed-out invocation was given, as an event's `detail` should say it. */
 export const minutes = (elapsedMs: number): string => `${Math.round(elapsedMs / 60_000)}m`
 
+/** What the program said went wrong, preferring what it said on stderr. */
+export const complaint = (ran: Ran): string => (ran.stderr === "" ? ran.stdout : ran.stderr)
+
 export const run = (
     command: string,
     args: readonly string[],

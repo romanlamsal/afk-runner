@@ -11,7 +11,8 @@ export const EXIT = {
     misuse: 2,
     /**
      * The run stopped itself: a planner that produced no usable manifest, a red spec branch
-     * independent of any ticket, or a tracker failure.
+     * independent of any ticket, a tracker failure, or a run that ended with no pull request —
+     * because nothing was verified, or because the push or the create failed.
      */
     halted: 3,
     /** A second interrupt killed the run outright. */

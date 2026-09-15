@@ -55,7 +55,15 @@ _Avoid_: rollback marker, undo tag
 
 **Spec PR**:
 The one pull request a run opens — spec branch into the repository's default branch, squash-merged.
+Opening it is the last thing a run does, and merging it is the operator's (ADR-0007).
 _Avoid_: layer PR, ticket PR, stack
+
+**The push**:
+Publishing the spec branch to its remote, once, immediately before the spec PR is opened. It is what
+makes the pull request possible, and it is the only write besides the tracker's two that leaves the
+machine — ADR-0013 counts writes to the *tracker*, and this is not one. It moves no branch and no
+working tree; the upstream it records for the spec branch is the only local mark it leaves.
+_Avoid_: publish, upload, sync
 
 ## Commands
 

@@ -1,5 +1,6 @@
-import type { Tracker } from "../domain/tracker.ts"
-import { run } from "./process.ts"
+import { INVOCATION_TIMEOUT_MS } from "../domain/timeout.ts"
+import type { OpenResult, Tracker } from "../domain/tracker.ts"
+import { complaint, type Ran, run } from "./process.ts"
 
 /**
  * The tracker port, against the GitHub CLI. It is assumed to be installed and authenticated: that is
@@ -7,14 +8,51 @@ import { run } from "./process.ts"
  * guesses produces refusals that are wrong as often as they are right.
  *
  * The claim is one of the two writes a whole run makes (ADR-0013), and it is a collision guard
- * rather than bookkeeping — which is why a failed one halts the run instead of being logged.
+ * rather than bookkeeping — which is why a failed one halts the run instead of being logged. The
+ * pull request is the other, and it is the last thing the run does.
  */
+
+/**
+ * Where gh says the pull request is. The url is the last thing it prints, but it prints notices on
+ * the same stream, so the line is recognised rather than counted to: a run that printed a notice
+ * where the operator expects a link would be worse than one that printed no link at all.
+ */
+const printedUrl = (ran: Ran): string | undefined =>
+    ran.stdout
+        .split("\n")
+        .map(line => line.trim())
+        .findLast(line => line.startsWith("http"))
+
 export const createGitHubTracker = (): Tracker => ({
     claim: async (root, ticket) => {
         const edited = await run("gh", ["issue", "edit", String(ticket), "--add-assignee", "@me"], { cwd: root })
-        if (edited.ok) {
-            return { ok: true }
-        }
-        return { ok: false, reason: edited.stderr === "" ? edited.stdout : edited.stderr }
+        return edited.ok ? { ok: true } : { ok: false, reason: complaint(edited) }
+    },
+
+    openPullRequest: async (root, { head, base, title, body, draft }): Promise<OpenResult> => {
+        // The base is named rather than left to gh to guess, so that the pull request is opened
+        // against the very branch the spec branch was cut from. Trunk is what `origin/HEAD` names,
+        // which is the repository's default branch (ADR-0018).
+        const created = await run(
+            "gh",
+            [
+                "pr",
+                "create",
+                "--head",
+                head,
+                "--base",
+                base,
+                "--title",
+                title,
+                "--body",
+                body,
+                ...(draft ? ["--draft"] : []),
+            ],
+            // The one timeout every external invocation gets. This one reaches the network at the
+            // end of an unattended run, where a wedged process is a run that never reports (ADR-0021).
+            { cwd: root, timeoutMs: INVOCATION_TIMEOUT_MS },
+        )
+
+        return created.ok ? { ok: true, url: printedUrl(created) } : { ok: false, reason: complaint(created) }
     },
 })

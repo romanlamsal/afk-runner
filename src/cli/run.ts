@@ -1,14 +1,17 @@
 import type { DriveRun } from "../service/drive.ts"
+import type { FinishRun } from "../service/finish.ts"
 import type { StartRun } from "../service/start.ts"
 import { EXIT, type ExitCode } from "./exit-codes.ts"
 import type { Invocation } from "./invocation.ts"
 import { planOutput } from "./plan-output.ts"
 import { preparedOutput } from "./prepared-output.ts"
 import { progressOutput } from "./progress-output.ts"
+import { pullRequestOutput } from "./pull-request-output.ts"
 
 export type RunDeps = {
     start: StartRun
     drive: DriveRun
+    finish: FinishRun
     print: (line: string) => void
     printError: (line: string) => void
 }
@@ -17,12 +20,13 @@ export type RunDeps = {
  * The boundary between an accepted invocation and the use cases that serve it. It calls a service,
  * turns what came back into lines and an exit code, and holds no rule about a run.
  *
- * The spec pull request is the ticket after this one: a run whose tickets landed and were verified
- * still halts, because exiting `0` over a pull request that was never opened is the failure mode
- * this whole rewrite exists to remove.
+ * A draft pull request is what a partial run comes to, and the exit code says the same thing in a
+ * number: `0` is a ready pull request over a whole spec, `1` is a draft over part of one, and
+ * anything else opened nothing. Success is never printed over a failure that happened, which is the
+ * failure mode this whole rewrite exists to remove.
  */
 export const createRun =
-    ({ start, drive, print, printError }: RunDeps) =>
+    ({ start, drive, finish, print, printError }: RunDeps) =>
     async (invocation: Invocation): Promise<ExitCode> => {
         const started = await start({
             spec: invocation.spec,
@@ -55,13 +59,24 @@ export const createRun =
                     print(line)
                 }
 
+                // A halted run opens nothing. It stopped itself because something is wrong with the
+                // branch or the run rather than with a ticket, and a pull request over that is a
+                // review of a question afk already knows the answer to.
                 if (driven.outcome === "halted") {
                     printError(`afk: ${driven.reason}`)
                     return EXIT.halted
                 }
 
-                printError("afk: opening the spec pull request is not implemented yet")
-                return EXIT.halted
+                const finished = await finish(started.run, driven.progress)
+                if (finished.outcome === "failed") {
+                    printError(`afk: ${finished.reason}`)
+                    return EXIT.halted
+                }
+
+                for (const line of pullRequestOutput(finished)) {
+                    print(line)
+                }
+                return finished.draft ? EXIT.partial : EXIT.complete
             }
         }
     }

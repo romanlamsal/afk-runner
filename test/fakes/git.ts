@@ -33,6 +33,8 @@ export type FakeGit = {
     collide: (branch: string) => void
     /** Make the worktree at `path` dirty, as an agent that left work uncommitted does. */
     soil: (path: string) => void
+    /** Every branch pushed, in the order it was pushed. */
+    pushed: string[]
 }
 
 export const TRUNK: TrunkState = { branch: "main", ahead: 0, behind: 0, compared: true, dirty: false }
@@ -43,6 +45,8 @@ export type FakeRepository = {
     checkout?: GitResult
     /** What a revert comes to, for a repository where git refuses one. */
     revert?: GitResult
+    /** What a push comes to, for a repository whose remote refuses one. */
+    push?: GitResult
     /** Branch name to the commits on it, oldest first. The last one is the tip. */
     branches?: Record<string, readonly string[]>
     /** Commit to what it says, for the commits whose message a scenario cares about. */
@@ -59,6 +63,7 @@ export const createFakeGit = (repository: FakeRepository = {}): FakeGit => {
     const worktrees: WorktreeRequest[] = []
     const rebases: RebaseRequest[] = []
     const removed: string[] = []
+    const pushed: string[] = []
     /** Commit to what it says. A commit nobody gave words to says its own name. */
     const messages = new Map<string, string>(Object.entries(repository.messages ?? {}))
     const branches = new Map<string, string[]>(
@@ -106,6 +111,7 @@ export const createFakeGit = (repository: FakeRepository = {}): FakeGit => {
         worktrees,
         rebases,
         removed,
+        pushed,
         commit: (branch, sha, message) => {
             branches.set(branch, [...(branches.get(branch) ?? []), sha])
             messages.set(sha, message ?? sha)
@@ -221,6 +227,16 @@ export const createFakeGit = (repository: FakeRepository = {}): FakeGit => {
             abortRebase: async (_root, path) => {
                 stopped.delete(path)
                 return { ok: true }
+            },
+
+            // A push leaves the repository exactly as it was: there is no local ref for it to move,
+            // which is the whole of what the port promises about it.
+            push: async (_root, branch) => {
+                pushed.push(branch)
+                if (repository.push !== undefined && !repository.push.ok) {
+                    return repository.push
+                }
+                return branches.has(branch) ? { ok: true } : { ok: false, reason: `src refspec ${branch} matches no` }
             },
         },
     }

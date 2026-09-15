@@ -8,6 +8,7 @@ import type { Git } from "../../src/domain/git.ts"
 import type { Ticket } from "../../src/domain/manifest.ts"
 import { mergedTickets } from "../../src/domain/squash.ts"
 import { createDriveService } from "../../src/service/drive.ts"
+import { createFinishService } from "../../src/service/finish.ts"
 import { createFixService } from "../../src/service/fix.ts"
 import { createGateService, createProveBranch } from "../../src/service/gate.ts"
 import { createImplementService } from "../../src/service/implement.ts"
@@ -87,6 +88,7 @@ const harness = ({
     const attempted = new Map<number, number>()
     const resolver = createFakeAgent()
     const fixer = createFakeAgent()
+    const writer = createFakeAgent({ structuredOutput: { title: "Layerless afk", summary: "One branch." } })
     const commands = createFakeCommands(failing)
     const environment = createFakeEnvironment()
     const events = createFakeEventLog(log)
@@ -207,6 +209,7 @@ const harness = ({
                 prepare: createPrepareService({ agent: preparer.run, events: events.log, git: git.git, now }),
                 now,
             }),
+            finish: createFinishService({ agent: writer.run, git: git.git, now, tracker: tracker.tracker }),
             print: line => printed.push(line),
             printError: line => errors.push(line),
         }),
@@ -222,6 +225,7 @@ const harness = ({
         merging,
         preparer,
         resolver,
+        writer,
         printed,
         errors,
         tracker,
@@ -877,5 +881,124 @@ describe("a run that recovers a wrecked ticket", () => {
 
         // then
         expect(settled(events.appended)).toEqual(["#10 implement failed", "#10 prepare failed"])
+    })
+})
+
+describe("a run that ends in a pull request", () => {
+    /** A ticket nothing rescues: its implementer commits nothing and its prepare pass gets nowhere. */
+    const wrecked = { idle: [11], preparing: false } as const
+
+    it("should push the spec branch before anything is opened against it", async () => {
+        // given
+        const { run, git } = harness({ tickets: [ticket(10)] })
+
+        // when
+        await run()
+
+        // then
+        expect(git.pushed).toEqual(["afk/4/spec"])
+    })
+
+    it("should open one pull request, from the spec branch onto the trunk it was cut from", async () => {
+        // given
+        const { run, tracker } = harness({ tickets: [ticket(10)] })
+
+        // when
+        await run()
+
+        // then
+        expect(tracker.opened).toEqual([
+            expect.objectContaining({ head: "afk/4/spec", base: "main", draft: false, title: "Layerless afk" }),
+        ])
+    })
+
+    it("should close every verified ticket, by a fact rather than by an agent's recollection", async () => {
+        // given
+        const { run, tracker } = harness({ tickets: [ticket(10), ticket(12)] })
+
+        // when
+        await run()
+
+        // then
+        expect(tracker.opened.at(0)?.body.endsWith("Closes #10\nCloses #12")).toBe(true)
+    })
+
+    it("should exit 0 once the whole spec is verified and its pull request is open", async () => {
+        // given
+        const { run } = harness({ tickets: [ticket(10)] })
+
+        // when
+        const code = await run()
+
+        // then
+        expect(code).toBe(EXIT.complete)
+    })
+
+    it("should open a draft for a run that did not land every ticket", async () => {
+        // given
+        const { run, tracker } = harness({ tickets: [ticket(10), ticket(11)], ...wrecked })
+
+        // when
+        await run()
+
+        // then
+        expect(tracker.opened.at(0)?.draft).toBe(true)
+    })
+
+    it("should name the ticket that failed in the draft's body", async () => {
+        // given
+        const { run, tracker } = harness({ tickets: [ticket(10), ticket(11)], ...wrecked })
+
+        // when
+        await run()
+
+        // then
+        expect(tracker.opened.at(0)?.body).toContain("- failed: #11")
+    })
+
+    it("should exit 1 for a partial run, so that one line says it is not the whole spec", async () => {
+        // given
+        const { run } = harness({ tickets: [ticket(10), ticket(11)], ...wrecked })
+
+        // when
+        const code = await run()
+
+        // then
+        expect(code).toBe(EXIT.partial)
+    })
+
+    it("should open nothing at all when the gate proved nothing", async () => {
+        // given
+        const { run, tracker } = harness({ tickets: [ticket(11)], ...wrecked })
+
+        // when
+        await run()
+
+        // then
+        expect(tracker.opened).toEqual([])
+    })
+
+    it("should say what became of the tickets instead of opening an empty change", async () => {
+        // given
+        const { run, errors } = harness({ tickets: [ticket(11)], ...wrecked })
+
+        // when
+        await run()
+
+        // then
+        expect(errors).toContain(
+            "afk: no ticket of spec #4 was verified, so there is no pull request to open: failed: #11",
+        )
+    })
+
+    it("should exit non-zero when the gate proved nothing", async () => {
+        // given
+        const { run } = harness({ tickets: [ticket(11)], ...wrecked })
+
+        // when
+        const code = await run()
+
+        // then
+        expect(code).toBe(EXIT.halted)
     })
 })

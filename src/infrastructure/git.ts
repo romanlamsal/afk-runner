@@ -1,7 +1,8 @@
 import { access, rm } from "node:fs/promises"
 import { isAbsolute, join, resolve } from "node:path"
 import type { Git, GitResult, RebaseResult, TrunkState } from "../domain/git.ts"
-import { type Ran, run } from "./process.ts"
+import { INVOCATION_TIMEOUT_MS } from "../domain/timeout.ts"
+import { complaint, type Ran, run } from "./process.ts"
 
 /**
  * The git port, against the git binary.
@@ -45,9 +46,6 @@ const trunkBranch = async (root: string): Promise<string | undefined> => {
 
     return undefined
 }
-
-/** What git said went wrong, preferring what it said on stderr. */
-const complaint = (ran: Ran): string => (ran.stderr === "" ? ran.stdout : ran.stderr)
 
 const there = async (path: string): Promise<boolean> => {
     try {
@@ -241,5 +239,20 @@ export const createGit = (): Git => ({
 
         const aborted = await git(cwd, "rebase", "--abort")
         return aborted.ok ? { ok: true } : { ok: false, reason: complaint(aborted) }
+    },
+
+    // `--set-upstream` so that a second push of the same branch — a resumed run's, or the
+    // operator's own afterwards — needs no arguments. Never `--force`: the spec branch is
+    // append-only, and a push git refuses is a fact worth reporting rather than overriding.
+    //
+    // It is given the one timeout every external invocation gets, because it is the one git call
+    // that reaches the network and can sit on a credential prompt nobody is there to answer
+    // (ADR-0021).
+    push: async (root, branch): Promise<GitResult> => {
+        const pushed = await run("git", ["push", "--set-upstream", REMOTE, branch], {
+            cwd: root,
+            timeoutMs: INVOCATION_TIMEOUT_MS,
+        })
+        return pushed.ok ? { ok: true } : { ok: false, reason: complaint(pushed) }
     },
 })

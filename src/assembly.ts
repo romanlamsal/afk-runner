@@ -10,6 +10,7 @@ import { createFileEventLog } from "./repository/event-log.ts"
 import { createFileManifestStore } from "./repository/manifest-store.ts"
 import { createFileRunRecordStore } from "./repository/run-records.ts"
 import { createDriveService } from "./service/drive.ts"
+import { createFinishService } from "./service/finish.ts"
 import { createFixService } from "./service/fix.ts"
 import { createGateService, createProveBranch } from "./service/gate.ts"
 import { createImplementService } from "./service/implement.ts"
@@ -37,6 +38,9 @@ export const assembleCli = (): Cli => {
     const events = createFileEventLog()
     const git = createGit()
     const now = (): Date => new Date()
+    // Both writes a whole run makes to GitHub go through it: the claim, and the spec pull request
+    // at the end (ADR-0013).
+    const tracker = createGitHubTracker()
 
     const start = createStartService({
         // Where afk was invoked. The target repository is this directory's git top level, which the
@@ -63,7 +67,7 @@ export const assembleCli = (): Cli => {
             events,
             git,
             now,
-            tracker: createGitHubTracker(),
+            tracker,
         }),
         merge: createMergeService({
             agent,
@@ -80,6 +84,12 @@ export const assembleCli = (): Cli => {
     return createCli({
         isInteractive: () => process.stdin.isTTY === true,
         printError,
-        run: createRun({ start, drive, print, printError }),
+        run: createRun({
+            start,
+            drive,
+            finish: createFinishService({ agent, git, now, tracker }),
+            print,
+            printError,
+        }),
     })
 }

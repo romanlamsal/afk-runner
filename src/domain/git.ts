@@ -137,4 +137,13 @@ export type Git = {
      * (ADR-0005). Asking for one where there is no rebase is not a failure.
      */
     abortRebase: (root: string, path: string) => Promise<GitResult>
+    /**
+     * Publish the spec branch to its remote, which is what makes a pull request over it possible at
+     * all. The last thing a run does to git, and the one write besides the tracker's two that leaves
+     * the machine (ADR-0013).
+     *
+     * It moves no branch and touches no working tree — not trunk's, not the operator's. The only
+     * local mark it leaves is the upstream it records for the branch it pushed.
+     */
+    push: (root: string, branch: string) => Promise<GitResult>
 }
