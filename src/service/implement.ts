@@ -3,7 +3,7 @@ import { ticketBranch } from "../domain/branches.ts"
 import type { Clock } from "../domain/clock.ts"
 import type { CommandRunner } from "../domain/commands.ts"
 import type { CopyEnvironmentFiles } from "../domain/environment.ts"
-import type { EventLog, LifecycleEvent, Outcome } from "../domain/events.ts"
+import { type EventLog, type LifecycleEvent, type Outcome, sessionOf } from "../domain/events.ts"
 import type { Git } from "../domain/git.ts"
 import { implementerFault } from "../domain/implementer.ts"
 import { ticketWorktree, transcriptPath } from "../domain/paths.ts"
@@ -93,6 +93,13 @@ export const createImplementService =
             return failed(prepared.detail)
         }
 
+        // The attempt a prepare pass bought continues the session the attempt before it was given,
+        // and only where one was recorded: an id in the log was read out of a stream, so it is a
+        // session that exists, and a first attempt has none to continue. afk never generates one
+        // (ADR-0012, ADR-0017).
+        const resumeSessionId =
+            attempt === 1 ? undefined : sessionOf(await events.read(root, spec), ticket, "implement")
+
         const attempted = await attemptWithAgent(
             agent,
             {
@@ -100,7 +107,7 @@ export const createImplementService =
                 root,
                 cwd: worktree,
                 transcriptPath: transcript,
-                resumeSessionId: undefined,
+                resumeSessionId,
                 outputSchema: undefined,
             },
             sessionId => record("running", { sessionId, baseSha }),

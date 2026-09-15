@@ -342,6 +342,45 @@ export const describeGitContract = (name: string, create: () => Promise<GitWorld
         })
     })
 
+    describe(`${name}: hasWorktree`, () => {
+        it("should know a worktree it administers, so that a prepare pass has somewhere to go", async () => {
+            // given
+            const world = await create()
+            await world.commit("afk/4/t7")
+
+            // when
+            const has = await world.git.hasWorktree(world.root, await world.worktree("afk/4/t7"))
+
+            // then
+            expect(has).toBe(true)
+        })
+
+        it("should know nothing of a path no worktree was ever made at", async () => {
+            // given
+            const world = await create()
+
+            // when
+            const has = await world.git.hasWorktree(world.root, ".afk/4/t7")
+
+            // then
+            expect(has).toBe(false)
+        })
+
+        it("should forget a worktree once it is removed, so a verified ticket's is not prepared", async () => {
+            // given
+            const world = await create()
+            await world.commit("afk/4/t7")
+            const path = await world.worktree("afk/4/t7")
+            await world.git.removeWorktree(world.root, path)
+
+            // when
+            const has = await world.git.hasWorktree(world.root, path)
+
+            // then
+            expect(has).toBe(false)
+        })
+    })
+
     describe(`${name}: checkoutWorktree`, () => {
         it("should refuse a second worktree for a branch another already holds (ADR-0006)", async () => {
             // given

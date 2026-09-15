@@ -139,6 +139,14 @@ export const createGit = (): Git => ({
         return removed.ok ? { ok: true } : { ok: false, reason: complaint(removed) }
     },
 
+    // git lists what it administers, which is the question: a directory it no longer knows about is
+    // not a worktree, and neither is one a killed run left behind after its administration was
+    // pruned.
+    hasWorktree: async (root, path) => {
+        const listed = await git(root, "worktree", "list", "--porcelain")
+        return listed.ok && listed.stdout.split("\n").includes(`worktree ${join(root, path)}`)
+    },
+
     revision: async (root, rev) => {
         const resolved = await git(root, "rev-parse", "--verify", "--quiet", `${rev}^{commit}`)
         return resolved.ok && resolved.stdout !== "" ? resolved.stdout : undefined

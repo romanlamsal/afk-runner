@@ -1,3 +1,5 @@
+import type { BrokenStep } from "./events.ts"
+
 /**
  * Every prompt afk sends, composed here as a pure function of what the run knows. Prompts are not
  * asserted for shape: a test over wording pins the wording rather than the behaviour.
@@ -163,4 +165,86 @@ export const resolverPrompt = ({
         "",
         "Report a note saying what was in conflict and how you resolved it. It goes into the commit",
         "that lands this ticket, so write it for whoever reads that commit.",
+    ].join("\n")
+
+/**
+ * What the prepare agent is told to look at, keyed by the step that broke. It is never invoked
+ * without one: the pass is broad by design — it is the out-of-the-ordinary path — and the step is
+ * the only thing keeping it from being turned loose on a wrecked ticket with no instruction
+ * (ADR-0012).
+ *
+ * A step that broke is either a failure an agent reported or a process a killed run left behind,
+ * and the worktree does not say which. So each instruction covers both readings rather than afk
+ * guessing between them and instructing for the wrong one.
+ */
+const INSTRUCTIONS: Record<BrokenStep, readonly string[]> = {
+    implement: [
+        "Its implementer either reported a failure or was killed part-way through, and the worktree",
+        "does not say which. Find out how far it got: what is committed on the branch, what is left",
+        "uncommitted, and whether anything in the worktree is half-written. Leave the branch and the",
+        "worktree in a state another implementer can carry on from.",
+    ],
+    rebase: [
+        "Its rebase onto the spec branch did not land. A rebase may still be in progress — abort it",
+        "if one is in your way. Leave the worktree a clean checkout of the ticket's branch with the",
+        "ticket's own commits still on it, so that the rebase can simply be attempted again.",
+    ],
+    resolve: [
+        "A conflict resolver was sent to its rebase and left it unresolved. Abort the rebase rather",
+        "than finishing it: resolving the conflict is not your job. Leave the worktree a clean",
+        "checkout of the ticket's branch with the ticket's own commits still on it.",
+    ],
+    merge: [
+        "It was being squashed onto the spec branch when the run was killed, so the squash may or may",
+        "not have landed. Leave the ticket's branch and worktree fit to be rebased and squashed",
+        "again. Do not go looking for the squash on the spec branch and do not put one there — afk",
+        "checks that itself, and the spec branch is not yours to touch.",
+    ],
+    gate: [
+        "Its work is already on the spec branch, and the run was killed while the checks were running",
+        "on it. There is nothing to put right in the ticket's own worktree beyond leaving it clean;",
+        "the checks will simply be run again.",
+    ],
+}
+
+/**
+ * The prepare agent: the one pass a wrecked ticket gets before the normal track picks it back up,
+ * mid-run and on the first tick of a resumed run alike (ADR-0012).
+ *
+ * What bounds it is this prompt and the hard stop at one retry, not supervision — so what it must
+ * not do is said as plainly as what it is for. It only ever prepares, and it never waits for a
+ * human: the run is unattended and stays that way.
+ */
+export const preparerPrompt = ({
+    spec,
+    ticket,
+    title,
+    branch,
+    worktree,
+    brokenStep,
+}: {
+    spec: number
+    ticket: number
+    title: string
+    branch: string
+    /** The ticket's own worktree, which is where this runs and the only tree it may write to. */
+    worktree: string
+    brokenStep: BrokenStep
+}): string =>
+    [
+        `Ticket #${ticket} of spec #${spec} is stuck at its \`${brokenStep}\` step: ${title}.`,
+        "",
+        ...INSTRUCTIONS[brokenStep],
+        "",
+        `You are in that ticket's own worktree, ${worktree}, checked out on ${branch}. Prepare it and`,
+        "nothing else. Do not implement the ticket, do not merge, do not rebase onto anything, and do",
+        "not land work anywhere: another agent does that, and it does it after you.",
+        "",
+        "Touch no other worktree and no other branch — the spec branch above all, which has one",
+        "writer and it is not you. Do not push, and write nothing to the issue tracker.",
+        "",
+        "Never wait for anybody: nobody is at the terminal. Where you cannot put something right, say",
+        "so and stop.",
+        "",
+        "Report what you found and what you changed.",
     ].join("\n")

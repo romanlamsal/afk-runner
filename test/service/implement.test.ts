@@ -44,14 +44,18 @@ type Setup = {
     refusal?: string
     /** Whether the implementer commits on its branch. The default is an implementer that works. */
     commits?: boolean
+    /** What an earlier attempt left in the log, for the attempts that are not the first. */
+    log?: readonly LifecycleEvent[]
+    /** Which attempt this is. The second is the one a prepare pass bought (ADR-0012). */
+    attempt?: number
 }
 
-const harness = ({ reply, repository, failing, refusal, commits = true }: Setup = {}) => {
+const harness = ({ reply, repository, failing, refusal, commits = true, log = [], attempt = 1 }: Setup = {}) => {
     const git = createFakeGit(repository ?? { branches: { "afk/4/spec": ["spec-tip"] } })
     const agent = createFakeAgent(reply)
     const commands = createFakeCommands(failing)
     const environment = createFakeEnvironment()
-    const events = createFakeEventLog()
+    const events = createFakeEventLog(log)
     const tracker = createFakeTracker({ refusal })
 
     const implement = createImplementService({
@@ -77,7 +81,7 @@ const harness = ({ reply, repository, failing, refusal, commits = true }: Setup 
         events,
         git,
         tracker,
-        implement: (): Promise<StepResult> => implement(RUN, { ticket: 7, attempt: 1 }),
+        implement: (): Promise<StepResult> => implement(RUN, { ticket: 7, attempt }),
     }
 }
 
@@ -308,5 +312,30 @@ describe("the implement service: the claim", () => {
 
         // then
         expect([...commands.ran, ...agent.invocations]).toEqual([])
+    })
+})
+
+describe("the implement service: the session a retry continues", () => {
+    /** What a first attempt left behind, with or without ever having been given a session. */
+    const earlier = (sessionId?: string): readonly LifecycleEvent[] => [
+        { ticket: 7, step: "implement", outcome: "running", at: "2026-09-15T11:18:38.314Z", sessionId },
+        { ticket: 7, step: "implement", outcome: "failed", at: "2026-09-15T11:18:38.314Z" },
+        { ticket: 7, step: "prepare", outcome: "running", at: "2026-09-15T11:18:38.314Z", sessionId: "the-pass" },
+        { ticket: 7, step: "prepare", outcome: "ok", at: "2026-09-15T11:18:38.314Z" },
+    ]
+
+    it.each([
+        ["the session its first attempt was observed to have", 2, earlier("in-the-stream"), "in-the-stream"],
+        ["nothing, where that attempt's stream carried no id at all", 2, earlier(undefined), undefined],
+        ["nothing on a first attempt, which has no session to continue", 1, [], undefined],
+    ] as const)("should resume %s", async (_name, attempt, log, expected) => {
+        // given — ADR-0017: an id is passed only when one was observed, and never a generated one
+        const { implement, agent } = harness({ attempt, log })
+
+        // when
+        await implement()
+
+        // then
+        expect(agent.invocations[0]?.resumeSessionId).toBe(expected)
     })
 })

@@ -81,6 +81,14 @@ export type Git = {
      * a verified ticket's worktree is on the spec branch, and a failed one's is kept (ADR-0012).
      */
     removeWorktree: (root: string, path: string) => Promise<GitResult>
+    /**
+     * Whether a worktree is registered at `path`. A git question rather than a filesystem one: a
+     * worktree is a git object, and a directory git does not know about is not one.
+     *
+     * Asked before the prepare agent is sent anywhere, because a ticket whose worktree was never
+     * made has nothing in it to prepare (ADR-0012).
+     */
+    hasWorktree: (root: string, path: string) => Promise<boolean>
     /** The commit `rev` names, or undefined when the repository has no such rev. */
     revision: (root: string, rev: string) => Promise<string | undefined>
     /**

@@ -155,6 +155,7 @@ export const createFakeGit = (repository: FakeRepository = {}): FakeGit => {
                 checkouts.set(request.path, request.branch)
                 return { ok: true }
             },
+            hasWorktree: async (_root, path) => checkouts.has(path),
             removeWorktree: async (_root, path) => {
                 removed.push(path)
                 checkouts.delete(path)

@@ -5,6 +5,7 @@ import type { PreparedRun } from "../domain/run.ts"
 import type { StepResult } from "./attempt.ts"
 import type { ImplementTicket } from "./implement.ts"
 import type { MergeTicket } from "./merge.ts"
+import type { PrepareTicket } from "./prepare.ts"
 
 /** The driving port of a run: work the slate until nothing is left to start and nothing is running. */
 export type DriveRun = (run: PreparedRun, options: { maxParallel: number }) => Promise<DriveResult>
@@ -20,6 +21,8 @@ export type DriveDeps = {
     events: EventLog
     implement: ImplementTicket
     merge: MergeTicket
+    /** The pass a ticket a step left broken gets, mid-run and on a resumed run alike (ADR-0012). */
+    prepare: PrepareTicket
     now: Clock
 }
 
@@ -36,7 +39,7 @@ type Settled = { action: Action; result: StepResult }
  * recognisable at all.
  */
 export const createDriveService =
-    ({ events, implement, merge, now }: DriveDeps): DriveRun =>
+    ({ events, implement, merge, now, prepare }: DriveDeps): DriveRun =>
     async (run, { maxParallel }) => {
         const { root, spec, manifest } = run
         const inFlight = new Map<Action, Promise<Settled>>()
@@ -80,6 +83,12 @@ export const createDriveService =
                     inFlight.set(
                         action,
                         merge(run, action).then(result => ({ action, result })),
+                    )
+                }
+                if (action.kind === "prepare") {
+                    inFlight.set(
+                        action,
+                        prepare(run, action).then(result => ({ action, result })),
                     )
                 }
             }

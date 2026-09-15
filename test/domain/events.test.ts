@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest"
 import {
     attempts,
+    brokenStep,
     type LifecycleEvent,
     type Outcome,
+    prepared,
     progressOf,
     readEvent,
     running,
     type Step,
+    sessionOf,
     settled,
     skipped,
     statusOf,
@@ -232,5 +235,99 @@ describe("skipped", () => {
 
         // then
         expect(done).toBe(true)
+    })
+})
+
+describe("brokenStep", () => {
+    it("should be the step the log last mentioned", () => {
+        // given
+        const events = [event(10, "implement", "ok"), event(10, "rebase", "failed")]
+
+        // when
+        const broke = brokenStep(events, 10)
+
+        // then
+        expect(broke).toBe("rebase")
+    })
+
+    it("should look past a prepare pass, because a pass is never the thing that broke", () => {
+        // given
+        const events = [event(10, "implement", "failed"), event(10, "prepare", "running")]
+
+        // when
+        const broke = brokenStep(events, 10)
+
+        // then
+        expect(broke).toBe("implement")
+    })
+
+    it("should be nothing for a ticket the log has never mentioned", () => {
+        // given
+        const events = [event(11, "implement", "failed")]
+
+        // when
+        const broke = brokenStep(events, 10)
+
+        // then
+        expect(broke).toBeUndefined()
+    })
+})
+
+describe("prepared", () => {
+    it("should name the step a finished pass was sent to", () => {
+        // given
+        const events = [event(10, "rebase", "failed"), event(10, "prepare", "running"), event(10, "prepare", "ok")]
+
+        // when
+        const step = prepared(events, 10)
+
+        // then
+        expect(step).toBe("rebase")
+    })
+
+    it.each([
+        ["the pass is still running", [event(10, "implement", "failed"), event(10, "prepare", "running")]],
+        ["the pass failed", [event(10, "implement", "failed"), event(10, "prepare", "failed")]],
+        ["nothing was ever prepared", [event(10, "implement", "failed")]],
+        [
+            "the step the pass bought has already been attempted",
+            [event(10, "implement", "failed"), event(10, "prepare", "ok"), event(10, "implement", "running")],
+        ],
+    ] as const)("should name no step because %s", (_name, events) => {
+        // given — the events from the table
+
+        // when
+        const step = prepared(events, 10)
+
+        // then
+        expect(step).toBeUndefined()
+    })
+})
+
+describe("sessionOf", () => {
+    it("should be the last session the step was given", () => {
+        // given — ADR-0017: an id in the log was read out of a stream, so it is a session that exists
+        const events = [
+            { ...event(10, "implement", "running"), sessionId: "first" },
+            event(10, "implement", "failed"),
+            { ...event(10, "prepare", "running"), sessionId: "the-pass" },
+        ]
+
+        // when
+        const session = sessionOf(events, 10, "implement")
+
+        // then
+        expect(session).toBe("first")
+    })
+
+    it("should be nothing where the step's stream carried no id, so that nothing is resumed", () => {
+        // given
+        const events = [event(10, "implement", "running"), event(10, "implement", "failed")]
+
+        // when
+        const session = sessionOf(events, 10, "implement")
+
+        // then
+        expect(session).toBeUndefined()
     })
 })

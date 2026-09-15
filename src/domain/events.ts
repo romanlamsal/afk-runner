@@ -17,6 +17,18 @@ export const STEPS = ["implement", "prepare", "rebase", "resolve", "merge", "gat
 
 export type Step = (typeof STEPS)[number]
 
+/**
+ * The steps a prepare pass can be sent to, and so the steps it has an instruction for. `prepare` is
+ * never one of them — a pass is what was sent to the thing that broke, never the thing itself — and
+ * neither is `revert`: a ticket being taken back off the spec branch was already on its way out, and
+ * putting it back is the one thing recovery must not do (ADR-0009, ADR-0012).
+ */
+export const BROKEN_STEPS = ["implement", "rebase", "resolve", "merge", "gate"] as const
+
+export type BrokenStep = (typeof BROKEN_STEPS)[number]
+
+export const repairableStep = (step: Step): step is BrokenStep => BROKEN_STEPS.some(broken => broken === step)
+
 export const OUTCOMES = ["running", "ok", "failed", "skipped"] as const
 
 export type Outcome = (typeof OUTCOMES)[number]
@@ -125,6 +137,33 @@ export const running = (events: readonly LifecycleEvent[], ticket: number): bool
 /** A ticket the log has never mentioned, which is the only kind a first attempt is handed out for. */
 export const unattempted = (events: readonly LifecycleEvent[], ticket: number): boolean =>
     statusOf(events, ticket) === undefined
+
+/**
+ * The step a recovery pass is about: the last event that was not itself a prepare.
+ *
+ * A prepare is never the thing that broke — it is what was sent to the thing that broke — so it is
+ * looked past, and a prepare a killed run left `running` is still about whatever it was sent to
+ * (ADR-0012).
+ */
+export const brokenStep = (events: readonly LifecycleEvent[], ticket: number): Step | undefined =>
+    events.findLast(event => event.ticket === ticket && event.step !== "prepare")?.step
+
+/**
+ * A ticket a prepare pass has been through, and the step it was sent to repair: what the normal
+ * track picks the ticket back up by.
+ */
+export const prepared = (events: readonly LifecycleEvent[], ticket: number): Step | undefined => {
+    const last = statusOf(events, ticket)
+    return last?.step === "prepare" && last.outcome === "ok" ? brokenStep(events, ticket) : undefined
+}
+
+/**
+ * The session a step's last attempt was given, where it was given one at all. An id here was read
+ * out of a stream, so continuing it continues a session that exists — which is the whole of why
+ * afk never generates one (ADR-0017).
+ */
+export const sessionOf = (events: readonly LifecycleEvent[], ticket: number, step: Step): string | undefined =>
+    events.findLast(event => event.ticket === ticket && event.step === step && event.sessionId !== undefined)?.sessionId
 
 /**
  * What a skip is written down as. The step is `implement`, because implementing is the work that

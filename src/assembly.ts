@@ -15,6 +15,7 @@ import { createGateService, createProveBranch } from "./service/gate.ts"
 import { createImplementService } from "./service/implement.ts"
 import { createMergeService } from "./service/merge.ts"
 import { createPlanService } from "./service/plan.ts"
+import { createPrepareService } from "./service/prepare.ts"
 import { createStartService } from "./service/start.ts"
 
 /**
@@ -72,6 +73,7 @@ export const assembleCli = (): Cli => {
             now,
             fix: createFixService({ agent, events, git, now, prove }),
         }),
+        prepare: createPrepareService({ agent, events, git, now }),
         now,
     })
 
