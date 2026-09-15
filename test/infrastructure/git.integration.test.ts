@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { access, mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises"
+import { access, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
@@ -476,5 +476,93 @@ describe("createGit().push", () => {
 
         // then
         expect(pushed).toEqual({ ok: false, reason: expect.stringContaining("origin") })
+    })
+})
+
+describe("createGit().deleteRemoteBranchesUnder", () => {
+    it("should take the spec branch off the remote, which is the only footprint a run leaves there", async () => {
+        // given
+        const { root } = await toPush()
+        await git.push(root, "afk/4/spec")
+
+        // when
+        await git.deleteRemoteBranchesUnder(root, "afk/4/")
+
+        // then
+        expect(await sh(root, "ls-remote", "origin", "refs/heads/afk/4/spec")).toBe("")
+    })
+
+    it("should leave the remote's other branches where they are", async () => {
+        // given
+        const { root } = await toPush()
+        await git.push(root, "afk/4/spec")
+
+        // when
+        await git.deleteRemoteBranchesUnder(root, "afk/4/")
+
+        // then
+        expect(await sh(root, "ls-remote", "origin", "refs/heads/main")).toContain("refs/heads/main")
+    })
+
+    it("should be content with a remote that never had this spec's branches", async () => {
+        // given
+        const { root } = await cloned()
+
+        // when
+        const deleted = await git.deleteRemoteBranchesUnder(root, "afk/4/")
+
+        // then
+        expect(deleted).toEqual({ ok: true })
+    })
+
+    it("should be content with a repository that has no remote at all, which is where a run that died leaves one", async () => {
+        // given
+        const root = await repository()
+
+        // when
+        const deleted = await git.deleteRemoteBranchesUnder(root, "afk/4/")
+
+        // then
+        expect(deleted).toEqual({ ok: true })
+    })
+})
+
+describe("createGit().removeWorktreesUnder", () => {
+    it("should take away a worktree whose directory is already gone, rather than refusing over it", async () => {
+        // given
+        const root = await repository()
+        await git.checkoutWorktree(root, { path: ".afk/4/t7", branch: "afk/4/t7", startPoint: "main" })
+        await rm(join(root, ".afk/4/t7"), { recursive: true, force: true })
+
+        // when
+        const removed = await git.removeWorktreesUnder(root, ".afk/4")
+
+        // then
+        expect(removed).toEqual({ ok: true })
+    })
+
+    it("should free the branches those worktrees held, so that they can be deleted", async () => {
+        // given
+        const root = await repository()
+        await git.checkoutWorktree(root, { path: ".afk/4/t7", branch: "afk/4/t7", startPoint: "main" })
+        await git.removeWorktreesUnder(root, ".afk/4")
+
+        // when
+        const deleted = await git.deleteBranchesUnder(root, "afk/4/")
+
+        // then
+        expect(deleted).toEqual({ ok: true })
+    })
+
+    it("should leave the invoking worktree registered, because it is not one the run made", async () => {
+        // given
+        const root = await repository()
+        await git.checkoutWorktree(root, { path: ".afk/4/t7", branch: "afk/4/t7", startPoint: "main" })
+
+        // when
+        await git.removeWorktreesUnder(root, ".afk/4")
+
+        // then
+        expect(await sh(root, "worktree", "list", "--porcelain")).toContain(`worktree ${root}`)
     })
 })

@@ -167,6 +167,12 @@ The run directory — the event log, worktrees, agent transcripts. Machine-local
 expected to exist on another machine.
 _Avoid_: cache, workspace, scratch
 
+**Starting over**:
+What `--force-fresh` does: the run's worktrees, this spec's branches local and remote, its pull
+request and its run directory, taken away in one command with no prompt — the flag is the consent.
+It takes nothing back off the tracker: a claim is never released (ADR-0013).
+_Avoid_: reset, clean, wipe, rollback
+
 ## Tracker
 
 **Claim**:

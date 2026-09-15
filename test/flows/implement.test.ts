@@ -19,6 +19,7 @@ import { createFakeAgent } from "../fakes/agent.ts"
 import { createFakeCommands } from "../fakes/commands.ts"
 import { createFakeEnvironment } from "../fakes/environment.ts"
 import { createFakeEventLog } from "../fakes/event-log.ts"
+import { createStubFresh } from "../fakes/fresh.ts"
 import { createFakeGit } from "../fakes/git.ts"
 import { createFakeInterrupts } from "../fakes/interrupts.ts"
 import { createFakeManifestStore } from "../fakes/manifest-store.ts"
@@ -173,6 +174,7 @@ const harness = ({
         isInteractive: () => true,
         printError: line => errors.push(line),
         run: createRun({
+            fresh: createStubFresh(),
             start: createStartService({
                 cwd: "/repo",
                 environment: environment.copy,

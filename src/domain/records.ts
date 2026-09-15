@@ -8,6 +8,9 @@ export type Records = {
     events: boolean
 }
 
+/** What taking a run's records away came to. Nothing afk asks for goes unchecked (ADR-0005). */
+export type RemovalResult = { ok: true } | { ok: false; reason: string }
+
 /**
  * Where afk keeps a run's own records. A driven port: the domain says what it needs, never how.
  */
@@ -17,6 +20,14 @@ export type RunRecordStore = {
      * status and nothing in it can be staged (ADR-0013).
      */
     create: (root: string, spec: number) => Promise<void>
+    /**
+     * Take the run directory away whole — manifest, event log, transcripts and whatever the
+     * worktrees under it left behind. A directory that is not there is already what was asked for.
+     *
+     * The one step of starting over that cannot be retried into existence, so it goes last and it
+     * reports rather than throws.
+     */
+    remove: (root: string, spec: number) => Promise<RemovalResult>
     hasEventLog: (root: string, spec: number) => Promise<boolean>
 }
 

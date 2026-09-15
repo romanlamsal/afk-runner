@@ -1,5 +1,5 @@
 import { access, rm } from "node:fs/promises"
-import { isAbsolute, join, resolve } from "node:path"
+import { isAbsolute, join, resolve, sep } from "node:path"
 import type { Git, GitResult, RebaseResult, TrunkState } from "../domain/git.ts"
 import { INVOCATION_TIMEOUT_MS } from "../domain/timeout.ts"
 import { complaint, type Ran, run } from "./process.ts"
@@ -19,7 +19,13 @@ const REMOTE = "origin"
 /** Where a repository with no `origin/HEAD` is looked for, in the order git itself would guess. */
 const TRUNK_CANDIDATES = ["main", "master"] as const
 
+/** What `worktree list --porcelain` puts in front of every path it lists. */
+const WORKTREE_LINE = "worktree "
+
 const git = (cwd: string, ...args: string[]): Promise<Ran> => run("git", args, { cwd })
+
+/** What a command that prints one thing per line said, with the empty output being nothing at all. */
+const lines = (stdout: string): string[] => stdout.split("\n").filter(line => line !== "")
 
 const hasBranch = async (root: string, branch: string): Promise<boolean> =>
     (await git(root, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`)).ok
@@ -145,6 +151,33 @@ export const createGit = (): Git => ({
         return listed.ok && listed.stdout.split("\n").includes(`worktree ${join(root, path)}`)
     },
 
+    // Pruned first, so that a worktree whose directory the operator already deleted is administration
+    // git has forgotten rather than a removal it refuses. What is left is listed and removed one by
+    // one, because git takes one worktree per call.
+    removeWorktreesUnder: async (root, path): Promise<GitResult> => {
+        await git(root, "worktree", "prune")
+        const listed = await git(root, "worktree", "list", "--porcelain")
+        if (!listed.ok) {
+            return { ok: false, reason: complaint(listed) }
+        }
+
+        const under = `${join(root, path)}${sep}`
+        const registered = lines(listed.stdout)
+            .filter(line => line.startsWith(WORKTREE_LINE))
+            .map(line => line.slice(WORKTREE_LINE.length))
+            .filter(worktree => worktree.startsWith(under))
+
+        for (const worktree of registered) {
+            const removed = await git(root, "worktree", "remove", "--force", worktree)
+            if (!removed.ok) {
+                return { ok: false, reason: complaint(removed) }
+            }
+        }
+
+        await git(root, "worktree", "prune")
+        return { ok: true }
+    },
+
     revision: async (root, rev) => {
         const resolved = await git(root, "rev-parse", "--verify", "--quiet", `${rev}^{commit}`)
         return resolved.ok && resolved.stdout !== "" ? resolved.stdout : undefined
@@ -239,6 +272,60 @@ export const createGit = (): Git => ({
 
         const aborted = await git(cwd, "rebase", "--abort")
         return aborted.ok ? { ok: true } : { ok: false, reason: complaint(aborted) }
+    },
+
+    // `--force`, because a branch afk owns is deleted on its own say-so: an unmerged ticket branch
+    // is the ordinary case, and being asked to confirm it is what starting over exists to avoid.
+    // A prefix nothing is named under deletes nothing, which is not a failure.
+    deleteBranchesUnder: async (root, prefix): Promise<GitResult> => {
+        const listed = await git(root, "for-each-ref", "--format=%(refname:short)", `refs/heads/${prefix}*`)
+        if (!listed.ok) {
+            return { ok: false, reason: complaint(listed) }
+        }
+
+        // The pattern keeps the listing small; the prefix is what decides. Neither side of this pair
+        // leans on what a `*` means to the command it was handed, so both mean the same thing.
+        const named = lines(listed.stdout).filter(branch => branch.startsWith(prefix))
+        if (named.length === 0) {
+            return { ok: true }
+        }
+
+        const deleted = await git(root, "branch", "--delete", "--force", ...named)
+        return deleted.ok ? { ok: true } : { ok: false, reason: complaint(deleted) }
+    },
+
+    // The remote is read before it is written to, so that a branch that is not there is nothing to
+    // delete rather than a push git refuses — and so that one push takes away everything that is.
+    deleteRemoteBranchesUnder: async (root, prefix): Promise<GitResult> => {
+        // A repository with no remote never had anything pushed to one, which is the ordinary case
+        // for a run that died before it finished.
+        if (!(await git(root, "remote", "get-url", REMOTE)).ok) {
+            return { ok: true }
+        }
+
+        const listed = await run("git", ["ls-remote", "--heads", REMOTE, `refs/heads/${prefix}*`], {
+            cwd: root,
+            timeoutMs: INVOCATION_TIMEOUT_MS,
+        })
+        if (!listed.ok) {
+            return { ok: false, reason: complaint(listed) }
+        }
+
+        // `<sha>\t<ref>`, and the ref is taken whole: `push --delete` is given full ref names so
+        // that nothing it is handed can be read as anything but a branch.
+        const heads = `refs/heads/${prefix}`
+        const refs = lines(listed.stdout)
+            .map(line => line.split("\t")[1] ?? "")
+            .filter(ref => ref.startsWith(heads))
+        if (refs.length === 0) {
+            return { ok: true }
+        }
+
+        const deleted = await run("git", ["push", REMOTE, "--delete", ...refs], {
+            cwd: root,
+            timeoutMs: INVOCATION_TIMEOUT_MS,
+        })
+        return deleted.ok ? { ok: true } : { ok: false, reason: complaint(deleted) }
     },
 
     // `--set-upstream` so that a second push of the same branch — a resumed run's, or the

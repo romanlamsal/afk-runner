@@ -35,6 +35,12 @@ export type FakeGit = {
     soil: (path: string) => void
     /** Every branch pushed, in the order it was pushed. */
     pushed: string[]
+    /** The branches the remote has: what a push put there, less what a deletion took away. */
+    onRemote: () => readonly string[]
+    /** The branches the repository has locally. */
+    localBranches: () => readonly string[]
+    /** The paths a worktree is registered at right now. */
+    checkedOut: () => readonly string[]
 }
 
 export const TRUNK: TrunkState = { branch: "main", ahead: 0, behind: 0, compared: true, dirty: false }
@@ -47,6 +53,12 @@ export type FakeRepository = {
     revert?: GitResult
     /** What a push comes to, for a repository whose remote refuses one. */
     push?: GitResult
+    /** The branches the remote already has, as an earlier run's push left them. */
+    remoteBranches?: readonly string[]
+    /** What deleting on the remote comes to, for a remote that refuses one. */
+    deleteRemote?: GitResult
+    /** What taking the run's worktrees away comes to, for a repository where git refuses. */
+    worktreeRemoval?: GitResult
     /** Branch name to the commits on it, oldest first. The last one is the tip. */
     branches?: Record<string, readonly string[]>
     /** Commit to what it says, for the commits whose message a scenario cares about. */
@@ -64,6 +76,7 @@ export const createFakeGit = (repository: FakeRepository = {}): FakeGit => {
     const rebases: RebaseRequest[] = []
     const removed: string[] = []
     const pushed: string[] = []
+    const remote = new Set<string>(repository.remoteBranches ?? [])
     /** Commit to what it says. A commit nobody gave words to says its own name. */
     const messages = new Map<string, string>(Object.entries(repository.messages ?? {}))
     const branches = new Map<string, string[]>(
@@ -112,6 +125,9 @@ export const createFakeGit = (repository: FakeRepository = {}): FakeGit => {
         rebases,
         removed,
         pushed,
+        onRemote: () => [...remote],
+        localBranches: () => [...branches.keys()],
+        checkedOut: () => [...checkouts.keys()],
         commit: (branch, sha, message) => {
             branches.set(branch, [...(branches.get(branch) ?? []), sha])
             messages.set(sha, message ?? sha)
@@ -168,6 +184,18 @@ export const createFakeGit = (repository: FakeRepository = {}): FakeGit => {
                 dirty.delete(path)
                 return { ok: true }
             },
+            removeWorktreesUnder: async (_root, path) => {
+                if (repository.worktreeRemoval !== undefined && !repository.worktreeRemoval.ok) {
+                    return repository.worktreeRemoval
+                }
+                for (const worktree of [...checkouts.keys()].filter(at => at.startsWith(`${path}/`))) {
+                    removed.push(worktree)
+                    checkouts.delete(worktree)
+                    dirty.delete(worktree)
+                }
+                return { ok: true }
+            },
+
             revision: async (_root, rev) => tipOf(rev),
             contains: async (_root, { rev, commit }) => historyOf(rev).includes(commit),
             isClean: async (_root, path) => !dirty.has(path) && !stopped.has(path),
@@ -229,6 +257,34 @@ export const createFakeGit = (repository: FakeRepository = {}): FakeGit => {
                 return { ok: true }
             },
 
+            // git refuses to delete a branch a worktree has checked out, so the order starting over
+            // works in — worktrees first, branches after — is a constraint rather than a preference.
+            deleteBranchesUnder: async (_root, prefix) => {
+                const named = [...branches.keys()].filter(branch => branch.startsWith(prefix))
+                const held = named.find(branch => [...checkouts.values()].includes(branch))
+                if (held !== undefined) {
+                    return { ok: false, reason: `Cannot delete branch '${held}' used by worktree` }
+                }
+                for (const branch of named) {
+                    branches.delete(branch)
+                }
+                return { ok: true }
+            },
+
+            deleteRemoteBranchesUnder: async (_root, prefix) => {
+                const named = [...remote].filter(branch => branch.startsWith(prefix))
+                if (named.length === 0) {
+                    return { ok: true }
+                }
+                if (repository.deleteRemote !== undefined && !repository.deleteRemote.ok) {
+                    return repository.deleteRemote
+                }
+                for (const branch of named) {
+                    remote.delete(branch)
+                }
+                return { ok: true }
+            },
+
             // A push leaves the repository exactly as it was: there is no local ref for it to move,
             // which is the whole of what the port promises about it.
             push: async (_root, branch) => {
@@ -236,7 +292,11 @@ export const createFakeGit = (repository: FakeRepository = {}): FakeGit => {
                 if (repository.push !== undefined && !repository.push.ok) {
                     return repository.push
                 }
-                return branches.has(branch) ? { ok: true } : { ok: false, reason: `src refspec ${branch} matches no` }
+                if (!branches.has(branch)) {
+                    return { ok: false, reason: `src refspec ${branch} matches no` }
+                }
+                remote.add(branch)
+                return { ok: true }
             },
         },
     }

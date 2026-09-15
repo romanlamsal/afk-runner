@@ -342,6 +342,114 @@ export const describeGitContract = (name: string, create: () => Promise<GitWorld
         })
     })
 
+    describe(`${name}: removeWorktreesUnder`, () => {
+        it.each([["wt/afk/4/t7"], ["wt/afk/4/t8"]] as const)(
+            "should take the worktree at %s away, being registered under the path it was given",
+            async path => {
+                // given
+                const world = await create()
+                await world.commit("afk/4/t7")
+                await world.commit("afk/4/t8")
+
+                // when
+                await world.git.removeWorktreesUnder(world.root, "wt")
+
+                // then
+                expect(await world.git.hasWorktree(world.root, path)).toBe(false)
+            },
+        )
+
+        it("should leave a worktree registered elsewhere where it is", async () => {
+            // given
+            const world = await create()
+            await world.commit("afk/4/t7")
+            const path = await world.worktree("afk/4/t7")
+
+            // when
+            await world.git.removeWorktreesUnder(world.root, "somewhere-else")
+
+            // then
+            expect(await world.git.hasWorktree(world.root, path)).toBe(true)
+        })
+
+        it("should be content with a path nothing is registered under", async () => {
+            // given
+            const world = await create()
+
+            // when
+            const removed = await world.git.removeWorktreesUnder(world.root, ".afk/4")
+
+            // then
+            expect(removed).toEqual({ ok: true })
+        })
+    })
+
+    describe(`${name}: deleteBranchesUnder`, () => {
+        it.each([["afk/4/spec"], ["afk/4/t7"]] as const)(
+            "should delete %s, which is named under the prefix",
+            async branch => {
+                // given
+                const world = await create()
+                await world.orphan("afk/4/spec")
+                await world.orphan("afk/4/t7")
+
+                // when
+                await world.git.deleteBranchesUnder(world.root, "afk/4/")
+
+                // then
+                expect(await world.git.revision(world.root, branch)).toBeUndefined()
+            },
+        )
+
+        it("should leave a branch named outside the prefix where it is", async () => {
+            // given
+            const world = await create()
+            await world.orphan("afk/5/spec")
+
+            // when
+            await world.git.deleteBranchesUnder(world.root, "afk/4/")
+
+            // then
+            expect(await world.git.revision(world.root, "afk/5/spec")).toBeDefined()
+        })
+
+        it("should be content with a prefix no branch is named under", async () => {
+            // given
+            const world = await create()
+
+            // when
+            const deleted = await world.git.deleteBranchesUnder(world.root, "afk/4/")
+
+            // then
+            expect(deleted).toEqual({ ok: true })
+        })
+
+        it("should delete a branch a run's worktree held, once that worktree is gone", async () => {
+            // given
+            const world = await create()
+            await world.commit("afk/4/t7")
+            await world.git.removeWorktreesUnder(world.root, "wt")
+
+            // when
+            await world.git.deleteBranchesUnder(world.root, "afk/4/")
+
+            // then
+            expect(await world.git.revision(world.root, "afk/4/t7")).toBeUndefined()
+        })
+
+        it("should refuse a branch a worktree still has checked out, rather than reporting success over it", async () => {
+            // given
+            const world = await create()
+            await world.commit("afk/4/t7")
+
+            // when
+            const deleted = await world.git.deleteBranchesUnder(world.root, "afk/4/")
+
+            // then
+            expect(deleted.ok).toBe(false)
+        })
+    })
+
     describe(`${name}: hasWorktree`, () => {
         it("should know a worktree it administers, so that a prepare pass has somewhere to go", async () => {
             // given

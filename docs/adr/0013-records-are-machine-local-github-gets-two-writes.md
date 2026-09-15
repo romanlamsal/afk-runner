@@ -17,8 +17,12 @@ end.
 - **No progress comments, no labels, and no conflict-resolution note on the ticket issue.** A
   comment pointing at a resolution that exists only in `.afk/` on one machine is worse than no
   comment at all.
-- **A claimed ticket is never released.** An unassigned ticket looks unattempted; an
-  attempted-and-failed one is exactly what you want to find later.
+- **A claimed ticket is never released**, `--force-fresh` included. An unassigned ticket looks
+  unattempted; an attempted-and-failed one is exactly what you want to find later.
+- **The two writes are what a *run* makes.** `--force-fresh` throws a run away rather than making
+  one, and closing the pull request it opened is the undoing of one of the two rather than a third.
+  It is closed before its head branch is deleted, because deleting the head closes it anyway — and
+  afk would then be reporting there was nothing to close.
 - Interaction worth knowing: `docs/agents/issue-tracker.md`'s *Frontier query* drops assigned
   issues, so an afk-claimed ticket is invisible to it for as long as the claim stands — which is
   correct, and which nobody would predict.

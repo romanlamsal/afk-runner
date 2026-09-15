@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { mkdtemp, readFile, realpath, writeFile } from "node:fs/promises"
+import { chmod, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
@@ -84,4 +84,58 @@ describe("createFileRunRecordStore", () => {
         // then
         expect(has).toBe(true)
     })
+
+    it("should take the run directory away whole, transcripts and event log with it", async () => {
+        // given
+        const root = await repository()
+        await records.create(root, 4)
+        await writeFile(join(root, ".afk/4/events.jsonl"), '{"step":"implement"}\n', "utf8")
+
+        // when
+        await records.remove(root, 4)
+
+        // then
+        expect(await records.hasEventLog(root, 4)).toBe(false)
+    })
+
+    it("should leave another spec's run directory where it is", async () => {
+        // given
+        const root = await repository()
+        await records.create(root, 4)
+        await records.create(root, 5)
+
+        // when
+        await records.remove(root, 4)
+
+        // then
+        expect(await readFile(join(root, ".afk/5/.gitignore"), "utf8")).toContain("*")
+    })
+
+    it("should be content with a spec that has no run directory", async () => {
+        // given
+        const root = await repository()
+
+        // when
+        const removal = await records.remove(root, 4)
+
+        // then
+        expect(removal).toEqual({ ok: true })
+    })
+
+    // Skipped for a user the filesystem never says no to, which is what running as root is.
+    it.skipIf(process.getuid?.() === 0)(
+        "should report a run directory it could not take away, rather than throwing past the run",
+        async () => {
+            // given: a run directory inside one nobody may write to, which is what makes the rm fail
+            const root = await repository()
+            await records.create(root, 4)
+            await chmod(join(root, ".afk"), 0o500)
+
+            // when
+            const removal = await records.remove(root, 4)
+
+            // then
+            expect(removal).toEqual({ ok: false, reason: expect.stringContaining("EACCES") })
+        },
+    )
 })

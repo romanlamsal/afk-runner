@@ -82,6 +82,12 @@ export type Git = {
      */
     removeWorktree: (root: string, path: string) => Promise<GitResult>
     /**
+     * Take away every worktree registered under `path` — everything a run made, in one call. Asked
+     * only by starting over, and before the directory holding them is deleted: a worktree whose
+     * directory vanishes stays registered in the repository afk was invoked against.
+     */
+    removeWorktreesUnder: (root: string, path: string) => Promise<GitResult>
+    /**
      * Whether a worktree is registered at `path`. A git question rather than a filesystem one: a
      * worktree is a git object, and a directory git does not know about is not one.
      *
@@ -137,6 +143,18 @@ export type Git = {
      * (ADR-0005). Asking for one where there is no rebase is not a failure.
      */
     abortRebase: (root: string, path: string) => Promise<GitResult>
+    /**
+     * Delete every local branch named under `prefix`, which is every branch one spec's run owns.
+     * A prefix no branch is named under is not a failure: starting over is told what to throw away,
+     * never what exists.
+     */
+    deleteBranchesUnder: (root: string, prefix: string) => Promise<GitResult>
+    /**
+     * The same on the remote, where a run leaves at most the spec branch. A repository with no
+     * remote has nothing there to delete, which is the ordinary case for a run that died before it
+     * finished.
+     */
+    deleteRemoteBranchesUnder: (root: string, prefix: string) => Promise<GitResult>
     /**
      * Publish the spec branch to its remote, which is what makes a pull request over it possible at
      * all. The last thing a run does to git, and the one write besides the tracker's two that leaves

@@ -4,6 +4,9 @@ import type { PullRequest } from "./pull-request.ts"
  * The tracker port. Exactly two writes reach it in a whole run — the claim when an implementer
  * starts, and the spec PR at the end — because anything a second reader needs has to reach the spec
  * branch's commits or it does not exist (ADR-0013).
+ *
+ * Starting over adds the only other write there is, and it is the undoing of one of those two:
+ * closing the pull request a previous run opened. What it never undoes is a claim.
  */
 
 export type ClaimResult = { ok: true } | { ok: false; reason: string }
@@ -14,6 +17,10 @@ export type PullRequestRequest = PullRequest & {
     /** What it is opened against: the trunk the spec branch was cut from (ADR-0018). */
     base: string
 }
+
+export type CloseResult =
+    /** `closed` is false where there was no open pull request to close, which is not a failure. */
+    { ok: true; closed: boolean } | { ok: false; reason: string }
 
 export type OpenResult =
     /** The pull request exists. `url` is what the tracker printed for it, where it printed one. */
@@ -31,4 +38,10 @@ export type Tracker = {
      * unattended.
      */
     openPullRequest: (root: string, request: PullRequestRequest) => Promise<OpenResult>
+    /**
+     * Close the pull request opened from `head`, so that starting over leaves no review of work
+     * that no longer exists. Absence is the ordinary case: a run that died during implementation
+     * never opened one.
+     */
+    closePullRequest: (root: string, head: string) => Promise<CloseResult>
 }

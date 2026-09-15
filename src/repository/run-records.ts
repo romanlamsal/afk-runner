@@ -1,4 +1,4 @@
-import { access, mkdir, writeFile } from "node:fs/promises"
+import { access, mkdir, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { eventLogPath, runDirectory, runIgnorePath } from "../domain/paths.ts"
 import type { RunRecordStore } from "../domain/records.ts"
@@ -21,6 +21,21 @@ export const createFileRunRecordStore = (): RunRecordStore => ({
     create: async (root, spec) => {
         await mkdir(join(root, runDirectory(spec)), { recursive: true })
         await writeFile(join(root, runIgnorePath(spec)), IGNORE_EVERYTHING, "utf8")
+    },
+    // `force`, so that a spec whose directory is already gone is what was asked for rather than a
+    // failure. What the worktrees under it left behind goes with it — git's administration of them
+    // is taken away first, and that is the caller's ordering to keep.
+    //
+    // A directory that will not go — a busy mount, a file the operator cannot write — is reported
+    // rather than thrown: it is the last step of starting over, and throwing it past the service
+    // would report nothing at all.
+    remove: async (root, spec) => {
+        try {
+            await rm(join(root, runDirectory(spec)), { recursive: true, force: true })
+            return { ok: true }
+        } catch (error) {
+            return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+        }
     },
     hasEventLog: (root, spec) => exists(join(root, eventLogPath(spec))),
 })

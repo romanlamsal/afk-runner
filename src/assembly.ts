@@ -15,6 +15,7 @@ import { createFileRunRecordStore } from "./repository/run-records.ts"
 import { createDriveService } from "./service/drive.ts"
 import { createFinishService } from "./service/finish.ts"
 import { createFixService } from "./service/fix.ts"
+import { createFreshService } from "./service/fresh.ts"
 import { createGateService, createProveBranch } from "./service/gate.ts"
 import { createImplementService } from "./service/implement.ts"
 import { createMergeService } from "./service/merge.ts"
@@ -35,6 +36,7 @@ export const assembleCli = (): Cli => {
     }
 
     const manifests = createFileManifestStore()
+    const records = createFileRunRecordStore()
     const agent = createClaudeAgentRunner()
     const commands = createShellCommandRunner()
     const environment = createEnvironmentFiles()
@@ -58,16 +60,18 @@ export const assembleCli = (): Cli => {
     // at the end (ADR-0013).
     const tracker = createGitHubTracker()
 
+    // Where afk was invoked. The target repository is this directory's git top level, which the
+    // services resolve — nothing here assumes the two are the same.
+    const cwd = process.cwd()
+
     const start = createStartService({
-        // Where afk was invoked. The target repository is this directory's git top level, which the
-        // start service resolves — nothing here assumes the two are the same.
-        cwd: process.cwd(),
+        cwd,
         environment,
         git,
         manifests,
         operator: createTerminalOperator({ input: process.stdin, output: process.stdout, print }),
         plan: createPlanService({ agent, manifests, now }),
-        records: createFileRunRecordStore(),
+        records,
     })
 
     // Asked twice, for different reasons: by the gate, about a ticket, and by the revert, about the
@@ -102,6 +106,7 @@ export const assembleCli = (): Cli => {
         isInteractive: () => process.stdin.isTTY === true,
         printError,
         run: createRun({
+            fresh: createFreshService({ cwd, git, records, tracker }),
             start,
             drive,
             finish: createFinishService({ agent, git, now, tracker }),

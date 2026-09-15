@@ -26,8 +26,9 @@ are recorded here.
 | `--force-fresh` | delete this spec's branches, run directory and pull request. No prompt: the flag is the consent |
 | `--max-parallel <n>` | implementer slots, default 3 |
 
-`--plan-only` and `--implement-only` name different halves of a run and cannot be combined. A
-refused invocation exits `2`.
+`--plan-only` and `--implement-only` name different halves of a run and cannot be combined. Neither
+can `--force-fresh` and `--implement-only`: the manifest lives in the run directory, so starting over
+deletes the very thing `--implement-only` requires. A refused invocation exits `2`.
 
 **`--dry-run` is deleted.** Printing the execution order under `--plan-only` serves what it was
 for, and simulating a run would be a second execution path that nothing else exercises.

@@ -1,7 +1,9 @@
 import type { DriveRun } from "../service/drive.ts"
 import type { FinishRun } from "../service/finish.ts"
+import type { StartFresh } from "../service/fresh.ts"
 import type { StartRun } from "../service/start.ts"
 import { EXIT, type ExitCode } from "./exit-codes.ts"
+import { freshOutput } from "./fresh-output.ts"
 import type { Invocation } from "./invocation.ts"
 import { planOutput } from "./plan-output.ts"
 import { preparedOutput } from "./prepared-output.ts"
@@ -9,6 +11,7 @@ import { progressOutput } from "./progress-output.ts"
 import { pullRequestOutput } from "./pull-request-output.ts"
 
 export type RunDeps = {
+    fresh: StartFresh
     start: StartRun
     drive: DriveRun
     finish: FinishRun
@@ -17,8 +20,11 @@ export type RunDeps = {
 }
 
 /**
- * The boundary between an accepted invocation and the use cases that serve it. It calls a service,
- * turns what came back into lines and an exit code, and holds no rule about a run.
+ * The boundary between an accepted invocation and the use cases that serve it. It calls the use
+ * cases an invocation names, turns what came back into lines and an exit code, and holds no rule
+ * about a run. What order they are called in is the flag surface's, not a rule of its own: starting
+ * over is what `--force-fresh` asks for before anything else, and a run stops at the first thing
+ * that failed.
  *
  * A draft pull request is what a partial run comes to, and the exit code says the same thing in a
  * number: `0` is a ready pull request over a whole spec, `1` is a draft over part of one, and
@@ -26,8 +32,21 @@ export type RunDeps = {
  * failure mode this whole rewrite exists to remove.
  */
 export const createRun =
-    ({ start, drive, finish, print, printError }: RunDeps) =>
+    ({ fresh, start, drive, finish, print, printError }: RunDeps) =>
     async (invocation: Invocation): Promise<ExitCode> => {
+        // Before anything is read, because what starting over throws away is what starting would
+        // otherwise refuse over. A run that cannot be thrown away whole is not started on top of.
+        if (invocation.forceFresh) {
+            const cleared = await fresh(invocation.spec)
+            if (cleared.outcome === "failed") {
+                printError(`afk: ${cleared.reason}`)
+                return EXIT.halted
+            }
+            for (const line of freshOutput(invocation.spec, cleared)) {
+                print(line)
+            }
+        }
+
         const started = await start({
             spec: invocation.spec,
             mode: invocation.mode,

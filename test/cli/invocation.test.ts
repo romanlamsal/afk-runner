@@ -47,7 +47,7 @@ describe("resolveInvocation", () => {
 
     it("should take the spec number and the modifier flags from the arguments", () => {
         // given
-        const parsed = args({ spec: "42", maxParallel: "5", resume: true, forceFresh: true, implementOnly: true })
+        const parsed = args({ spec: "42", maxParallel: "5", resume: true, forceFresh: true, planOnly: true })
 
         // when
         const resolution = resolveInvocation(parsed, { interactive: true })
@@ -55,7 +55,7 @@ describe("resolveInvocation", () => {
         // then
         expect(resolution).toEqual({
             kind: "invocation",
-            invocation: { spec: 42, mode: "implement-only", consented: true, forceFresh: true, maxParallel: 5 },
+            invocation: { spec: 42, mode: "plan-only", consented: true, forceFresh: true, maxParallel: 5 },
         })
     })
 
@@ -91,6 +91,11 @@ describe("resolveInvocation", () => {
             { planOnly: true, implementOnly: true },
             true,
             "--plan-only and --implement-only cannot be combined: each names a different half of a run",
+        ],
+        [
+            { forceFresh: true, implementOnly: true },
+            true,
+            "--force-fresh deletes the manifest --implement-only needs: pass --force-fresh on its own to plan afresh",
         ],
         [
             {},

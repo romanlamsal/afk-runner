@@ -8,6 +8,7 @@ import type { Mode } from "../../src/domain/mode.ts"
 import type { PreparedRun } from "../../src/domain/run.ts"
 import type { DriveResult } from "../../src/service/drive.ts"
 import type { FinishResult } from "../../src/service/finish.ts"
+import type { FreshResult } from "../../src/service/fresh.ts"
 import type { StartRequest, StartResult } from "../../src/service/start.ts"
 
 const MANIFEST: Manifest = {
@@ -40,15 +41,26 @@ const WORKED: DriveResult = { outcome: "done", reason: undefined, progress: { ..
 
 const OPENED: FinishResult = { outcome: "opened", draft: false, url: "https://example.invalid/pull/1" }
 
+const CLEARED: FreshResult = { outcome: "cleared", pullRequest: false }
+
 const harness = (
     result: StartResult = { outcome: "planned", manifest: MANIFEST },
-    { driven = WORKED, finished = OPENED }: { driven?: DriveResult; finished?: FinishResult } = {},
+    {
+        driven = WORKED,
+        finished = OPENED,
+        cleared = CLEARED,
+    }: { driven?: DriveResult; finished?: FinishResult; cleared?: FreshResult } = {},
 ) => {
     const printed: string[] = []
     const errors: string[] = []
     const started: StartRequest[] = []
     const ended: Progress[] = []
+    const freshened: number[] = []
     const run = createRun({
+        fresh: async spec => {
+            freshened.push(spec)
+            return cleared
+        },
         start: async request => {
             started.push(request)
             return result
@@ -61,7 +73,7 @@ const harness = (
         print: line => printed.push(line),
         printError: line => errors.push(line),
     })
-    return { run, printed, errors, started, ended }
+    return { run, printed, errors, started, ended, freshened }
 }
 
 const worked = (prepared: PreparedRun = PREPARED, options: { driven?: DriveResult; finished?: FinishResult } = {}) =>
@@ -311,5 +323,88 @@ describe("createRun: a run the operator interrupted", () => {
 
         // then
         expect(code).toBe(EXIT.partial)
+    })
+})
+
+describe("createRun: --force-fresh", () => {
+    const startingOver = (mode: Mode): Invocation => ({ ...invocation(mode), forceFresh: true })
+
+    const unclearable = { cleared: { outcome: "failed", reason: "a worktree is locked" } } as const
+
+    it("should throw nothing away when the invocation did not ask for it", async () => {
+        // given
+        const { run, freshened } = harness()
+
+        // when
+        await run(invocation("plan-only"))
+
+        // then
+        expect(freshened).toEqual([])
+    })
+
+    it("should throw the spec's run away when it was asked for", async () => {
+        // given
+        const { run, freshened } = harness()
+
+        // when
+        await run(startingOver("plan-only"))
+
+        // then
+        expect(freshened).toEqual([4])
+    })
+
+    it("should start the spec afterwards, so that starting over is one command", async () => {
+        // given
+        const { run, started } = harness()
+
+        // when
+        await run(startingOver("plan-only"))
+
+        // then
+        expect(started).toEqual([{ spec: 4, mode: "plan-only", consented: false }])
+    })
+
+    it("should say what is gone, because the flag asks nothing", async () => {
+        // given
+        const { run, printed } = harness()
+
+        // when
+        await run(startingOver("plan-only"))
+
+        // then
+        expect(printed).toContain("spec #4: branches deleted, .afk/4 cleared, claims left alone")
+    })
+
+    it("should start nothing on top of a run it could not throw away", async () => {
+        // given
+        const { run, started } = harness(undefined, unclearable)
+
+        // when
+        await run(startingOver("plan-only"))
+
+        // then
+        expect(started).toEqual([])
+    })
+
+    it("should exit halted when it could not throw the run away", async () => {
+        // given
+        const { run } = harness(undefined, unclearable)
+
+        // when
+        const code = await run(startingOver("plan-only"))
+
+        // then
+        expect(code).toBe(EXIT.halted)
+    })
+
+    it("should say what would not go", async () => {
+        // given
+        const { run, errors } = harness(undefined, unclearable)
+
+        // when
+        await run(startingOver("plan-only"))
+
+        // then
+        expect(errors).toContain("afk: a worktree is locked")
     })
 })

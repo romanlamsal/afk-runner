@@ -1,4 +1,4 @@
-import type { ClaimResult, OpenResult, PullRequestRequest, Tracker } from "../../src/domain/tracker.ts"
+import type { ClaimResult, CloseResult, OpenResult, PullRequestRequest, Tracker } from "../../src/domain/tracker.ts"
 
 /**
  * The tracker port's fake. It has no real counterpart in the contract suite knowingly: a real run
@@ -10,6 +10,8 @@ export type FakeTracker = {
     claimed: number[]
     /** Every pull request opened, which in a whole run is at most one. */
     opened: PullRequestRequest[]
+    /** Every branch a pull request was closed for, in the order it was asked. */
+    closed: string[]
 }
 
 export type FakeTrackerSetup = {
@@ -21,19 +23,28 @@ export type FakeTrackerSetup = {
     unopenable?: string | undefined
     /** What the tracker says the pull request's url is. */
     url?: string | undefined
+    /** The branches the tracker has an open pull request for. */
+    openFor?: readonly string[] | undefined
+    /** Why closing a pull request fails. Undefined is a tracker that closes it. */
+    unclosable?: string | undefined
 }
 
 export const createFakeTracker = ({
     refusal,
     refuses,
     unopenable,
+    openFor,
+    unclosable,
     url = "https://example.invalid/pull/1",
 }: FakeTrackerSetup = {}): FakeTracker => {
     const claimed: number[] = []
     const opened: PullRequestRequest[] = []
+    const closed: string[] = []
+    const open = new Set(openFor ?? [])
     return {
         claimed,
         opened,
+        closed,
         tracker: {
             claim: async (_root, ticket): Promise<ClaimResult> => {
                 claimed.push(ticket)
@@ -42,7 +53,22 @@ export const createFakeTracker = ({
             },
             openPullRequest: async (_root, request): Promise<OpenResult> => {
                 opened.push(request)
-                return unopenable === undefined ? { ok: true, url } : { ok: false, reason: unopenable }
+                if (unopenable !== undefined) {
+                    return { ok: false, reason: unopenable }
+                }
+                open.add(request.head)
+                return { ok: true, url }
+            },
+            closePullRequest: async (_root, head): Promise<CloseResult> => {
+                closed.push(head)
+                if (!open.has(head)) {
+                    return { ok: true, closed: false }
+                }
+                if (unclosable !== undefined) {
+                    return { ok: false, reason: unclosable }
+                }
+                open.delete(head)
+                return { ok: true, closed: true }
             },
         },
     }

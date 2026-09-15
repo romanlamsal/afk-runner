@@ -1,5 +1,5 @@
 import { INVOCATION_TIMEOUT_MS } from "../domain/timeout.ts"
-import type { OpenResult, Tracker } from "../domain/tracker.ts"
+import type { CloseResult, OpenResult, Tracker } from "../domain/tracker.ts"
 import { complaint, type Ran, run } from "./process.ts"
 
 /**
@@ -54,5 +54,28 @@ export const createGitHubTracker = (): Tracker => ({
         )
 
         return created.ok ? { ok: true, url: printedUrl(created) } : { ok: false, reason: complaint(created) }
+    },
+
+    // Asked for rather than attempted: `gh pr close` fails both for a branch that never had a pull
+    // request and for one whose pull request is already closed or merged, and neither is a failure
+    // to report. What is open is a question gh answers exactly, so it is asked instead of being
+    // read out of an error message.
+    closePullRequest: async (root, head): Promise<CloseResult> => {
+        const listed = await run(
+            "gh",
+            ["pr", "list", "--head", head, "--state", "open", "--json", "number", "--jq", ".[].number"],
+            { cwd: root, timeoutMs: INVOCATION_TIMEOUT_MS },
+        )
+        if (!listed.ok) {
+            return { ok: false, reason: complaint(listed) }
+        }
+
+        const [number] = listed.stdout.split("\n").filter(line => line !== "")
+        if (number === undefined) {
+            return { ok: true, closed: false }
+        }
+
+        const closed = await run("gh", ["pr", "close", number], { cwd: root, timeoutMs: INVOCATION_TIMEOUT_MS })
+        return closed.ok ? { ok: true, closed: true } : { ok: false, reason: complaint(closed) }
     },
 })

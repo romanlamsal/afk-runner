@@ -9,6 +9,7 @@ import { createFakeAgent } from "../fakes/agent.ts"
 import { createStubDrive } from "../fakes/drive.ts"
 import { createFakeEnvironment } from "../fakes/environment.ts"
 import { createStubFinish } from "../fakes/finish.ts"
+import { createStubFresh } from "../fakes/fresh.ts"
 import { createFakeGit } from "../fakes/git.ts"
 import { createFakeManifestStore } from "../fakes/manifest-store.ts"
 import { createFakeOperator } from "../fakes/operator.ts"
@@ -59,6 +60,7 @@ const harness = (reply: { structuredOutput: unknown } = { structuredOutput: MANI
         printError: line => errors.push(line),
         run: createRun({
             start,
+            fresh: createStubFresh(),
             drive: createStubDrive(),
             finish: createStubFinish(),
             print: line => printed.push(line),

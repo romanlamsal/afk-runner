@@ -71,6 +71,15 @@ export const resolveInvocation = (args: ParsedArgs, env: { interactive: boolean 
         return refuse("--plan-only and --implement-only cannot be combined: each names a different half of a run")
     }
 
+    // The manifest lives in the run directory, so starting over takes it with it. The pair asks for
+    // a manifest and deletes it in the same breath, and being told that here beats being told it
+    // after the branches are gone.
+    if (args.forceFresh && args.implementOnly) {
+        return refuse(
+            "--force-fresh deletes the manifest --implement-only needs: pass --force-fresh on its own to plan afresh",
+        )
+    }
+
     const asked = mode(args)
     if (!env.interactive && asked === "plan-and-implement") {
         return refuse(
