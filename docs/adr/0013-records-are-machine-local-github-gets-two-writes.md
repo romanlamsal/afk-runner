@@ -9,6 +9,18 @@ not portable.** It lives on one machine and is never expected anywhere else. **G
 exactly twice:** the ticket is claimed when its implementer starts, and the spec PR is opened at the
 end.
 
+## Amendment: the run directory ignores itself
+
+`.afk/` lives inside the target repository — worktrees are git objects and belong with everything
+else a run writes (ADR-0020) — so what it holds would otherwise show up in the operator's status:
+transcripts, whole checkouts, and the environment files copied into them.
+
+**afk writes a `.gitignore` into the run directory when it creates it, ignoring everything beside it
+and itself.** It is written before anything else is, so nothing afk produces is ever visible for a
+moment first. **No file the consumer owns is modified** — not their `.gitignore`, not their
+`.git/info/exclude` — which is what makes this afk's own guarantee rather than a request the
+operator has to have granted.
+
 ## Consequences
 
 - **Anything a second reader needs must reach the spec branch's commits, or it does not exist.**

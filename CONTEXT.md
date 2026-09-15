@@ -203,43 +203,10 @@ _Avoid_: recovery agent, triage agent
 The agent that writes the spec PR's title and summary.
 _Avoid_: summariser, scribe
 
-## Deprecated
-
-These terms describe the superseded implementation in `main.ts`. They are recorded so that code can
-be read, not so that it can be extended. None of them may appear in the design that replaces it.
+## Code
 
 **Layer**:
-A batch of tickets that ran in parallel, merged into a shared branch and was verified as a unit.
-Replaced by the slate — ADR-0001. Unrelated to `docs/agents/layers.md`'s *layer*, which is a server
-architecture tier and remains current; the collision is coincidental.
-
-**Layer branch**:
-`afk<spec>/layers/<n>`, the branch a layer's tickets merged into. There is now one spec branch —
-ADR-0006.
-
-**Ticket PR**:
-A pull request per ticket into its layer branch. Merging is now entirely local — ADR-0007.
-
-**Stack / `gh-stack`**:
-The pull request stack linking layer PRs. A run now opens one spec PR — ADR-0007.
-
-**`verifyLayer`**:
-The per-layer verification pass, run once a layer's merge queue drained. Replaced by the gate, which
-runs after every merge — ADR-0008.
-
-**Stored `status` enum**:
-`pending | implementing | implemented | merged | failed | skipped`, written into `state.json`. Status
-is now derived from the event log — ADR-0011.
-
-**`mergeable` polling**:
-Waiting for GitHub to report a pull request mergeable before merging it, with a retry-and-backoff
-loop around the merge. Gone with ticket PRs — ADR-0007.
-
-**`merge-tree` probe**:
-A check for whether a ticket would conflict, used to choose between a fast and a slow merge path.
-Every ticket is now rebased unconditionally — ADR-0005.
-
-**`changed-base`**:
-An implementer failure meaning the ticket's branch was behind its layer branch. Being behind is now
-the normal state of every ticket that is not first to merge, and is the merge track's business —
-ADR-0004.
+One division of afk's own source tree — `docs/agents/layers.md`'s sense, and the only sense the word
+has here. It never means a batch of tickets: the schedule is a flat DAG worked by the slate
+(ADR-0001).
+_Avoid_: tier, ring, level
