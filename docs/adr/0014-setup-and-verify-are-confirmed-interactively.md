@@ -28,7 +28,9 @@ are recorded here.
 
 `--plan-only` and `--implement-only` name different halves of a run and cannot be combined. Neither
 can `--force-fresh` and `--implement-only`: the manifest lives in the run directory, so starting over
-deletes the very thing `--implement-only` requires. A refused invocation exits `2`.
+deletes the very thing `--implement-only` requires. **Arguments** afk refuses exit `2`. Refusing
+to *start* is `3`: the arguments were fine and what went wrong is on disk, and the README's exit
+code table is the single statement of that split.
 
 **`--dry-run` is deleted.** Printing the execution order under `--plan-only` serves what it was
 for, and simulating a run would be a second execution path that nothing else exercises.
