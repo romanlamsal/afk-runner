@@ -3,9 +3,10 @@ import { ticketBranch } from "../domain/branches.ts"
 import type { Clock } from "../domain/clock.ts"
 import type { CommandRunner } from "../domain/commands.ts"
 import type { CopyEnvironmentFiles } from "../domain/environment.ts"
-import { type EventLog, type LifecycleEvent, type Outcome, sessionOf } from "../domain/events.ts"
+import { type EventDetails, type EventLog, type Outcome, sessionOf } from "../domain/events.ts"
 import type { Git } from "../domain/git.ts"
 import { implementerFault } from "../domain/implementer.ts"
+import { ticketOf } from "../domain/manifest.ts"
 import { ticketWorktree, transcriptPath } from "../domain/paths.ts"
 import { implementerPrompt } from "../domain/prompts.ts"
 import type { PreparedRun } from "../domain/run.ts"
@@ -26,9 +27,6 @@ export type ImplementDeps = {
     tracker: Tracker
 }
 
-/** Everything an event carries beyond what every event of this step carries. */
-type Details = Pick<LifecycleEvent, "sessionId" | "baseSha" | "detail">
-
 /**
  * Give a ticket to an implementer: claim it, cut it a worktree, put the operator's environment and
  * dependencies in it, and let an agent commit on a branch of its own.
@@ -40,23 +38,23 @@ export const createImplementService =
     ({ agent, commands, environment, events, git, now, tracker }: ImplementDeps): ImplementTicket =>
     async (run, { ticket, attempt }) => {
         const { root, spec, manifest } = run
-        const listed = manifest.tickets.find(one => one.number === ticket)
-        if (listed === undefined) {
-            return { outcome: "halted", reason: `#${ticket} is not a ticket of spec #${spec}` }
+        const listed = ticketOf(manifest, spec, ticket)
+        if (!listed.ok) {
+            return { outcome: "halted", reason: listed.reason }
         }
 
         const branch = ticketBranch(spec, ticket)
         const worktree = ticketWorktree(spec, ticket)
         const transcript = transcriptPath(spec, `t${ticket}-implement-${attempt}`, now())
 
-        const record = (outcome: Outcome, details: Details = {}): Promise<void> =>
+        const record = (outcome: Outcome, details: EventDetails = {}): Promise<void> =>
             events.append(root, spec, {
+                ...details,
                 ticket,
                 step: "implement",
                 outcome,
                 at: now().toISOString(),
                 transcriptPath: transcript,
-                ...details,
             })
 
         // The claim is a collision guard and not bookkeeping, so it is made before anything is spent
@@ -103,7 +101,13 @@ export const createImplementService =
         const attempted = await attemptWithAgent(
             agent,
             {
-                prompt: implementerPrompt({ spec, ticket, title: listed.title, branch, verify: manifest.verify }),
+                prompt: implementerPrompt({
+                    spec,
+                    ticket,
+                    title: listed.ticket.title,
+                    branch,
+                    verify: manifest.verify,
+                }),
                 root,
                 cwd: worktree,
                 transcriptPath: transcript,

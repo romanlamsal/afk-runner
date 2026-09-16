@@ -42,7 +42,11 @@ const refused = (reason: string): StartResult => ({ outcome: "refused", reason }
  * operator is told about their repository does not depend on whether they are also being asked
  * something.
  */
-const decide = async (operator: Operator, mode: Mode, screen: ConfirmationScreen): Promise<Commands | undefined> => {
+const confirmOrReport = async (
+    operator: Operator,
+    mode: Mode,
+    screen: ConfirmationScreen,
+): Promise<Commands | undefined> => {
     if (mode !== "implement-only") {
         return operator.confirm(screen)
     }
@@ -101,7 +105,7 @@ export const createStartService =
             )
         }
 
-        const commands = await decide(operator, mode, {
+        const commands = await confirmOrReport(operator, mode, {
             notices: trunkNotices(trunk),
             commands: { setup: planned.setup, verify: planned.verify },
         })

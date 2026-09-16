@@ -1,8 +1,9 @@
 import type { AgentRunner } from "../domain/agent.ts"
 import { ticketBranch } from "../domain/branches.ts"
 import type { Clock } from "../domain/clock.ts"
-import { attempts, type BrokenStep, type EventLog, type LifecycleEvent, type Outcome } from "../domain/events.ts"
+import { attempts, type BrokenStep, type EventDetails, type EventLog, type Outcome } from "../domain/events.ts"
 import type { Git } from "../domain/git.ts"
+import { ticketOf } from "../domain/manifest.ts"
 import { ticketWorktree, transcriptPath } from "../domain/paths.ts"
 import { preparerPrompt } from "../domain/prompts.ts"
 import type { PreparedRun } from "../domain/run.ts"
@@ -21,9 +22,6 @@ export type PrepareDeps = {
     now: Clock
 }
 
-/** Everything an event carries beyond what every event of this step carries. */
-type Details = Pick<LifecycleEvent, "sessionId" | "transcriptPath" | "detail">
-
 /**
  * Send the prepare agent to a ticket a step left broken: a failed implementer, or any step whose
  * process a killed run left behind. It is the same pass in both cases, because the log cannot tell
@@ -39,9 +37,9 @@ export const createPrepareService =
     ({ agent, events, git, now }: PrepareDeps): PrepareTicket =>
     async (run, { ticket, brokenStep }) => {
         const { root, spec, manifest } = run
-        const listed = manifest.tickets.find(one => one.number === ticket)
-        if (listed === undefined) {
-            return { outcome: "halted", reason: `#${ticket} is not a ticket of spec #${spec}` }
+        const listed = ticketOf(manifest, spec, ticket)
+        if (!listed.ok) {
+            return { outcome: "halted", reason: listed.reason }
         }
 
         const branch = ticketBranch(spec, ticket)
@@ -49,8 +47,8 @@ export const createPrepareService =
         const attempt = attempts(await events.read(root, spec), ticket, "prepare") + 1
         const transcript = transcriptPath(spec, `t${ticket}-prepare-${attempt}`, now())
 
-        const record = (outcome: Outcome, details: Details = {}): Promise<void> =>
-            events.append(root, spec, { ticket, step: "prepare", outcome, at: now().toISOString(), ...details })
+        const record = (outcome: Outcome, details: EventDetails = {}): Promise<void> =>
+            events.append(root, spec, { ...details, ticket, step: "prepare", outcome, at: now().toISOString() })
 
         // A ticket whose worktree was never made, or whose worktree a failed start never got as far
         // as, has nothing in it to prepare — and the implementer's own start cuts a fresh one. The
@@ -65,7 +63,7 @@ export const createPrepareService =
         const attempted = await attemptWithAgent(
             agent,
             {
-                prompt: preparerPrompt({ spec, ticket, title: listed.title, branch, worktree, brokenStep }),
+                prompt: preparerPrompt({ spec, ticket, title: listed.ticket.title, branch, worktree, brokenStep }),
                 root,
                 cwd: worktree,
                 transcriptPath: transcript,

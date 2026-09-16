@@ -53,7 +53,7 @@ const trunkBranch = async (root: string): Promise<string | undefined> => {
     return undefined
 }
 
-const there = async (path: string): Promise<boolean> => {
+const exists = async (path: string): Promise<boolean> => {
     try {
         await access(path)
         return true
@@ -78,7 +78,7 @@ const rebasing = async (cwd: string): Promise<boolean> => {
         // `--git-path` answers relative to the worktree it was asked in, unless the repository puts
         // its git directory somewhere else.
         const path = named.stdout
-        if (named.ok && path !== "" && (await there(isAbsolute(path) ? path : resolve(cwd, path)))) {
+        if (named.ok && path !== "" && (await exists(isAbsolute(path) ? path : resolve(cwd, path)))) {
             return true
         }
     }

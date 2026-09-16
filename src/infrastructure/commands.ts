@@ -22,7 +22,7 @@ export const createShellCommandRunner = ({
             return { ok: false, detail: `\`${command}\` timed out after ${minutes(Date.now() - startedAt)}` }
         }
 
-        const said = [ran.stderr, ran.stdout].find(output => output !== "") ?? ""
-        return { ok: ran.ok, detail: ran.ok ? "" : `\`${command}\` failed: ${said}` }
+        const output = [ran.stderr, ran.stdout].find(stream => stream !== "") ?? ""
+        return { ok: ran.ok, detail: ran.ok ? "" : `\`${command}\` failed: ${output}` }
     }
 }

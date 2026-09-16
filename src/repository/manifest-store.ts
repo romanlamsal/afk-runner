@@ -17,8 +17,8 @@ export const createFileManifestStore = (): ManifestStore => ({
         try {
             return readStoredManifest(JSON.parse(contents), spec)
         } catch (error) {
-            const said = error instanceof Error ? error.message : String(error)
-            return { ok: false, reason: `${manifestPath(spec)} is not JSON: ${said}` }
+            const message = error instanceof Error ? error.message : String(error)
+            return { ok: false, reason: `${manifestPath(spec)} is not JSON: ${message}` }
         }
     },
     write: async (root, spec, manifest) => {

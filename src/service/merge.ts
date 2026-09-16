@@ -1,8 +1,9 @@
 import type { AgentRunner } from "../domain/agent.ts"
 import { ticketBranch } from "../domain/branches.ts"
 import type { Clock } from "../domain/clock.ts"
-import { type EventLog, type LifecycleEvent, type Outcome, resolutionNote, type Step } from "../domain/events.ts"
+import { type EventDetails, type EventLog, type Outcome, resolutionNote, type Step } from "../domain/events.ts"
 import type { Git } from "../domain/git.ts"
+import { ticketOf } from "../domain/manifest.ts"
 import { ticketWorktree, transcriptPath } from "../domain/paths.ts"
 import { resolverPrompt } from "../domain/prompts.ts"
 import { readResolutionNote, resolutionJsonSchema, resolverFault } from "../domain/resolution.ts"
@@ -26,9 +27,6 @@ export type MergeDeps = {
     fix: FixRedGate
 }
 
-/** Everything an event carries beyond what every event of this step carries. */
-type Details = Pick<LifecycleEvent, "sessionId" | "transcriptPath" | "detail">
-
 /**
  * Land a ticket on the spec branch and prove it: rebase onto the tip, squash onto the branch, gate.
  * It is the only thing that produces a **verified** ticket, and the driver hands it one ticket at a
@@ -47,16 +45,16 @@ export const createMergeService =
     ({ agent, events, fix, gate, git, now }: MergeDeps): MergeTicket =>
     async (run, { ticket, attempt }) => {
         const { root, spec, manifest } = run
-        const listed = manifest.tickets.find(one => one.number === ticket)
-        if (listed === undefined) {
-            return { outcome: "halted", reason: `#${ticket} is not a ticket of spec #${spec}` }
+        const listed = ticketOf(manifest, spec, ticket)
+        if (!listed.ok) {
+            return { outcome: "halted", reason: listed.reason }
         }
 
         const branch = ticketBranch(spec, ticket)
         const worktree = ticketWorktree(spec, ticket)
 
-        const record = (step: Step, outcome: Outcome, details: Details = {}): Promise<void> =>
-            events.append(root, spec, { ticket, step, outcome, at: now().toISOString(), ...details })
+        const record = (step: Step, outcome: Outcome, details: EventDetails = {}): Promise<void> =>
+            events.append(root, spec, { ...details, ticket, step, outcome, at: now().toISOString() })
 
         /**
          * The end of a rebase that did not land. The abort is asked for unconditionally because it
@@ -65,8 +63,8 @@ export const createMergeService =
          */
         const abandon = async (detail: string): Promise<StepResult> => {
             const aborted = await git.abortRebase(root, worktree)
-            const said = aborted.ok ? detail : `${detail}, and the rebase could not be aborted: ${aborted.reason}`
-            await record("rebase", "failed", { detail: said })
+            const reported = aborted.ok ? detail : `${detail}, and the rebase could not be aborted: ${aborted.reason}`
+            await record("rebase", "failed", { detail: reported })
             return { outcome: "failed" }
         }
 
@@ -88,7 +86,7 @@ export const createMergeService =
          */
         const gated = async (): Promise<StepResult> => {
             const proven = await gate(run, ticket)
-            const result = proven.outcome === "failed" ? await fix(run, listed) : proven
+            const result = proven.outcome === "failed" ? await fix(run, listed.ticket) : proven
             if (result.outcome === "ok") {
                 await git.removeWorktree(root, worktree)
             }
@@ -117,7 +115,7 @@ export const createMergeService =
             const message = squashMessage({
                 spec,
                 ticket,
-                title: listed.title,
+                title: listed.ticket.title,
                 commits,
                 note: resolutionNote(await events.read(root, spec), ticket),
             })
@@ -180,7 +178,7 @@ export const createMergeService =
                 prompt: resolverPrompt({
                     spec,
                     ticket,
-                    title: listed.title,
+                    title: listed.ticket.title,
                     branch,
                     onto: run.branch,
                     verify: manifest.verify,

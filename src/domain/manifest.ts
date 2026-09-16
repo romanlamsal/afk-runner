@@ -89,3 +89,17 @@ export const readPlannedManifest = (raw: unknown, spec: number): ManifestRead =>
  */
 export const readStoredManifest = (raw: unknown, spec: number): ManifestRead =>
     readManifest(raw, spec, `the manifest in ${manifestPath(spec)}`)
+
+export type TicketLookup = { ok: true; ticket: Ticket } | { ok: false; reason: string }
+
+/**
+ * A step is only ever run for a ticket the manifest names. A number that is not one is the log and
+ * the manifest disagreeing rather than a ticket that failed, so every caller stops the run over it
+ * rather than the step — which is why the rule and its words are here and not in each of them.
+ */
+export const ticketOf = (manifest: Manifest, spec: number, ticket: number): TicketLookup => {
+    const listed = manifest.tickets.find(one => one.number === ticket)
+    return listed === undefined
+        ? { ok: false, reason: `#${ticket} is not a ticket of spec #${spec}` }
+        : { ok: true, ticket: listed }
+}

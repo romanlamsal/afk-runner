@@ -30,7 +30,7 @@ const paragraphs = (texts: readonly (string | undefined)[]): readonly string[] =
 
 /** The resolver's reasoning, named as such — a resolver that said nothing leaves nothing. */
 const resolution = (note: string | undefined): readonly string[] =>
-    paragraphs([note]).map(said => `Conflict resolution: ${said}`)
+    paragraphs([note]).map(paragraph => `Conflict resolution: ${paragraph}`)
 
 export const squashMessage = ({
     spec,

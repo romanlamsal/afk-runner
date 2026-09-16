@@ -60,6 +60,13 @@ const eventSchema = z.object({
 export type LifecycleEvent = z.infer<typeof eventSchema>
 
 /**
+ * Everything an event carries beyond what every event of its step already carries. One type rather
+ * than a copy per service, because which fields may vary is a property of the event and the event
+ * is defined here.
+ */
+export type EventDetails = Pick<LifecycleEvent, "sessionId" | "baseSha" | "transcriptPath" | "detail">
+
+/**
  * One line of the log, or nothing. The log is read defensively on purpose: the last line of one a
  * killed run left behind is as likely to be half-written as not, and losing only that line is the
  * whole point of one object per line.

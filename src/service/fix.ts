@@ -1,6 +1,6 @@
 import type { AgentRunner } from "../domain/agent.ts"
 import type { Clock } from "../domain/clock.ts"
-import { type EventLog, type LifecycleEvent, reverted, statusOf } from "../domain/events.ts"
+import { type EventDetails, type EventLog, type LifecycleEvent, reverted, statusOf } from "../domain/events.ts"
 import { fixerFault } from "../domain/fix.ts"
 import type { Git } from "../domain/git.ts"
 import type { Ticket } from "../domain/manifest.ts"
@@ -47,10 +47,8 @@ export const createFixService =
          * being attempted — the closed step enum is what recovery keys on, and a fix is not
          * something recovery keys on (ADR-0011).
          */
-        const fixAttempt = (
-            outcome: "running" | "ok" | "failed",
-            details: Pick<LifecycleEvent, "sessionId" | "transcriptPath" | "detail"> = {},
-        ): Promise<void> => record({ ticket, step: "gate", outcome, at: now().toISOString(), ...details })
+        const fixAttempt = (outcome: "running" | "ok" | "failed", details: EventDetails = {}): Promise<void> =>
+            record({ ticket, step: "gate", outcome, at: now().toISOString(), ...details })
 
         // The commit the ticket landed as is the spec branch's tip, because the merge track is
         // serial and the gate worktree is the branch's sole writer: nothing can have landed after
@@ -91,8 +89,8 @@ export const createFixService =
 
             const proved = await prove(run)
             if (!proved.ok) {
-                const said = `${run.branch} is broken independently of any ticket: it is still red with #${ticket} reverted off it`
-                return halt(said, `${said}: ${proved.detail}`)
+                const reason = `${run.branch} is broken independently of any ticket: it is still red with #${ticket} reverted off it`
+                return halt(reason, `${reason}: ${proved.detail}`)
             }
 
             await record(
@@ -136,7 +134,7 @@ export const createFixService =
         const failure =
             attempted.outcome === "failed" ? `the fix agent for #${ticket} failed: ${attempted.detail}` : undefined
 
-        const said = (detail: string): Promise<void> =>
+        const failedWith = (detail: string): Promise<void> =>
             fixAttempt("failed", {
                 sessionId,
                 transcriptPath: transcript,
@@ -148,13 +146,13 @@ export const createFixService =
             moved: (await git.revision(root, run.branch)) !== landed,
         })
         if (fault !== undefined) {
-            await said(fault)
+            await failedWith(fault)
             return revert()
         }
 
         const proved = await prove(run)
         if (!proved.ok) {
-            await said(proved.detail)
+            await failedWith(proved.detail)
             return revert()
         }
 

@@ -4,7 +4,7 @@ import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import type { AgentInvocation, AgentResult, AgentRunner } from "../domain/agent.ts"
 import { INVOCATION_TIMEOUT_MS } from "../domain/timeout.ts"
-import { minutes, registerChild, signalGroup } from "./process.ts"
+import { minutes, registerChild, terminateGroup } from "./process.ts"
 import { createStreamReader } from "./stream-json.ts"
 
 /**
@@ -26,9 +26,6 @@ const CLAUDE_FLAGS = [
 
 /** Enough of the tail to name a failure, without holding a wedged agent's whole error output. */
 const STDERR_TAIL = 2000
-
-/** What a timed-out agent gets to shut down in before it is killed outright. */
-const GRACE_MS = 10_000
 
 const commandLine = (invocation: AgentInvocation): string[] => [
     "-p",
@@ -88,8 +85,7 @@ export const createClaudeAgentRunner = ({
             let timedOut = false
             const kill = setTimeout(() => {
                 timedOut = true
-                signalGroup(child, "SIGTERM")
-                setTimeout(() => signalGroup(child, "SIGKILL"), GRACE_MS).unref()
+                terminateGroup(child)
             }, timeoutMs)
 
             child.stdout.setEncoding("utf8")

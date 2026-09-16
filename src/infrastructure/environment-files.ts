@@ -10,7 +10,8 @@ import { run } from "./process.ts"
  * git is what finds them: an environment file is one the repository ignores, and asking git which
  * files it ignores is the only way to learn that which does not involve afk inventing its own idea
  * of an ignore rule. Nothing under afk's own run directory is ever a source — copies made into an
- * earlier worktree are ignored files too, and copying a copy would put them at the wrong path.
+ * earlier worktree are ignored files too, and copying a copy would put them at the wrong path
+ * (ADR-0013, ADR-0020).
  */
 
 export const createEnvironmentFiles = (): CopyEnvironmentFiles => async (root, worktree) => {

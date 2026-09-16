@@ -4,7 +4,8 @@
  *
  * They are **copied**, never symlinked, and their relative paths are preserved so that a monorepo's
  * layout lands correctly. Rotating a secret mid-run therefore does not update worktrees that already
- * exist. Contents never cross this port: nothing afk logs, and no prompt it composes, can carry one.
+ * exist. Contents never cross this port: nothing afk logs, and no prompt it composes, can carry one
+ * (ADR-0020).
  */
 export type CopyEnvironmentFiles = (root: string, worktree: string) => Promise<void>
 

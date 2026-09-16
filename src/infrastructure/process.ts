@@ -62,8 +62,18 @@ export type Ran = {
 /** Enough of the tail to name a failure, without holding a wedged process's whole output. */
 const TAIL = 4000
 
-/** What a timed-out process gets to shut down in before it is killed outright. */
+/** What a timed-out child gets to shut down in before it is killed outright. */
 const GRACE_MS = 10_000
+
+/**
+ * A timed-out child's whole shutdown: its group is asked to stop, and taken down if it will not.
+ * One escalation for every kind of child afk starts, so that a wedged agent and a wedged command
+ * are ended the same way and neither can keep a slot by ignoring the first signal.
+ */
+export const terminateGroup = (child: ChildProcess): void => {
+    signalGroup(child, "SIGTERM")
+    setTimeout(() => signalGroup(child, "SIGKILL"), GRACE_MS).unref()
+}
 
 const tail = (text: string): string => text.slice(-TAIL)
 
@@ -93,8 +103,7 @@ export const run = (
                 ? undefined
                 : setTimeout(() => {
                       timedOut = true
-                      signalGroup(child, "SIGTERM")
-                      setTimeout(() => signalGroup(child, "SIGKILL"), GRACE_MS).unref()
+                      terminateGroup(child)
                   }, timeoutMs)
 
         child.stdout.setEncoding("utf8")
