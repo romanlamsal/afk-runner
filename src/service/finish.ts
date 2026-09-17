@@ -1,8 +1,9 @@
 import type { AgentRunner } from "../domain/agent.ts"
 import type { Clock } from "../domain/clock.ts"
-import type { Progress } from "../domain/events.ts"
+import type { EventDetails, EventLog, Outcome, Progress } from "../domain/events.ts"
 import type { Git } from "../domain/git.ts"
 import { transcriptPath } from "../domain/paths.ts"
+import { PROFILES } from "../domain/profiles.ts"
 import { pullRequestWriterPrompt } from "../domain/prompts.ts"
 import {
     composePullRequest,
@@ -12,6 +13,7 @@ import {
 } from "../domain/pull-request.ts"
 import type { PreparedRun } from "../domain/run.ts"
 import type { Tracker } from "../domain/tracker.ts"
+import { attemptWithAgent } from "./attempt.ts"
 
 /** The driving port: end the run with the one pull request it opens, or with why there is none. */
 export type FinishRun = (run: PreparedRun, progress: Progress) => Promise<FinishResult>
@@ -24,6 +26,7 @@ export type FinishResult =
 
 export type FinishDeps = {
     agent: AgentRunner
+    events: EventLog
     git: Git
     now: Clock
     tracker: Tracker
@@ -41,10 +44,11 @@ const failed = (reason: string): FinishResult => ({ outcome: "failed", reason })
  *
  * The writer failing is not one of those three. The branch is pushed and the work is verified either
  * way, so a body saying the prose is missing is what the run is worth — losing the pull request over
- * a flaky session would not be.
+ * a flaky session would not be. It is still written down: the `pull-request` step's end event says
+ * the attempt failed while the run carries on, because the log records attempts and not verdicts.
  */
 export const createFinishService =
-    ({ agent, git, now, tracker }: FinishDeps): FinishRun =>
+    ({ agent, events, git, now, tracker }: FinishDeps): FinishRun =>
     async (run, progress) => {
         const { root, spec, manifest } = run
 
@@ -57,16 +61,38 @@ export const createFinishService =
             return failed(`${run.branch} could not be pushed: ${pushed.reason}`)
         }
 
+        const transcript = transcriptPath(spec, "pull-request", now())
+
+        /**
+         * A step about the run, so its events carry no ticket (ADR-0028). It gets a start and an
+         * end like every other step, which is what makes the writer's consumption a reading rather
+         * than an argument (ADR-0011, ADR-0027).
+         */
+        const record = (outcome: Outcome, details: EventDetails = {}): Promise<void> =>
+            events.append(root, spec, { step: "pull-request", outcome, at: now().toISOString(), ...details })
+
         // In the gate worktree, because that is where the spec branch is checked out and the writer
         // reads the commits it is writing about (ADR-0006).
-        const written = await agent({
-            prompt: pullRequestWriterPrompt({ spec, branch: run.branch, trunk: run.trunk, progress }),
-            root,
-            cwd: run.gate,
-            transcriptPath: transcriptPath(spec, "pull-request", now()),
-            resumeSessionId: undefined,
-            onSessionId: undefined,
-            outputSchema: pullRequestJsonSchema(),
+        const written = await attemptWithAgent(
+            agent,
+            {
+                prompt: pullRequestWriterPrompt({ spec, branch: run.branch, trunk: run.trunk, progress }),
+                root,
+                cwd: run.gate,
+                transcriptPath: transcript,
+                resumeSessionId: undefined,
+                outputSchema: pullRequestJsonSchema(),
+                profile: PROFILES.pullRequestWriter,
+            },
+            sessionId => record("running", { sessionId, transcriptPath: transcript }),
+        )
+        const { sessionId, usage } = written
+
+        await record(written.outcome === "ok" ? "ok" : "failed", {
+            sessionId,
+            transcriptPath: transcript,
+            usage,
+            detail: written.outcome === "ok" ? undefined : written.detail,
         })
 
         const pullRequest = composePullRequest({

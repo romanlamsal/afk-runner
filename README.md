@@ -56,22 +56,40 @@ than continuing unsupervised. With no TTY, pass `--plan-only` or `--implement-on
    then `setup` and then `verify`, pre-filled and editable in place. Empty input keeps the proposal.
 3. **Cut the spec branch.** `afk/<spec>/spec`, from your *local* trunk, into the gate worktree —
    the one long-lived worktree that holds it and its only writer.
-4. **Implement.** A rolling pool of slots draws from the slate: the tickets whose every blocker is
-   verified, most-dependents-first. Each gets its own worktree on `afk/<spec>/t<n>`, with `setup`
-   run in it and the repository's ignored environment files copied in, and its implementer runs
-   `verify` on its own work before reporting back.
-5. **Merge, serially.** One ticket at a time: rebase onto the spec branch's tip, resolve conflicts
-   in the ticket's own worktree when there are any, squash into the spec branch.
+4. **Set up, then implement.** A rolling pool of slots draws from the slate: the tickets whose every
+   blocker is verified, most-dependents-first. Setting one up claims it, cuts it its own worktree on
+   `afk/<spec>/t<n>`, copies the repository's ignored environment files in and runs `setup` there —
+   a step of its own, so a run killed during it is visible and costs the ticket an attempt. A setup
+   that broke or was killed is never repaired: the worktree is thrown away and cut again, and that
+   recut is the ticket's second and last setup. The implementer then works in the worktree its setup
+   cut, on its own budget of two attempts, and runs `verify` on its own work before reporting back.
+5. **Merge, serially.** One ticket at a time, and three steps of its own: rebase onto the spec
+   branch's tip; where git stopped on a conflict, resolve it in the ticket's own worktree; squash
+   into the spec branch. A run killed between any two of them resumes at the next one. A ticket gets
+   two trips through the track — a resolve that could not land spends the rebase's budget rather
+   than one of its own, because it is the same trip.
 6. **Gate.** `setup` then `verify` on the spec branch, after every merge — so a red result names
-   one merge. Green is the only thing that makes a ticket **verified**. Red gets one fix attempt
-   constrained to fix the cause and never the signal; still red and the merge is reverted, the
-   ticket failed, its dependents skipped, and the reverted tip gated again. Red there halts the run.
+   one merge. Green is the only thing that makes a ticket **verified**. Red buys one fix attempt, a
+   step of its own with a budget of one, constrained to fix the cause and never the signal. What the
+   fix agent says is not the answer: the gate runs again over what it left behind, so a fix that was
+   killed costs its budget and goes back to the gate rather than buying a second one. Still red and
+   the merge is reverted, the ticket failed, its dependents skipped, and the reverted tip gated
+   again. Red there halts the run.
 7. **Finish.** Push the spec branch and open one pull request against the default branch: ready
    when every ticket verified, a draft naming what is missing when not, and none at all when
    nothing was verified. afk opens it and stops — merging it is yours.
 
 Every external invocation — agent, `setup`, `verify` — times out after an hour, and a timeout is an
-ordinary failure. A failed or stale step gets one prepare pass and one more attempt.
+ordinary failure.
+
+**What a broken step is worth.** Five steps get a prepare pass — an agent sent to the wreckage with
+the broken step named — and one more attempt after it: `implement`, `rebase`, `resolve`, `merge` and
+`gate`. The other four get none, each for its own reason. A broken `setup` is recut, because
+throwing a half-made worktree away is faster and more certain than anything an agent would do to it.
+A broken or killed `fix` goes back to the gate, because the branch decides whether the fix worked
+and not the agent's exit code. A `prepare` pass is never itself prepared. A ticket killed mid-revert
+stays doomed: its merge was on its way off the branch, and putting it back is the one thing recovery
+must not do.
 
 **Interrupts.** The first stops new work and lets what is running finish, then finishes the run as
 the partial one it is. The second kills outright and exits `130`; the next start picks the wreckage
@@ -81,12 +99,13 @@ up.
 
 Exactly two writes, both through `gh`:
 
-- **the claim** — the ticket is assigned to you when its implementer starts, so a colleague can see
-  it is taken;
+- **the claim** — the ticket is assigned to you when its setup starts, so a colleague can see it is
+  taken;
 - **the spec PR** — opened at the end, with one `Closes #<n>` per verified ticket appended by the
   script rather than by an agent.
 
-A failed claim halts the run: it is a collision guard, not bookkeeping. A claim is never released,
+A failed claim halts the run: it is a collision guard, not bookkeeping. A ticket that is set up
+twice is claimed twice, which changes nothing on the tracker. A claim is never released,
 `--force-fresh` included — an attempted-and-failed ticket should be findable afterwards. No progress
 comments, no labels, no notes on ticket issues. `--force-fresh` closing the pull request it opened
 is the undoing of one of the two writes, not a third.

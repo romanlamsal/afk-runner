@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { AgentInvocation, AgentResult, AgentRunner } from "../../src/domain/agent.ts"
+import { PROFILES } from "../../src/domain/profiles.ts"
 import { attemptWithAgent } from "../../src/service/attempt.ts"
 
 /**
@@ -17,6 +18,7 @@ const INVOCATION: Omit<AgentInvocation, "onSessionId"> = {
     transcriptPath: ".afk/4/transcripts/t7.jsonl",
     resumeSessionId: undefined,
     outputSchema: undefined,
+    profile: PROFILES.implementer,
 }
 
 /** An agent whose stream carries `sessionId`, announced the way the real adapter announces it. */
@@ -25,7 +27,7 @@ const agentAnnouncing = (sessionId: string | undefined): AgentRunner => {
         if (sessionId !== undefined) {
             invocation.onSessionId?.(sessionId)
         }
-        return { outcome: "ok", sessionId, structuredOutput: undefined, detail: "" }
+        return { outcome: "ok", sessionId, structuredOutput: undefined, detail: "", usage: undefined }
     }
 }
 
@@ -86,6 +88,7 @@ describe("attemptWithAgent", () => {
             sessionId: "session-from-the-stream",
             structuredOutput: { note: "it went wrong" },
             detail: "the checks did not pass",
+            usage: { inputTokens: 12, outputTokens: 34, cacheReadInputTokens: 56, cacheCreationInputTokens: 78 },
         }
         const agent: AgentRunner = async invocation => {
             invocation.onSessionId?.("session-from-the-stream")
@@ -104,7 +107,7 @@ describe("attemptWithAgent", () => {
         const invocations: AgentInvocation[] = []
         const agent: AgentRunner = async invocation => {
             invocations.push(invocation)
-            return { outcome: "ok", sessionId: undefined, structuredOutput: undefined, detail: "" }
+            return { outcome: "ok", sessionId: undefined, structuredOutput: undefined, detail: "", usage: undefined }
         }
 
         // when

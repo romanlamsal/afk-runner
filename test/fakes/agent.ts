@@ -25,6 +25,7 @@ export const createFakeAgent = (reply: Partial<AgentResult> = {}): FakeAgent => 
                 sessionId: "session-from-the-stream",
                 structuredOutput: undefined,
                 detail: "",
+                usage: undefined,
                 ...reply,
             }
             if (result.sessionId !== undefined) {

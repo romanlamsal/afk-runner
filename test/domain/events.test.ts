@@ -2,15 +2,18 @@ import { describe, expect, it } from "vitest"
 import {
     attempts,
     brokenStep,
+    cutFrom,
     type LifecycleEvent,
     type Outcome,
     prepared,
     progressOf,
     readEvent,
+    repairableStep,
     running,
     type Step,
     sessionOf,
     settled,
+    setUp,
     skipped,
     statusOf,
     unattempted,
@@ -238,6 +241,79 @@ describe("skipped", () => {
     })
 })
 
+/**
+ * ADR-0022: setup is a step of its own, and ADR-0024 keeps it out of the steps a prepare pass is
+ * sent to — a half-made worktree is thrown away and cut again rather than handed to an agent.
+ */
+describe("setup as a step", () => {
+    it("should never be something a prepare pass is sent to repair", () => {
+        // given
+        const step = "setup" as const
+
+        // when
+        const repairable = repairableStep(step)
+
+        // then
+        expect(repairable).toBe(false)
+    })
+
+    it.each([
+        ["its setup got through", [event(10, "setup", "ok")], true],
+        ["its setup failed", [event(10, "setup", "failed")], false],
+        ["a killed run left its setup running", [event(10, "setup", "running")], false],
+        ["an implementer has been through it since", [event(10, "setup", "ok"), event(10, "implement", "ok")], false],
+        ["nothing has happened to it", [], false],
+    ] as const)("should call a ticket set up, or not, when %s", (_name, events, expected) => {
+        // given — the warm worktree an implementer is handed, and nothing else
+
+        // when
+        const warm = setUp(events, 10)
+
+        // then
+        expect(warm).toBe(expected)
+    })
+})
+
+describe("cutFrom", () => {
+    const base = (ticket: number, baseSha: string): LifecycleEvent => ({
+        ...event(ticket, "setup", "ok"),
+        baseSha,
+    })
+
+    it("should be the commit the setup that cut the worktree recorded", () => {
+        // given
+        const events = [base(10, "spec-tip"), event(10, "implement", "running")]
+
+        // when
+        const cut = cutFrom(events, 10)
+
+        // then
+        expect(cut).toBe("spec-tip")
+    })
+
+    it("should be the last one, so that a recut ticket is judged against the worktree it has", () => {
+        // given
+        const events = [base(10, "an-older-tip"), event(10, "setup", "failed"), base(10, "the-tip-it-has")]
+
+        // when
+        const cut = cutFrom(events, 10)
+
+        // then
+        expect(cut).toBe("the-tip-it-has")
+    })
+
+    it("should be nothing for a ticket no setup has been through", () => {
+        // given
+        const events = [base(11, "spec-tip")]
+
+        // when
+        const cut = cutFrom(events, 10)
+
+        // then
+        expect(cut).toBeUndefined()
+    })
+})
+
 describe("brokenStep", () => {
     it("should be the step the log last mentioned", () => {
         // given
@@ -329,5 +405,148 @@ describe("sessionOf", () => {
 
         // then
         expect(session).toBeUndefined()
+    })
+})
+
+/**
+ * The counts an attempt consumed, and nothing priced. ADR-0027: the agent CLI computes a dollar
+ * figure locally at list price and it is not a bill, so the log must not carry one — a figure in
+ * the log is a figure somebody will later read as spend.
+ */
+describe("an event's usage", () => {
+    const counts = {
+        inputTokens: 1600,
+        outputTokens: 29700,
+        cacheReadInputTokens: 1600000,
+        cacheCreationInputTokens: 86500,
+    }
+
+    it("should keep the counts an agent step reported", () => {
+        // given
+        const raw = { ticket: 7, step: "implement", outcome: "ok", at: "2026-09-15T11:18:38.314Z", usage: counts }
+
+        // when
+        const read = readEvent(raw)
+
+        // then
+        expect(read?.usage).toEqual(counts)
+    })
+
+    it("should keep no dollar figure, whatever a writer tried to put in one", () => {
+        // given
+        const raw = {
+            ticket: 7,
+            step: "implement",
+            outcome: "ok",
+            at: "2026-09-15T11:18:38.314Z",
+            usage: { ...counts, totalCostUsd: 3.38 },
+        }
+
+        // when
+        const read = readEvent(raw)
+
+        // then
+        expect(read?.usage).not.toHaveProperty("totalCostUsd")
+    })
+
+    it("should be absent on a step that ran commands and held no session", () => {
+        // given
+        const raw = { ticket: 7, step: "merge", outcome: "ok", at: "2026-09-15T11:18:38.314Z" }
+
+        // when
+        const read = readEvent(raw)
+
+        // then
+        expect(read?.usage).toBeUndefined()
+    })
+})
+
+/**
+ * The one step about the run rather than about one ticket's machine. Its events carry no ticket, and
+ * what makes that safe is that every derivation here matches the ticket against a number, so a
+ * ticketless event is invisible to all of them (ADR-0028).
+ */
+describe("a run-level event", () => {
+    const opened = {
+        step: "pull-request",
+        outcome: "ok",
+        at: "2026-09-15T11:18:38.314Z",
+        usage: { inputTokens: 1, outputTokens: 2, cacheReadInputTokens: 3, cacheCreationInputTokens: 4 },
+    }
+
+    it("should be read without a ticket", () => {
+        // given
+        const raw = opened
+
+        // when
+        const read = readEvent(raw)
+
+        // then
+        expect(read?.ticket).toBeUndefined()
+    })
+
+    it("should not become any ticket's status", () => {
+        // given
+        const events = [event(10, "gate", "ok"), readEvent(opened)].flatMap(one => (one === undefined ? [] : [one]))
+
+        // when
+        const status = statusOf(events, 10)
+
+        // then
+        expect(status?.step).toBe("gate")
+    })
+
+    it("should leave a ticket verified that the gate proved before it", () => {
+        // given
+        const events = [event(10, "gate", "ok"), readEvent(opened)].flatMap(one => (one === undefined ? [] : [one]))
+
+        // when
+        const proved = verified(events, 10)
+
+        // then
+        expect(proved).toBe(true)
+    })
+
+    it("should never be something a prepare pass is sent to repair", () => {
+        // given
+        const step = "pull-request" as const
+
+        // when
+        const repairable = repairableStep(step)
+
+        // then
+        expect(repairable).toBe(false)
+    })
+})
+
+/**
+ * The one outcome that is neither an end nor a step still going: git stopped the rebase part-way
+ * and said so, which is a fact about the tool rather than about how afk feels about it (ADR-0025).
+ */
+describe("a conflicted rebase", () => {
+    it("should be a line the log reads back", () => {
+        // given
+        const raw = { ticket: 10, step: "rebase", outcome: "conflicted", at: "2026-09-15T11:18:38.314Z" }
+
+        // when
+        const read = readEvent(raw)
+
+        // then
+        expect(read).toEqual(raw)
+    })
+
+    it.each([
+        ["settled", settled],
+        ["running", running],
+        ["verified", verified],
+    ] as const)("should leave the ticket not %s", (_name, derivation) => {
+        // given
+        const events = [event(10, "implement", "ok"), event(10, "rebase", "running"), event(10, "rebase", "conflicted")]
+
+        // when
+        const holds = derivation(events, 10)
+
+        // then
+        expect(holds).toBe(false)
     })
 })

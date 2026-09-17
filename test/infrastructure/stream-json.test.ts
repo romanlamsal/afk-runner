@@ -104,3 +104,98 @@ describe("createStreamReader", () => {
         expect(reading.structuredOutput).toEqual({ name: "Bob", number: 7 })
     })
 })
+
+/**
+ * The terminal line, and the only one afk reads token counts off. The `usage` on the assistant
+ * lines before it is one turn each, and every turn re-sends the history, so summing them would
+ * count that history once per turn.
+ */
+const RESULT = JSON.stringify({
+    type: "result",
+    subtype: "success",
+    session_id: "b6424495",
+    total_cost_usd: 0.42,
+    usage: {
+        input_tokens: 1600,
+        output_tokens: 29700,
+        cache_read_input_tokens: 1600000,
+        cache_creation_input_tokens: 86500,
+    },
+})
+
+const TURN = JSON.stringify({
+    type: "assistant",
+    session_id: "b6424495",
+    message: {
+        role: "assistant",
+        content: [{ type: "text", text: "working" }],
+        usage: { input_tokens: 999, output_tokens: 999 },
+    },
+})
+
+describe("createStreamReader, reading what an attempt consumed", () => {
+    it.each([
+        ["inputTokens", 1600],
+        ["outputTokens", 29700],
+        ["cacheReadInputTokens", 1600000],
+        ["cacheCreationInputTokens", 86500],
+    ] as const)("should read %s off the result line", (count, expected) => {
+        // given
+        const lines = [INIT, TURN, RESULT]
+
+        // when
+        const reading = read(lines)
+
+        // then
+        expect(reading.usage?.[count]).toBe(expected)
+    })
+
+    it("should read no usage when the stream carried no result line", () => {
+        // given
+        const lines = [INIT, TURN, STRUCTURED]
+
+        // when
+        const reading = read(lines)
+
+        // then
+        expect(reading.usage).toBeUndefined()
+    })
+
+    it("should default the cache counts, which the API omits when they are zero", () => {
+        // given
+        const lines = [INIT, JSON.stringify({ type: "result", usage: { input_tokens: 12, output_tokens: 34 } })]
+
+        // when
+        const reading = read(lines)
+
+        // then
+        expect(reading.usage).toEqual({
+            inputTokens: 12,
+            outputTokens: 34,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0,
+        })
+    })
+
+    it("should leave the usage absent for a result line whose usage it does not recognise", () => {
+        // given
+        const lines = [INIT, JSON.stringify({ type: "result", usage: {} })]
+
+        // when
+        const reading = read(lines)
+
+        // then
+        expect(reading.usage).toBeUndefined()
+    })
+
+    it("should ignore the per-turn counts, which every turn re-sends the history behind", () => {
+        // given
+        const lines = [INIT, TURN, TURN, TURN]
+
+        // when
+        const reading = read(lines)
+
+        // then
+        expect(reading.usage).toBeUndefined()
+    })
+})

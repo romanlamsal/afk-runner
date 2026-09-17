@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { AgentResult } from "../../src/domain/agent.ts"
 import type { BrokenStep, LifecycleEvent } from "../../src/domain/events.ts"
 import type { Manifest } from "../../src/domain/manifest.ts"
+import { PROFILES } from "../../src/domain/profiles.ts"
 import type { PreparedRun } from "../../src/domain/run.ts"
 import type { StepResult } from "../../src/service/attempt.ts"
 import { createPrepareService } from "../../src/service/prepare.ts"
@@ -200,5 +201,16 @@ describe("the prepare service", () => {
 
         // then
         expect(result).toEqual({ outcome: "halted", reason: expect.stringContaining("#99") })
+    })
+
+    it("should invoke the prepare agent at its own profile, and no other role's", async () => {
+        // given
+        const { prepare, agent } = harness()
+
+        // when
+        await prepare()
+
+        // then
+        expect(agent.invocations.at(0)?.profile).toBe(PROFILES.preparer)
     })
 })

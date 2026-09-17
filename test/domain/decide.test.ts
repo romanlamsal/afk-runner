@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { type Action, nextActions, type RunParameters } from "../../src/domain/decide.ts"
-import type { BrokenStep, LifecycleEvent, Outcome, Step } from "../../src/domain/events.ts"
+import { type BrokenStep, type LifecycleEvent, type Outcome, STEPS, type Step } from "../../src/domain/events.ts"
 import type { Ticket } from "../../src/domain/manifest.ts"
 import { manifestOf, ticket } from "../fixtures/manifest.ts"
 
@@ -19,6 +19,12 @@ const event = (ticket: number, step: Step, outcome: Outcome): LifecycleEvent => 
     outcome,
     at: "2026-09-15T11:18:38.314Z",
 })
+
+/** A ticket whose setup got through: the worktree is cut and an implementer is what it wants next. */
+const cut = (number: number): readonly LifecycleEvent[] => [
+    event(number, "setup", "running"),
+    event(number, "setup", "ok"),
+]
 
 /** A ticket the gate has passed: the only thing that puts a blocker behind its dependents. */
 const verified = (number: number): readonly LifecycleEvent[] => [
@@ -46,11 +52,76 @@ const decide = (
 ): readonly Action[] =>
     nextActions(manifestOf(tickets), events, { inFlight: [], maxParallel: 3, draining: false, ...parameters })
 
+const settingUp = (ticket: number): Action => ({ kind: "setup", ticket })
+
 const implementing = (ticket: number, attempt = 1): Action => ({ kind: "implement", ticket, attempt })
 
-const merging = (ticket: number, attempt = 1): Action => ({ kind: "merge", ticket, attempt })
+const rebasing = (ticket: number): Action => ({ kind: "rebase", ticket })
+
+const resolving = (ticket: number, attempt = 1): Action => ({ kind: "resolve", ticket, attempt })
+
+const merging = (ticket: number): Action => ({ kind: "merge", ticket })
+
+/** The rebase git stopped part-way, which is the one state a resolve is ever taken out of. */
+const collided = (number: number): readonly LifecycleEvent[] => [
+    event(number, "implement", "ok"),
+    event(number, "rebase", "running"),
+    event(number, "rebase", "conflicted"),
+]
+
+const gating = (ticket: number): Action => ({ kind: "gate", ticket })
 
 const preparing = (ticket: number, brokenStep: BrokenStep): Action => ({ kind: "prepare", ticket, brokenStep })
+
+const fixing = (ticket: number): Action => ({ kind: "fix", ticket })
+
+const reverting = (ticket: number): Action => ({ kind: "revert", ticket })
+
+/** A ticket whose merge went red at the gate, which is where the gate-red sequence starts. */
+const red = (number: number): readonly LifecycleEvent[] => [
+    event(number, "merge", "ok"),
+    event(number, "gate", "running"),
+    event(number, "gate", "failed"),
+]
+
+/** The one fix attempt that red bought, and the gate that went red again after it (ADR-0009). */
+const fixed = (number: number, outcome: Outcome = "ok"): readonly LifecycleEvent[] => [
+    ...red(number),
+    event(number, "fix", "running"),
+    ...(outcome === "running" ? [] : [event(number, "fix", outcome)]),
+]
+
+/**
+ * ADR-0026: the action set is the step set. `pull-request` is the one step that is about the **run**
+ * rather than about one ticket's machine, and `finish` is the action that performs it (ADR-0028).
+ */
+const TICKET_STEPS = STEPS.filter(step => step !== "pull-request")
+
+/** The state each step of the machine is taken out of, as a log. */
+const AT: Record<(typeof TICKET_STEPS)[number], readonly LifecycleEvent[]> = {
+    setup: [],
+    implement: cut(10),
+    prepare: [event(10, "implement", "running"), event(10, "implement", "failed")],
+    rebase: [event(10, "implement", "ok")],
+    resolve: collided(10),
+    merge: [event(10, "implement", "ok"), event(10, "rebase", "ok")],
+    gate: [event(10, "merge", "ok")],
+    fix: red(10),
+    revert: [...fixed(10, "failed"), event(10, "gate", "running"), event(10, "gate", "failed")],
+}
+
+describe("nextActions: the action set", () => {
+    it("should have an action of its own name for every step of a ticket's machine", () => {
+        // given — ADR-0026, and one log per state: the state that step is the move out of
+        const machine = TICKET_STEPS
+
+        // when
+        const given = machine.map(step => decide([ticket(10)], AT[step]).map(action => action.kind))
+
+        // then
+        expect(given.flat()).toEqual(machine)
+    })
+})
 
 describe("nextActions: the slate", () => {
     it("should start a ticket nothing blocks", () => {
@@ -61,7 +132,7 @@ describe("nextActions: the slate", () => {
         const actions = decide(tickets)
 
         // then
-        expect(actions).toEqual([implementing(10)])
+        expect(actions).toEqual([settingUp(10)])
     })
 
     it.each([
@@ -88,7 +159,7 @@ describe("nextActions: the slate", () => {
         const actions = decide(tickets, verified(11))
 
         // then
-        expect(actions).toEqual([implementing(12)])
+        expect(actions).toEqual([settingUp(12)])
     })
 
     it("should not wait for a blocker the manifest does not list, because it is not this run's work", () => {
@@ -99,7 +170,7 @@ describe("nextActions: the slate", () => {
         const actions = decide(tickets)
 
         // then
-        expect(actions).toEqual([implementing(12)])
+        expect(actions).toEqual([settingUp(12)])
     })
 
     it("should hand out the most-blocking ticket first when there is one slot", () => {
@@ -110,7 +181,7 @@ describe("nextActions: the slate", () => {
         const actions = decide(tickets, [], { maxParallel: 1 })
 
         // then
-        expect(actions).toEqual([implementing(11)])
+        expect(actions).toEqual([settingUp(11)])
     })
 
     it("should never hand out more tickets than there are slots", () => {
@@ -132,7 +203,7 @@ describe("nextActions: the slate", () => {
         const actions = decide(tickets, [], { maxParallel: 2, inFlight: [implementing(10)] })
 
         // then
-        expect(actions).toEqual([implementing(11)])
+        expect(actions).toEqual([settingUp(11)])
     })
 
     it("should never hand out a ticket that is already in flight", () => {
@@ -164,27 +235,27 @@ describe("nextActions: attempts", () => {
         const tickets = [ticket(10)]
 
         // when
-        const actions = decide(tickets)
+        const actions = decide(tickets, cut(10))
 
         // then
         expect(actions).toEqual([implementing(10, 1)])
     })
 
-    it("should number a rebase attempt from the rebases the log already carries", () => {
-        // given
+    it("should number a resolve by the trip through the merge track it belongs to", () => {
+        // given — one rebase already spent, and the second one has stopped on a conflict
         const tickets = [ticket(10)]
-        const events = [event(10, "rebase", "running"), event(10, "rebase", "failed"), event(10, "implement", "ok")]
+        const events = [event(10, "rebase", "running"), event(10, "rebase", "failed"), ...collided(10)]
 
         // when
         const actions = decide(tickets, events)
 
         // then
-        expect(actions).toEqual([merging(10, 2)])
+        expect(actions).toEqual([resolving(10, 2)])
     })
 })
 
 describe("nextActions: the merge track", () => {
-    it("should take an implemented ticket into the merge track", () => {
+    it("should take an implemented ticket into the merge track at its head, the rebase", () => {
         // given
         const tickets = [ticket(10)]
 
@@ -192,10 +263,49 @@ describe("nextActions: the merge track", () => {
         const actions = decide(tickets, [event(10, "implement", "ok")])
 
         // then
+        expect(actions).toEqual([rebasing(10)])
+    })
+
+    it.each([
+        ["a rebase that landed by itself", "rebase"],
+        ["one a conflict resolver finished", "resolve"],
+    ] as const)("should merge a ticket on the tip after %s", (_name, step) => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, [event(10, "implement", "ok"), event(10, step, "ok")])
+
+        // then
         expect(actions).toEqual([merging(10)])
     })
 
-    it("should take a merged ticket back into the merge track, so that its gate still runs", () => {
+    it("should resolve a conflicted rebase, and take no other move out of it", () => {
+        // given — ADR-0025: git drew the distinction, so the log carries it and the machine reads it
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, collided(10))
+
+        // then
+        expect(actions).toEqual([resolving(10)])
+    })
+
+    it.each([
+        ["failed", [event(10, "implement", "ok"), event(10, "rebase", "running"), event(10, "rebase", "failed")]],
+        ["landed", [event(10, "implement", "ok"), event(10, "rebase", "ok")]],
+    ] as const)("should spend no resolver on a rebase that %s", (_name, events) => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, events)
+
+        // then
+        expect(actions.some(action => action.kind === "resolve")).toBe(false)
+    })
+
+    it("should gate a merged ticket, because the gate follows every merge without exception", () => {
         // given — what a run killed between a squash and its gate leaves behind (ADR-0008)
         const tickets = [ticket(10)]
 
@@ -203,12 +313,52 @@ describe("nextActions: the merge track", () => {
         const actions = decide(tickets, [event(10, "implement", "ok"), event(10, "merge", "ok")])
 
         // then
-        expect(actions).toEqual([merging(10)])
+        expect(actions).toEqual([gating(10)])
+    })
+
+    it("should never gate a ticket twice, because the gate is what makes it verified", () => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, [event(10, "merge", "ok"), event(10, "gate", "ok")])
+
+        // then
+        expect(actions).toEqual([{ kind: "finish" }])
+    })
+
+    it.each([
+        ["a gate", gating(11)],
+        ["a rebase", rebasing(11)],
+        ["a resolve", resolving(11)],
+        ["a merge", merging(11)],
+        ["a fix", fixing(11)],
+        ["a revert", reverting(11)],
+    ] as const)("should start no second merge-side action while %s is in flight", (_name, flying) => {
+        // given: #10 is waiting for the merge track while #11 already has it
+        const tickets = [ticket(10), ticket(11)]
+        const events = [event(10, "implement", "ok"), event(11, "merge", "ok")]
+
+        // when
+        const actions = decide(tickets, events, { inFlight: [flying] })
+
+        // then
+        expect(actions).toEqual([])
+    })
+
+    it("should keep handing out implementers while a ticket is being gated", () => {
+        // given
+        const tickets = [ticket(10), ticket(11)]
+
+        // when
+        const actions = decide(tickets, [...cut(10), event(11, "merge", "ok")], { inFlight: [gating(11)] })
+
+        // then
+        expect(actions).toEqual([implementing(10)])
     })
 
     it.each([
         ["it is still being implemented", [event(10, "implement", "running")]],
-        ["its rebase already landed", [event(10, "implement", "ok"), event(10, "rebase", "ok")]],
         ["its rebase failed", [event(10, "implement", "ok"), event(10, "rebase", "failed")]],
         ["it is verified", [event(10, "implement", "ok"), event(10, "gate", "ok")]],
     ] as const)("should leave a ticket out of the merge track because %s", (_name, events) => {
@@ -225,7 +375,7 @@ describe("nextActions: the merge track", () => {
     it("should never merge two tickets at once, because one worktree owns the spec branch", () => {
         // given
         const tickets = [ticket(10), ticket(11)]
-        const events = [event(10, "implement", "ok"), event(11, "implement", "ok")]
+        const events = [event(10, "rebase", "ok"), event(11, "rebase", "ok")]
 
         // when
         const actions = decide(tickets, events, { inFlight: [merging(10)] })
@@ -237,7 +387,7 @@ describe("nextActions: the merge track", () => {
     it("should merge the most-blocking ticket first, so that the slate moves soonest", () => {
         // given
         const tickets = [ticket(10), ticket(11), ticket(12, [11])]
-        const events = [event(10, "implement", "ok"), event(11, "implement", "ok")]
+        const events = [event(10, "rebase", "ok"), event(11, "rebase", "ok")]
 
         // when
         const actions = decide(tickets, events)
@@ -254,7 +404,7 @@ describe("nextActions: the merge track", () => {
         const actions = decide(tickets, [event(10, "implement", "ok")], { inFlight: [merging(10)] })
 
         // then
-        expect(actions).toEqual([implementing(11)])
+        expect(actions).toEqual([settingUp(11)])
     })
 
     it("should skip rather than merge a ticket whose blocker died while it was being implemented", () => {
@@ -302,6 +452,173 @@ describe("nextActions: the merge track", () => {
 
         // then
         expect(actions).toEqual([{ kind: "finish" }])
+    })
+})
+
+describe("nextActions: the gate-red sequence", () => {
+    it("should spend the one fix attempt on a gate that went red", () => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, red(10))
+
+        // then
+        expect(actions).toEqual([fixing(10)])
+    })
+
+    it.each([
+        ["reported success", "ok"],
+        ["reported failure", "failed"],
+        ["was killed part-way", "running"],
+    ] as const)("should gate a ticket again whose fix %s, because the branch is what afk proves", (_name, outcome) => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, fixed(10, outcome))
+
+        // then
+        expect(actions).toEqual([gating(10)])
+    })
+
+    it("should revert the merge once the gate is red again and the fix budget is spent", () => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, [...fixed(10), ...red(10)])
+
+        // then
+        expect(actions).toEqual([reverting(10)])
+    })
+
+    it("should never spend a second fix on a log that carries one already, however that one ended", () => {
+        // given — ADR-0022: the budget is the log's `fix` start events and nothing else
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, [...fixed(10, "running"), ...red(10)])
+
+        // then
+        expect(actions).toEqual([reverting(10)])
+    })
+
+    it("should fail a reverted ticket for good, and skip its dependents", () => {
+        // given
+        const tickets = [ticket(11), ticket(12, [11])]
+        const events = [...fixed(11), ...red(11), event(11, "revert", "running"), event(11, "revert", "failed")]
+
+        // when
+        const actions = decide(tickets, events)
+
+        // then
+        expect(actions).toEqual([{ kind: "skip", ticket: 12 }])
+    })
+
+    it("should verify a ticket whose fix made the gate green, and let its dependents start", () => {
+        // given
+        const tickets = [ticket(11), ticket(12, [11])]
+
+        // when
+        const actions = decide(tickets, [...fixed(11), event(11, "gate", "ok")])
+
+        // then
+        expect(actions).toEqual([settingUp(12)])
+    })
+
+    it.each([
+        ["a fix", fixing(11)],
+        ["a revert", reverting(11)],
+    ] as const)("should start no second merge-side action while %s is in flight", (_name, flying) => {
+        // given: #10 is waiting for the merge track while #11 is being taken through the sequence
+        const tickets = [ticket(10), ticket(11)]
+        const events = [event(10, "implement", "ok"), ...red(11)]
+
+        // when
+        const actions = decide(tickets, events, { inFlight: [flying] })
+
+        // then
+        expect(actions).toEqual([])
+    })
+
+    it("should keep handing out implementers while a ticket is being fixed, because a fix is no slot", () => {
+        // given
+        const tickets = [ticket(10), ticket(11)]
+
+        // when
+        const actions = decide(tickets, [...cut(10), ...red(11)], { inFlight: [fixing(11)], maxParallel: 1 })
+
+        // then
+        expect(actions).toEqual([implementing(10)])
+    })
+})
+
+describe("nextActions: a gate-red sequence a killed run left part-way", () => {
+    it("should gate a ticket whose fix was killed, and never buy it a second fix", () => {
+        // given — the finding: a killed fix agent could buy a second fix attempt
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, fixed(10, "running"))
+
+        // then
+        expect(actions).toEqual([gating(10)])
+    })
+
+    it("should carry a killed fix on to the revert once that gate is red, rather than fix it again", () => {
+        // given — the same log, one gate further on: the budget was spent by the start event
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, [...fixed(10, "running"), ...red(10)])
+
+        // then
+        expect(actions).toEqual([reverting(10)])
+    })
+
+    it("should never prepare a ticket whose fix was killed, because a fix is no broken step", () => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, fixed(10, "running"))
+
+        // then
+        expect(actions.some(action => action.kind === "prepare")).toBe(false)
+    })
+
+    it("should not skip the dependents of a ticket whose fix was killed, because it is not doomed", () => {
+        // given — the finding: a killed fix had no route back and its merge sat on a red branch
+        const tickets = [ticket(11), ticket(12, [11])]
+
+        // when
+        const actions = decide(tickets, fixed(11, "running"))
+
+        // then
+        expect(actions).not.toContainEqual({ kind: "skip", ticket: 12 })
+    })
+
+    it("should leave the ticket doomed when the run was killed mid-revert, with no pass over it", () => {
+        // given — ADR-0009: putting back a merge that was on its way off is what recovery must not do
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, [...fixed(10), ...red(10), event(10, "revert", "running")])
+
+        // then
+        expect(actions).toEqual([{ kind: "finish" }])
+    })
+
+    it("should leave a fix alone while the driver says it is running", () => {
+        // given — the same log, and the one thing that tells a killed run from a live one (ADR-0019)
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, fixed(10, "running"), { inFlight: [fixing(10)] })
+
+        // then
+        expect(actions).toEqual([])
     })
 })
 
@@ -387,6 +704,17 @@ describe("nextActions: draining", () => {
 
         // then
         expect(actions).toEqual([])
+    })
+
+    it("should still gate a merge a draining run has already made, because the gate has no exception", () => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, [event(10, "merge", "ok")], { draining: true })
+
+        // then
+        expect(actions).toEqual([gating(10)])
     })
 
     it("should finish once the last in-flight action of a draining run has settled", () => {
@@ -484,6 +812,39 @@ describe("nextActions: a step whose process is gone", () => {
 
         // then
         expect(actions).toEqual([])
+    })
+
+    it("should resolve a ticket a killed run left at a conflicted rebase, rather than prepare it", () => {
+        // given — git stopped the rebase part-way and the run that was going to resolve it is gone
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, collided(10))
+
+        // then
+        expect(actions).toEqual([resolving(10)])
+    })
+
+    it("should leave a conflicted rebase alone while the resolve it is waiting for is live", () => {
+        // given — the same log, and the live action set that tells a stopped run from a running one
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, collided(10), { inFlight: [resolving(10)] })
+
+        // then
+        expect(actions).toEqual([])
+    })
+
+    it("should doom nothing over a conflicted rebase, because a conflict is no ticket's end", () => {
+        // given — a killed run's ticket stopped at a conflict, and a dependent of it
+        const tickets = [ticket(10), ticket(11, [10])]
+
+        // when
+        const actions = decide(tickets, collided(10))
+
+        // then
+        expect(actions).not.toContainEqual({ kind: "skip", ticket: 11 })
     })
 
     it("should send a prepare pass a killed run left running to the step underneath it", () => {
@@ -684,13 +1045,36 @@ describe("nextActions: recovering the merge track", () => {
         expect(actions).toEqual([preparing(10, brokenStep)])
     })
 
-    it("should take a prepared ticket back into the merge track rather than re-implement it", () => {
-        // given
+    it.each([
+        ["rebase", "rebase"],
+        ["resolve", "resolve"],
+    ] as const)(
+        "should take a ticket prepared after a broken %s back to the head of the merge track",
+        (_name, step) => {
+            // given — what a pass repaired is a trip through the track, and a trip starts at the rebase
+            const tickets = [ticket(10)]
+            const events = [
+                event(10, "implement", "ok"),
+                event(10, "rebase", "running"),
+                event(10, step, "failed"),
+                event(10, "prepare", "running"),
+                event(10, "prepare", "ok"),
+            ]
+
+            // when
+            const actions = decide(tickets, events)
+
+            // then
+            expect(actions).toEqual([rebasing(10)])
+        },
+    )
+
+    it("should merge a ticket the pass was sent to a killed merge for, rather than rebase it again", () => {
+        // given — the trailer cross-check inside the merge is what makes asking it twice harmless
         const tickets = [ticket(10)]
         const events = [
-            event(10, "implement", "ok"),
-            event(10, "rebase", "running"),
-            event(10, "rebase", "failed"),
+            event(10, "rebase", "ok"),
+            event(10, "merge", "running"),
             event(10, "prepare", "running"),
             event(10, "prepare", "ok"),
         ]
@@ -699,7 +1083,45 @@ describe("nextActions: recovering the merge track", () => {
         const actions = decide(tickets, events)
 
         // then
-        expect(actions).toEqual([merging(10, 2)])
+        expect(actions).toEqual([merging(10)])
+    })
+
+    it("should gate a ticket the pass was sent to a killed gate for, rather than merge it again", () => {
+        // given
+        const tickets = [ticket(10)]
+        const events = [
+            event(10, "merge", "ok"),
+            event(10, "gate", "running"),
+            event(10, "prepare", "running"),
+            event(10, "prepare", "ok"),
+        ]
+
+        // when
+        const actions = decide(tickets, events)
+
+        // then
+        expect(actions).toEqual([gating(10)])
+    })
+
+    it("should spend the rebase's budget on a failed resolve, not a budget of its own", () => {
+        // given — one whole trip through the merge track spent on a conflict nobody could resolve
+        const tickets = [ticket(10)]
+        const events = [
+            ...collided(10),
+            event(10, "resolve", "running"),
+            event(10, "resolve", "failed"),
+            event(10, "prepare", "running"),
+            event(10, "prepare", "ok"),
+            ...collided(10).slice(1),
+            event(10, "resolve", "running"),
+            event(10, "resolve", "failed"),
+        ]
+
+        // when
+        const actions = decide(tickets, events)
+
+        // then
+        expect(actions).toEqual([{ kind: "finish" }])
     })
 
     it("should fail a ticket for good once the merge track attempt the pass bought has failed too", () => {
@@ -743,7 +1165,7 @@ describe("nextActions: recovering the merge track", () => {
         const actions = decide(tickets, events, { inFlight: [preparing(11, "rebase")] })
 
         // then
-        expect(actions.some(action => action.kind === "merge")).toBe(false)
+        expect(actions.some(action => action.kind === "rebase")).toBe(false)
     })
 
     it("should keep handing out implementers while the merge track is being prepared", () => {
@@ -755,6 +1177,155 @@ describe("nextActions: recovering the merge track", () => {
         const actions = decide(tickets, events, { inFlight: [preparing(11, "rebase")] })
 
         // then
-        expect(actions).toEqual([implementing(10)])
+        expect(actions).toEqual([settingUp(10)])
+    })
+})
+
+/**
+ * ADR-0022 and ADR-0024: setup is a step of its own and an action of its own, it is never repaired,
+ * and it carries a budget of its own — the attempt and one more, counted off its own start events.
+ */
+describe("nextActions: setup", () => {
+    /** A setup that got somewhere and stopped, and one a killed run left with no end event at all. */
+    const broke = (number: number, outcome: "failed" | "running"): readonly LifecycleEvent[] => [
+        event(number, "setup", "running"),
+        ...(outcome === "failed" ? [event(number, "setup", "failed")] : []),
+    ]
+
+    /** A ticket that has spent both its setups: the first broke, the recut broke too. */
+    const spent = (number: number): readonly LifecycleEvent[] => [
+        ...broke(number, "failed"),
+        ...broke(number, "failed"),
+    ]
+
+    it("should set a ticket up before it is implemented, so that its claim is inside a recorded step", () => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets)
+
+        // then
+        expect(actions).toEqual([settingUp(10)])
+    })
+
+    it("should give a ticket whose setup got through an implementer rather than another setup", () => {
+        // given — ADR-0022: a run killed at `setup: ok` keeps its warm worktree
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, cut(10))
+
+        // then
+        expect(actions).toEqual([implementing(10, 1)])
+    })
+
+    it.each([
+        ["failed", "failed"],
+        ["a killed run left running", "running"],
+    ] as const)("should cut a setup that %s again, within its own budget", (_name, outcome) => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, broke(10, outcome))
+
+        // then
+        expect(actions).toEqual([settingUp(10)])
+    })
+
+    it.each([
+        ["failed", "failed"],
+        ["a killed run left running", "running"],
+    ] as const)("should never send a prepare pass to a setup that %s", (_name, outcome) => {
+        // given — ADR-0024: a half-made worktree is thrown away, never handed to an agent
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, broke(10, outcome))
+
+        // then
+        expect(actions.some(action => action.kind === "prepare")).toBe(false)
+    })
+
+    it("should count a killed setup against the budget, because the recut is the repair", () => {
+        // given — one setup that failed and one a second kill left running: both attempts are spent
+        const tickets = [ticket(10)]
+        const events = [...broke(10, "failed"), ...broke(10, "running")]
+
+        // when
+        const actions = decide(tickets, events)
+
+        // then
+        expect(actions).toEqual([{ kind: "finish" }])
+    })
+
+    it("should fail a ticket for good once its setup budget is spent", () => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, spent(10))
+
+        // then
+        expect(actions).toEqual([{ kind: "finish" }])
+    })
+
+    it("should skip the dependents of a ticket that spent its setup budget, transitively", () => {
+        // given
+        const tickets = [ticket(11), ticket(12, [11]), ticket(13, [12])]
+
+        // when
+        const actions = decide(tickets, spent(11))
+
+        // then
+        expect(actions).toEqual([
+            { kind: "skip", ticket: 12 },
+            { kind: "skip", ticket: 13 },
+        ])
+    })
+
+    it("should spend an implementer slot on a setup, because the ticket is being worked", () => {
+        // given
+        const tickets = [ticket(10), ticket(11)]
+
+        // when
+        const actions = decide(tickets, [], { maxParallel: 1 })
+
+        // then
+        expect(actions).toHaveLength(1)
+    })
+
+    it("should leave a setup the driver says is running alone", () => {
+        // given — ADR-0019: a `running` event is a killed step only once the live action set says so
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, broke(10, "running"), { inFlight: [settingUp(10)] })
+
+        // then
+        expect(actions).toEqual([])
+    })
+
+    it("should start no setup once the run is draining", () => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, [], { draining: true })
+
+        // then
+        expect(actions).toEqual([{ kind: "finish" }])
+    })
+
+    it("should hold a ticket's setup back until its every blocker is verified, as it holds its implementer", () => {
+        // given
+        const tickets = [ticket(11), ticket(12, [11])]
+
+        // when
+        const actions = decide(tickets, [event(11, "implement", "ok")])
+
+        // then
+        expect(actions.some(action => action.kind === "setup" && action.ticket === 12)).toBe(false)
     })
 })

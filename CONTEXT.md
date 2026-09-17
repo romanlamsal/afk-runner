@@ -117,8 +117,9 @@ _Avoid_: merge queue, merge worker
 **Drain**:
 Stopping a run without stopping what it is already doing: nothing new starts, every in-flight step
 finishes and records its event, and the process then exits. What the first interrupt asks for, and
-what a halt does on its way out. A drained run is a partial one, and opens the pull request a
-partial run opens.
+what a halt does on its way out. A merge a drain has already made is still gated, because the gate
+is that merge's own proof rather than new work (ADR-0008). A drained run is a partial one, and opens
+the pull request a partial run opens.
 _Avoid_: graceful shutdown, soft stop, quiesce
 
 ## State
@@ -129,9 +130,12 @@ the last lifecycle event, which is a step and an outcome together.
 
 **Step**:
 The closed vocabulary recovery keys on: `setup`, `implement`, `prepare`, `rebase`, `resolve`,
-`merge`, `gate`, `fix`, `revert`. A phase that can be killed on its own, or that carries a budget of
-its own, is a step of its own (ADR-0022). Each step is also an action the decision function can
-give: the action set is the step set, one for one (ADR-0026).
+`merge`, `gate`, `fix`, `revert`, `pull-request`. A phase that can be killed on its own, or that
+carries a budget of its own, is a step of its own (ADR-0022). Each step is also an action the
+decision function can give: the action set is the step set, one for one (ADR-0026).
+
+All but the last are moves in one ticket's machine. `pull-request` is about the **run** — the way
+`finish` and `skip` are already run-level actions — and its events name no ticket (ADR-0028).
 _Avoid_: phase, stage, state
 
 **Setup step**:
@@ -153,8 +157,9 @@ It is the record of what was attempted and how far it got.
 _Avoid_: state file, journal, history
 
 **Lifecycle event**:
-One appended record of a step, its outcome and the attempt's session, for one ticket. Appended when
-a step starts — before the step's first act, not before its agent's — and again when it ends. Never
+One appended record of a step, its outcome and the attempt's session, for one ticket — or for the
+run, where the step is a run-level one and the event names no ticket (ADR-0028). Appended when a
+step starts — before the step's first act, not before its agent's — and again when it ends. Never
 rewritten.
 _Avoid_: log line, transition, history entry
 
@@ -251,6 +256,19 @@ _Avoid_: recovery agent, triage agent
 **PR writer**:
 The agent that writes the spec PR's title and summary.
 _Avoid_: summariser, scribe
+
+**Agent profile**:
+What one role is invoked with: the model and effort of the agent afk starts, and the model of every
+agent that one spawns. One per role, and the only thing that distinguishes two invocations besides
+the prompt and the schema. It is why afk does not run `--bare`: the preamble was never the cost, and
+the fan-out is (ADR-0027).
+_Avoid_: tier, agent config, model settings
+
+**Fan-out**:
+The agents a role's skills spawn inside its own invocation. afk starts one agent per attempt and
+never these, so the only thing that reaches them is the profile's `subagentModel` — which is where
+most of a run's consumption goes.
+_Avoid_: subagents, sub-tasks, children
 
 ## Code
 

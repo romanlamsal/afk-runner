@@ -21,6 +21,10 @@ import { createImplementService } from "./service/implement.ts"
 import { createMergeService } from "./service/merge.ts"
 import { createPlanService } from "./service/plan.ts"
 import { createPrepareService } from "./service/prepare.ts"
+import { createRebaseService } from "./service/rebase.ts"
+import { createResolveService } from "./service/resolve.ts"
+import { createRevertService } from "./service/revert.ts"
+import { createSetupService } from "./service/setup.ts"
 import { createStartService } from "./service/start.ts"
 
 /**
@@ -81,23 +85,14 @@ export const assembleCli = (): Cli => {
     const drive = createDriveService({
         events,
         interrupts,
-        implement: createImplementService({
-            agent,
-            commands,
-            environment,
-            events,
-            git,
-            now,
-            tracker,
-        }),
-        merge: createMergeService({
-            agent,
-            events,
-            gate: createGateService({ events, now, prove }),
-            git,
-            now,
-            fix: createFixService({ agent, events, git, now, prove }),
-        }),
+        implement: createImplementService({ agent, events, git, now }),
+        setup: createSetupService({ commands, environment, events, git, now, tracker }),
+        rebase: createRebaseService({ events, git, now }),
+        resolve: createResolveService({ agent, events, git, now }),
+        merge: createMergeService({ events, git, now }),
+        gate: createGateService({ events, git, now, prove }),
+        fix: createFixService({ agent, events, git, now }),
+        revert: createRevertService({ events, git, now, prove }),
         prepare: createPrepareService({ agent, events, git, now }),
         now,
     })
@@ -109,7 +104,7 @@ export const assembleCli = (): Cli => {
             fresh: createFreshService({ cwd, git, records, tracker }),
             start,
             drive,
-            finish: createFinishService({ agent, git, now, tracker }),
+            finish: createFinishService({ agent, events, git, now, tracker }),
             print,
             printError,
         }),

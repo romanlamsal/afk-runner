@@ -6,14 +6,20 @@ import type { AgentInvocation } from "../../src/domain/agent.ts"
 import type { LifecycleEvent } from "../../src/domain/events.ts"
 import type { Git } from "../../src/domain/git.ts"
 import type { Ticket } from "../../src/domain/manifest.ts"
+import type { PreparedRun } from "../../src/domain/run.ts"
 import { mergedTickets } from "../../src/domain/squash.ts"
+import type { StepResult } from "../../src/service/attempt.ts"
 import { createDriveService } from "../../src/service/drive.ts"
 import { createFinishService } from "../../src/service/finish.ts"
-import { createFixService } from "../../src/service/fix.ts"
-import { createGateService, createProveBranch } from "../../src/service/gate.ts"
+import { createFixService, type FixTicket } from "../../src/service/fix.ts"
+import { createGateService, createProveBranch, type RunGate } from "../../src/service/gate.ts"
 import { createImplementService } from "../../src/service/implement.ts"
 import { createMergeService, type MergeTicket } from "../../src/service/merge.ts"
 import { createPrepareService } from "../../src/service/prepare.ts"
+import { createRebaseService, type RebaseTicket } from "../../src/service/rebase.ts"
+import { createResolveService, type ResolveTicket } from "../../src/service/resolve.ts"
+import { createRevertService, type RevertTicket } from "../../src/service/revert.ts"
+import { createSetupService, type SetupTicket } from "../../src/service/setup.ts"
 import { createStartService } from "../../src/service/start.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
 import { createFakeCommands } from "../fakes/commands.ts"
@@ -59,6 +65,8 @@ type Setup = {
     interruptedDuring?: number
     /** What a killed run left in the log, for the runs that are a continuation of one. */
     log?: readonly LifecycleEvent[]
+    /** The branches an earlier run left, beyond trunk and the spec branch. */
+    branches?: Record<string, readonly string[]>
     /** The worktrees a killed run left registered, path to the branch checked out in it. */
     worktrees?: Record<string, string>
     tracker?: FakeTrackerSetup
@@ -71,6 +79,7 @@ const harness = ({
     colliding = [],
     resolving = true,
     failing,
+    branches = {},
     red = "the branch",
     fixing = false,
     recovering = [],
@@ -83,7 +92,7 @@ const harness = ({
 }: Setup) => {
     const manifest = manifestOf(tickets)
     const git = createFakeGit({
-        branches: { main: ["spec-tip"], "afk/4/spec": ["spec-tip"] },
+        branches: { main: ["spec-tip"], "afk/4/spec": ["spec-tip"], ...branches },
         checkouts: worktrees,
         colliding: colliding.map(number => `afk/4/t${number}`),
     })
@@ -91,7 +100,7 @@ const harness = ({
     const preparer = createFakeAgent(preparing ? {} : { outcome: "failed", detail: "the pass got nowhere" })
     /** How many implementers a ticket has had, which is what makes a second attempt different. */
     const attempted = new Map<number, number>()
-    const resolver = createFakeAgent()
+    const resolver = createFakeAgent({ structuredOutput: { note: "both sides added a field; kept both" } })
     const fixer = createFakeAgent()
     const writer = createFakeAgent({ structuredOutput: { title: "Layerless afk", summary: "One branch." } })
     const commands = createFakeCommands(failing)
@@ -104,9 +113,9 @@ const harness = ({
     const tracker = createFakeTracker(trackerSetup)
     const printed: string[] = []
     const errors: string[] = []
-    /** The most implementers that were ever in flight at once, which is what a slot count means. */
+    /** The most tickets that were ever being worked at once, which is what a slot count means. */
     const concurrency = { running: 0, peak: 0 }
-    /** The same for the merge track, where the only correct answer is one (ADR-0006). */
+    /** The same for the merge track, over every action about the spec branch (ADR-0006). */
     const merging = { running: 0, peak: 0 }
 
     const now = (): Date => new Date("2026-09-15T11:18:38.314Z")
@@ -130,7 +139,9 @@ const harness = ({
               }
             : git.git
 
-    const mergeTrack = createMergeService({
+    const rebaseTrack = createRebaseService({ events: events.log, git: git.git, now })
+
+    const resolveTrack = createResolveService({
         // A conflict resolver that finishes the rebase it was called for, unless this scenario says
         // it is one that cannot.
         agent: async invocation => {
@@ -141,34 +152,67 @@ const harness = ({
             return result
         },
         events: events.log,
-        gate: createGateService({ events: events.log, now, prove }),
         git: git.git,
         now,
-        // A fix agent that commits a fix on the spec branch and makes the repository green again,
-        // unless this scenario says it is one that cannot.
-        fix: createFixService({
-            agent: async invocation => {
-                const result = await fixer.run(invocation)
-                if (fixing) {
-                    git.commit("afk/4/spec", "the-fix")
-                    commands.mend()
-                }
-                return result
-            },
-            events: events.log,
-            git: gitForFix,
-            now,
-            prove,
-        }),
     })
 
-    const merge: MergeTicket = async (run, action) => {
-        merging.running += 1
-        merging.peak = Math.max(merging.peak, merging.running)
-        const result = await mergeTrack(run, action)
-        merging.running -= 1
+    const mergeTrack = createMergeService({ events: events.log, git: git.git, now })
+
+    const gateTrack = createGateService({ events: events.log, git: git.git, now, prove })
+
+    // A fix agent that commits a fix on the spec branch and makes the repository green again,
+    // unless this scenario says it is one that cannot.
+    const fixTrack = createFixService({
+        agent: async invocation => {
+            const result = await fixer.run(invocation)
+            if (fixing) {
+                git.commit("afk/4/spec", "the-fix")
+                commands.mend()
+            }
+            return result
+        },
+        events: events.log,
+        git: git.git,
+        now,
+    })
+
+    const setupTrack = createSetupService({
+        commands: commands.run,
+        environment: environment.copy,
+        events: events.log,
+        git: git.git,
+        now,
+        tracker: tracker.tracker,
+    })
+
+    // A setup holds a slot exactly as the implementer it precedes does: both are the ticket being
+    // worked, and the pool is what bounds how many of them run at once.
+    const setup: SetupTicket = async (run, action) => {
+        concurrency.running += 1
+        concurrency.peak = Math.max(concurrency.peak, concurrency.running)
+        const result = await setupTrack(run, action)
+        concurrency.running -= 1
         return result
     }
+    const revertTrack = createRevertService({ events: events.log, git: gitForFix, now, prove })
+
+    /** Counted over both merge-side services, because seriality is about the branch and not one step. */
+    const serially =
+        <Action>(step: (run: PreparedRun, action: Action) => Promise<StepResult>) =>
+        async (run: PreparedRun, action: Action): Promise<StepResult> => {
+            merging.running += 1
+            merging.peak = Math.max(merging.peak, merging.running)
+            const result = await step(run, action)
+            merging.running -= 1
+            return result
+        }
+
+    const rebase: RebaseTicket = serially(rebaseTrack)
+    const resolve: ResolveTicket = serially(resolveTrack)
+    const merge: MergeTicket = serially(mergeTrack)
+    const gate: RunGate = serially(gateTrack)
+    const fix: FixTicket = serially(fixTrack)
+    const revert: RevertTicket = serially(revertTrack)
 
     const cli = createCli({
         isInteractive: () => true,
@@ -211,18 +255,27 @@ const harness = ({
                         concurrency.running -= 1
                         return result
                     },
-                    commands: commands.run,
-                    environment: environment.copy,
                     events: events.log,
                     git: git.git,
                     now,
-                    tracker: tracker.tracker,
                 }),
+                setup,
+                rebase,
+                resolve,
                 merge,
+                gate,
+                fix,
+                revert,
                 prepare: createPrepareService({ agent: preparer.run, events: events.log, git: git.git, now }),
                 now,
             }),
-            finish: createFinishService({ agent: writer.run, git: git.git, now, tracker: tracker.tracker }),
+            finish: createFinishService({
+                agent: writer.run,
+                events: events.log,
+                git: git.git,
+                now,
+                tracker: tracker.tracker,
+            }),
             print: line => printed.push(line),
             printError: line => errors.push(line),
         }),
@@ -246,11 +299,29 @@ const harness = ({
     }
 }
 
+/**
+ * What a setup that went through leaves behind: the log says the worktree was cut and what from,
+ * git has the ticket's branch at that commit, and the worktree is registered.
+ */
+const warm = (...tickets: readonly number[]): Pick<Setup, "log" | "branches" | "worktrees"> => ({
+    log: tickets.flatMap(number => [
+        { ticket: number, step: "setup", outcome: "running", at: "2026-09-15T09:00:00.000Z" } as const,
+        { ticket: number, step: "setup", outcome: "ok", at: "2026-09-15T09:30:00.000Z", baseSha: "spec-tip" } as const,
+    ]),
+    branches: Object.fromEntries(tickets.map(number => [`afk/4/t${number}`, ["spec-tip"]])),
+    worktrees: Object.fromEntries(tickets.map(number => [`.afk/4/t${number}`, `afk/4/t${number}`])),
+})
+
 /** The log as a scenario reads it: what happened to which ticket, in order, ends only. */
+/** Every end event the log carries, run-level ones included — those name no ticket (ADR-0028). */
 const settled = (appended: readonly LifecycleEvent[]): string[] =>
     appended
         .filter(event => event.outcome !== "running")
-        .map(event => `#${event.ticket} ${event.step} ${event.outcome}`)
+        .map(event =>
+            event.ticket === undefined
+                ? `${event.step} ${event.outcome}`
+                : `#${event.ticket} ${event.step} ${event.outcome}`,
+        )
 
 describe("a run that works its slate", () => {
     it("should implement every ticket nothing blocks", async () => {
@@ -262,6 +333,8 @@ describe("a run that works its slate", () => {
 
         // then
         expect(settled(events.appended)).toEqual([
+            "#10 setup ok",
+            "#11 setup ok",
             "#10 implement ok",
             "#11 implement ok",
             "#10 rebase ok",
@@ -270,6 +343,7 @@ describe("a run that works its slate", () => {
             "#11 rebase ok",
             "#11 merge ok",
             "#11 gate ok",
+            "pull-request ok",
         ])
     })
 
@@ -459,15 +533,19 @@ describe("a run whose gate goes red", () => {
 
         // then
         expect(settled(events.appended)).toEqual([
+            "#11 setup ok",
             "#11 implement ok",
             "#11 rebase ok",
             "#11 merge ok",
             "#11 gate failed",
+            "#11 fix ok",
             "#11 gate ok",
+            "#12 setup ok",
             "#12 implement ok",
             "#12 rebase ok",
             "#12 merge ok",
             "#12 gate ok",
+            "pull-request ok",
         ])
     })
 
@@ -480,10 +558,12 @@ describe("a run whose gate goes red", () => {
 
         // then
         expect(settled(events.appended)).toEqual([
+            "#11 setup ok",
             "#11 implement ok",
             "#11 rebase ok",
             "#11 merge ok",
             "#11 gate failed",
+            "#11 fix failed",
             "#11 gate failed",
             "#11 revert failed",
             "#12 implement skipped",
@@ -603,6 +683,47 @@ describe("a run's merge track", () => {
         expect(resolver.invocations.map(invocation => invocation.cwd)).toEqual([".afk/4/t10"])
     })
 
+    it("should take a conflicting ticket through the rebase, the resolve and the merge in turn", async () => {
+        // given — the three moves the merge track is made of, each an action of its own (ADR-0026)
+        const { run, events } = harness({ tickets: [ticket(10)], colliding: [10] })
+
+        // when
+        await run()
+
+        // then
+        expect(settled(events.appended)).toEqual([
+            "#10 setup ok",
+            "#10 implement ok",
+            "#10 rebase conflicted",
+            "#10 resolve ok",
+            "#10 merge ok",
+            "#10 gate ok",
+            "pull-request ok",
+        ])
+    })
+
+    it("should land the work a resolved conflict left on the spec branch", async () => {
+        // given
+        const { run, git } = harness({ tickets: [ticket(10)], colliding: [10] })
+
+        // when
+        await run()
+
+        // then
+        expect(git.commitsOn("afk/4/spec")).toEqual(["spec-tip", "squash-afk/4/t10"])
+    })
+
+    it("should quote the resolver's note in the squash the merge lands", async () => {
+        // given — the note belongs to the resolve event, and the merge reads it back (ADR-0007)
+        const { run, git } = harness({ tickets: [ticket(10)], colliding: [10] })
+
+        // when
+        await run()
+
+        // then
+        expect(git.messageOf("squash-afk/4/t10")).toContain("Conflict resolution: both sides added a field; kept both")
+    })
+
     it("should spend no resolver on a ticket that rebased by itself", async () => {
         // given
         const { run, resolver } = harness({ tickets: [ticket(10)] })
@@ -627,12 +748,13 @@ describe("a run's merge track", () => {
 
         // then — one prepare pass and one more trip through the merge track, then it is over
         expect(settled(events.appended)).toEqual([
+            "#11 setup ok",
             "#11 implement ok",
+            "#11 rebase conflicted",
             "#11 resolve failed",
-            "#11 rebase failed",
             "#11 prepare ok",
+            "#11 rebase conflicted",
             "#11 resolve failed",
-            "#11 rebase failed",
             "#12 implement skipped",
         ])
     })
@@ -658,7 +780,12 @@ describe("a run whose ticket cannot be implemented", () => {
         await run()
 
         // then
-        expect(settled(events.appended)).toEqual(["#11 implement failed", "#11 prepare ok", "#11 implement failed"])
+        expect(settled(events.appended)).toEqual([
+            "#11 setup ok",
+            "#11 implement failed",
+            "#11 prepare ok",
+            "#11 implement failed",
+        ])
     })
 
     it("should skip the failed ticket's dependents transitively", async () => {
@@ -673,6 +800,7 @@ describe("a run whose ticket cannot be implemented", () => {
 
         // then
         expect(settled(events.appended)).toEqual([
+            "#11 setup ok",
             "#11 implement failed",
             "#11 prepare ok",
             "#11 implement failed",
@@ -739,7 +867,7 @@ describe("a run whose tracker refuses a claim", () => {
         await run()
 
         // then
-        expect(settled(events.appended)).toEqual(["#10 implement ok"])
+        expect(settled(events.appended)).toEqual(["#10 setup ok"])
     })
 
     it("should start nothing new once a claim has been refused", async () => {
@@ -780,8 +908,8 @@ describe("a run resumed over a log that is not empty", () => {
         // when
         await run()
 
-        // then — the first is what the killed run left; the second is afk finding it already there
-        expect(settled(events.appended)).toEqual(["#10 merge ok", "#10 merge ok", "#10 gate ok"])
+        // then — the killed run's merge is picked back up at the gate, with no second trip through
+        expect(settled(events.appended)).toEqual(["#10 merge ok", "#10 gate ok", "pull-request ok"])
     })
 
     it("should never squash a ticket the spec branch already carries a second time", async () => {
@@ -800,7 +928,10 @@ describe("a run resumed over a log that is not empty", () => {
     it("should give a ticket a killed run left mid-step one implementer, not a second one beside it", async () => {
         // given — a `running` event with no process behind it, which is what a killed run leaves
         const { run, agent, events } = harness({ tickets: [ticket(10)] })
-        events.appended.push({ ticket: 10, step: "implement", outcome: "running", at: "2026-09-15T10:00:00.000Z" })
+        events.appended.push(
+            { ticket: 10, step: "setup", outcome: "ok", at: "2026-09-15T09:30:00.000Z", baseSha: "spec-tip" },
+            { ticket: 10, step: "implement", outcome: "running", at: "2026-09-15T10:00:00.000Z" },
+        )
 
         // when
         await run()
@@ -810,12 +941,164 @@ describe("a run resumed over a log that is not empty", () => {
     })
 })
 
+/**
+ * ADR-0024: a setup that a killed run left behind is thrown away and cut again, never handed to the
+ * prepare agent. The recut claims the ticket a second time, which the tracker is untroubled by.
+ */
+describe("a run that recuts a killed setup", () => {
+    /** What a run killed part-way through a setup leaves: a step that began, and a half-made worktree. */
+    const halfMade: Pick<Setup, "log" | "branches" | "worktrees"> = {
+        log: [{ ticket: 10, step: "setup", outcome: "running", at: "2026-09-15T09:00:00.000Z" }],
+        branches: { "afk/4/t10": ["spec-tip"] },
+        worktrees: { ".afk/4/t10": "afk/4/t10" },
+    }
+
+    it("should cut the worktree again and take the ticket the rest of the way", async () => {
+        // given
+        const { run, events } = harness({ tickets: [ticket(10)], ...halfMade })
+
+        // when
+        await run()
+
+        // then
+        expect(settled(events.appended)).toEqual([
+            "#10 setup ok",
+            "#10 implement ok",
+            "#10 rebase ok",
+            "#10 merge ok",
+            "#10 gate ok",
+            "pull-request ok",
+        ])
+    })
+
+    it("should cut the ticket's worktree again from the spec branch's tip", async () => {
+        // given
+        const { run, git } = harness({ tickets: [ticket(10)], ...halfMade })
+
+        // when
+        await run()
+
+        // then
+        expect(git.worktrees).toEqual([
+            { path: ".afk/4/gate", branch: "afk/4/spec", startPoint: "main" },
+            { path: ".afk/4/t10", branch: "afk/4/t10", startPoint: "spec-tip" },
+        ])
+    })
+
+    it("should claim the ticket again, which the tracker is untroubled by", async () => {
+        // given
+        const { run, tracker } = harness({ tickets: [ticket(10)], ...halfMade })
+
+        // when
+        await run()
+
+        // then
+        expect(tracker.claimed).toEqual([10])
+    })
+
+    it("should send no prepare pass to it, because a half-made worktree is thrown away", async () => {
+        // given
+        const { run, preparer } = harness({ tickets: [ticket(10)], ...halfMade })
+
+        // when
+        await run()
+
+        // then
+        expect(preparer.invocations).toEqual([])
+    })
+
+    it("should fail the ticket and skip its dependents once both its setups are spent", async () => {
+        // given — a repository whose setup command is simply wrong, so both attempts go red
+        const { run, events } = harness({
+            tickets: [ticket(11), ticket(12, [11])],
+            failing: "npm ci",
+        })
+
+        // when
+        await run()
+
+        // then
+        expect(settled(events.appended)).toEqual(["#11 setup failed", "#11 setup failed", "#12 implement skipped"])
+    })
+})
+
+describe("a run resumed over a fix a killed run left part-way", () => {
+    /** What a run killed mid-fix leaves: a red gate, a fix start event, and the squash on the branch. */
+    const killedMidFix = (harnessed: ReturnType<typeof harness>): void => {
+        harnessed.git.commit("afk/4/spec", "squash-afk/4/t10", "Ticket 10 (#10)\n\nafk-ticket: 4/10")
+        harnessed.events.appended.push(
+            { ticket: 10, step: "merge", outcome: "ok", at: "2026-09-15T10:00:00.000Z" },
+            { ticket: 10, step: "gate", outcome: "running", at: "2026-09-15T10:01:00.000Z" },
+            { ticket: 10, step: "gate", outcome: "failed", at: "2026-09-15T10:02:00.000Z" },
+            {
+                ticket: 10,
+                step: "fix",
+                outcome: "running",
+                at: "2026-09-15T10:03:00.000Z",
+                sessionId: "the-killed-fix",
+                baseSha: "squash-afk/4/t10",
+            },
+        )
+    }
+
+    /** A repository the ticket's merge broke, so that the reverted tip is what goes green again. */
+    const blamed = { tickets: [ticket(10)], failing: "npm run check", red: "the merge" } as const
+
+    it("should gate what the killed fix left behind, and carry on to the revert", async () => {
+        // given
+        const harnessed = harness(blamed)
+        killedMidFix(harnessed)
+
+        // when
+        await harnessed.run()
+
+        // then
+        expect(settled(harnessed.events.appended)).toEqual([
+            "#10 merge ok",
+            "#10 gate failed",
+            "#10 gate failed",
+            "#10 revert failed",
+        ])
+    })
+
+    it("should never spend a second fix agent on it, because the killed one spent the budget", async () => {
+        // given
+        const harnessed = harness(blamed)
+        killedMidFix(harnessed)
+
+        // when
+        await harnessed.run()
+
+        // then
+        expect(harnessed.fixer.invocations).toEqual([])
+    })
+
+    it("should take the killed fix's merge back off the spec branch rather than leave it red underneath", async () => {
+        // given
+        const harnessed = harness(blamed)
+        killedMidFix(harnessed)
+
+        // when
+        await harnessed.run()
+
+        // then
+        expect(harnessed.git.commitsOn("afk/4/spec")).toEqual([
+            "spec-tip",
+            "squash-afk/4/t10",
+            "revert-squash-afk/4/t10",
+        ])
+    })
+})
+
 describe("a run that recovers a wrecked ticket", () => {
     /** What a killed run leaves behind: a step that began, a worktree, and no process. */
-    const killed = (ticket: number, sessionId?: string): Pick<Setup, "log" | "worktrees"> => ({
-        log: [{ ticket, step: "implement", outcome: "running", at: "2026-09-15T10:00:00.000Z", sessionId }],
-        worktrees: { [`.afk/4/t${ticket}`]: `afk/4/t${ticket}` },
-    })
+    const killed = (ticket: number, sessionId?: string): Pick<Setup, "log" | "branches" | "worktrees"> => {
+        const { log = [], ...rest } = warm(ticket)
+        return {
+            ...rest,
+            log: [...log, { ticket, step: "implement", outcome: "running", at: "2026-09-15T10:00:00.000Z", sessionId }],
+        }
+    }
 
     it("should prepare a ticket a killed run left mid-step and take it the rest of the way", async () => {
         // given — ADR-0019: the first tick's live action set is empty, so the stale step is caught there
@@ -826,11 +1109,13 @@ describe("a run that recovers a wrecked ticket", () => {
 
         // then
         expect(settled(events.appended)).toEqual([
+            "#10 setup ok",
             "#10 prepare ok",
             "#10 implement ok",
             "#10 rebase ok",
             "#10 merge ok",
             "#10 gate ok",
+            "pull-request ok",
         ])
     })
 
@@ -876,12 +1161,14 @@ describe("a run that recovers a wrecked ticket", () => {
 
         // then
         expect(settled(events.appended)).toEqual([
+            "#10 setup ok",
             "#10 implement failed",
             "#10 prepare ok",
             "#10 implement ok",
             "#10 rebase ok",
             "#10 merge ok",
             "#10 gate ok",
+            "pull-request ok",
         ])
     })
 
@@ -893,7 +1180,7 @@ describe("a run that recovers a wrecked ticket", () => {
         await run()
 
         // then
-        expect(settled(events.appended)).toEqual(["#10 implement failed", "#10 prepare failed"])
+        expect(settled(events.appended)).toEqual(["#10 setup ok", "#10 implement failed", "#10 prepare failed"])
     })
 })
 
@@ -1023,13 +1310,19 @@ describe("a run the operator interrupted", () => {
             tickets: [ticket(10), ticket(11), ticket(12)],
             maxParallel: 2,
             interruptedDuring: 10,
+            ...warm(10, 11),
         })
 
         // when
         await run()
 
         // then
-        expect(settled(events.appended)).toEqual(["#10 implement ok", "#11 implement ok"])
+        expect(settled(events.appended)).toEqual([
+            "#10 setup ok",
+            "#11 setup ok",
+            "#10 implement ok",
+            "#11 implement ok",
+        ])
     })
 
     it("should give no further ticket an implementer once the operator has interrupted", async () => {
@@ -1038,6 +1331,7 @@ describe("a run the operator interrupted", () => {
             tickets: [ticket(10), ticket(11), ticket(12)],
             maxParallel: 2,
             interruptedDuring: 10,
+            ...warm(10, 11),
         })
 
         // when

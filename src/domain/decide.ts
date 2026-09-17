@@ -2,14 +2,17 @@ import {
     attempts,
     type BrokenStep,
     brokenStep,
+    conflicted,
     implemented,
     type LifecycleEvent,
     merged,
     prepared,
+    rebased,
     repairableStep,
     running,
     type Step,
     settled,
+    setUp,
     statusOf,
     unattempted,
     verified,
@@ -26,6 +29,14 @@ import { slateOrder } from "./schedule.ts"
  */
 
 export type Action =
+    /**
+     * Everything an implement attempt does before an agent exists: claim the ticket, cut it a
+     * worktree, copy the environment in and run the repository's own setup command. A step of its
+     * own because it can be killed on its own and carries a budget of its own (ADR-0022), and one
+     * that is never repaired — a second of these throws the worktree away and cuts it again
+     * (ADR-0024).
+     */
+    | { kind: "setup"; ticket: number }
     /** Give a ticket to an implementer. `attempt` is counted from the log, never stored. */
     | { kind: "implement"; ticket: number; attempt: number }
     /**
@@ -35,10 +46,45 @@ export type Action =
      */
     | { kind: "prepare"; ticket: number; brokenStep: BrokenStep }
     /**
-     * Take an implemented ticket through the merge track: rebase onto the spec branch's tip, and
-     * land it there. At most one of these is ever in flight (ADR-0006).
+     * Put an implemented ticket onto the spec branch's tip, in the ticket's own worktree — always,
+     * and without probing first (ADR-0005). It is the first of the three moves the merge track is
+     * made of, and at most one move of that track is ever in flight (ADR-0006).
      */
-    | { kind: "merge"; ticket: number; attempt: number }
+    | { kind: "rebase"; ticket: number }
+    /**
+     * Hand a conflict resolver the rebase git stopped part-way. It is given for a `rebase:
+     * conflicted` and for nothing else, so that an agent is never turned loose on a worktree with
+     * nothing to resolve in it (ADR-0025, ADR-0026).
+     *
+     * `attempt` is the trip through the merge track it belongs to, counted off the rebase start
+     * events — because a resolve spends the rebase's budget rather than one of its own.
+     */
+    | { kind: "resolve"; ticket: number; attempt: number }
+    /**
+     * Land a rebased ticket on the spec branch: the squash, and the trailer cross-check that guards
+     * the window a run killed between a squash and its event leaves behind. That, and nothing else
+     * (ADR-0026).
+     */
+    | { kind: "merge"; ticket: number }
+    /**
+     * Prove the spec branch with a ticket's merge on it. It follows every merge without exception,
+     * and it is an action of its own so that a run killed between a squash and its gate resumes at
+     * the gate rather than at another trip through the merge track (ADR-0008, ADR-0026).
+     */
+    | { kind: "gate"; ticket: number }
+    /**
+     * The one attempt a red gate is worth: an agent let loose on the spec branch to mend what the
+     * ticket's merge broke. The budget is one, counted off the log's `fix` start events, and what
+     * the attempt came to is never taken as the answer — the gate runs again afterwards, because
+     * the branch is what afk proves (ADR-0009, ADR-0022).
+     */
+    | { kind: "fix"; ticket: number }
+    /**
+     * Take a merge the gate could not prove back off the spec branch, and prove the tip that
+     * leaves behind. It is where the gate-red sequence ends: the ticket failed either way, and a
+     * tip that is still red halts the run (ADR-0009).
+     */
+    | { kind: "revert"; ticket: number }
     /** Record that a ticket will not land, because something it is blocked by will not either. */
     | { kind: "skip"; ticket: number }
     /** Nothing is running and nothing more can start. */
@@ -65,18 +111,31 @@ export type RunParameters = {
 const ATTEMPT_BUDGET = 2
 
 /**
+ * What a red gate is worth: one fix attempt, and failing that the merge comes back off the branch.
+ * A budget rather than a retry policy, and counted off the log's `fix` start events like every
+ * other, so that a run killed mid-fix cannot buy a second one (ADR-0009, ADR-0022).
+ */
+const FIX_BUDGET = 1
+
+/**
  * The steps the merge track owns. What makes them one thing is the spec branch: an action about any
  * of them is an action about the branch one worktree writes, so at most one is ever in flight
  * (ADR-0006).
  */
-const MERGE_SIDE: ReadonlySet<Step> = new Set<Step>(["rebase", "resolve", "merge", "gate", "revert"])
+const MERGE_SIDE: ReadonlySet<Step> = new Set<Step>(["rebase", "resolve", "merge", "gate", "fix", "revert"])
 
 const ticketsOf = (actions: readonly Action[]): ReadonlySet<number> =>
     new Set(actions.flatMap(action => ("ticket" in action ? [action.ticket] : [])))
 
 /** Whether an action is one about the spec branch, which is the set seriality is enforced over. */
 const onMergeTrack = (action: Action): boolean =>
-    action.kind === "merge" || (action.kind === "prepare" && MERGE_SIDE.has(action.brokenStep))
+    action.kind === "rebase" ||
+    action.kind === "resolve" ||
+    action.kind === "merge" ||
+    action.kind === "gate" ||
+    action.kind === "fix" ||
+    action.kind === "revert" ||
+    (action.kind === "prepare" && MERGE_SIDE.has(action.brokenStep))
 
 /**
  * What to start now.
@@ -96,10 +155,6 @@ export const nextActions = (
 ): readonly Action[] => {
     const busy = ticketsOf(inFlight)
     const idle = (): readonly Action[] => (inFlight.length === 0 ? [{ kind: "finish" }] : [])
-
-    if (draining) {
-        return idle()
-    }
 
     /**
      * What a prepare pass would be sent to repair, or nothing where no pass would help. This is the
@@ -121,6 +176,9 @@ export const nextActions = (
         if (last.outcome === "running") {
             return repairableStep(broke) ? broke : undefined
         }
+        // A conflicted rebase is not a step that broke. It is a state of the machine with a move
+        // out of it — the resolve — and the same move whether the run that recorded it is still
+        // alive or was killed on the spot (ADR-0025, ADR-0026).
         if (last.outcome !== "failed") {
             return undefined
         }
@@ -139,9 +197,48 @@ export const nextActions = (
         return undefined
     }
 
-    /** A ticket nothing more will happen to: no step of its is live, and no pass would help. */
+    /**
+     * A setup to cut again: one that failed, or one a killed run left `running`, while its own
+     * budget still has an attempt in it. The recut is counted like any attempt, so a killed setup
+     * that is cut again and killed again fails the ticket (ADR-0024).
+     */
+    const recutting = (ticket: number): boolean => {
+        const last = statusOf(events, ticket)
+        return last?.step === "setup" && last.outcome !== "ok" && attempts(events, ticket, "setup") < ATTEMPT_BUDGET
+    }
+
+    /**
+     * Where a ticket stands in the gate-red sequence, or nothing where it is not in one. The whole
+     * of ADR-0009, read off the log rather than held as control flow inside a service: one fix
+     * attempt, the gate again on what it left behind, and the revert once the budget is spent
+     * (ADR-0023).
+     *
+     * A fix is never judged by what the fix agent said, and a `fix: running` a killed run left
+     * behind is no different: the gate follows all three alike, because the branch is what afk
+     * proves. Its start event has already spent the budget, so the sequence carries on to the
+     * revert rather than round again — which is why a killed fix cannot buy a second one.
+     */
+    const afterRedGate = (ticket: number): Action | undefined => {
+        const last = statusOf(events, ticket)
+        if (last?.step === "fix") {
+            return { kind: "gate", ticket }
+        }
+        if (last?.step === "gate" && last.outcome === "failed") {
+            return attempts(events, ticket, "fix") < FIX_BUDGET ? { kind: "fix", ticket } : { kind: "revert", ticket }
+        }
+        return undefined
+    }
+
+    /**
+     * A ticket nothing more will happen to: no step of its is live, and no pass, recut or gate-red
+     * sequence would take it any further.
+     */
     const beyondRepair = (ticket: number): boolean =>
-        repairFor(ticket) === undefined && !busy.has(ticket) && (settled(events, ticket) || running(events, ticket))
+        repairFor(ticket) === undefined &&
+        !recutting(ticket) &&
+        afterRedGate(ticket) === undefined &&
+        !busy.has(ticket) &&
+        (settled(events, ticket) || running(events, ticket))
 
     /**
      * The tickets nothing can land any more: the ones beyond repair, and everything blocked by one
@@ -178,44 +275,63 @@ export const nextActions = (
         ticket => !busy.has(ticket.number) && !dead.has(ticket.number),
     )
 
-    // One at a time, and never a doomed ticket: a ticket whose blocker died finishes its
+    // The one thing the merge track would do for this ticket now, or nothing where it has nothing
+    // to do. One at a time, and never a doomed ticket: a ticket whose blocker died finishes its
     // implementer and is skipped, rather than spending the merge track on work that cannot land
     // (ADR-0010).
-    //
-    // A merged ticket is taken back through it as readily as an implemented one. A run killed
-    // between a squash and its gate leaves one, and nothing else would ever dispatch it again — so
-    // without this the gate would have an exception, which it does not have (ADR-0008). The merge
-    // service asks git what is already on the branch rather than doing the work twice.
-    const waiting = (ticket: number): boolean => {
+    const mergeSide = (ticket: number): Action | undefined => {
+        const repair = repairFor(ticket)
+        if (repair !== undefined && MERGE_SIDE.has(repair)) {
+            return { kind: "prepare", ticket, brokenStep: repair }
+        }
+
+        const sequence = afterRedGate(ticket)
+        if (sequence !== undefined) {
+            return sequence
+        }
+
+        // The one move out of a conflict, and the only place a conflict resolver is ever called
+        // from. A killed run that left the conflict behind gets the same move, because where the
+        // ticket is is what the log says and not which process said it (ADR-0025, ADR-0026).
+        if (conflicted(events, ticket)) {
+            return { kind: "resolve", ticket, attempt: attempts(events, ticket, "rebase") }
+        }
+
         const repaired = prepared(events, ticket)
-        return (
-            implemented(events, ticket) ||
-            merged(events, ticket) ||
-            (repaired !== undefined && MERGE_SIDE.has(repaired))
-        )
+        // A ticket that landed and was never proven. A run killed between a squash and its gate
+        // leaves one, and nothing else would ever dispatch it again — so without this the gate
+        // would have an exception, which it does not have (ADR-0008).
+        if (merged(events, ticket) || repaired === "gate") {
+            return { kind: "gate", ticket }
+        }
+        // A ticket on the tip, however it got there, and the pass a broken squash earned: both want
+        // the squash, and the cross-check inside it is what makes asking twice harmless.
+        if (rebased(events, ticket) || repaired === "merge") {
+            return { kind: "merge", ticket }
+        }
+        // The head of the merge track. A pass sent to a rebase or to a resolve comes back here too:
+        // what it repaired is a trip through the track, and a trip starts at the rebase.
+        if (implemented(events, ticket) || repaired === "rebase" || repaired === "resolve") {
+            return { kind: "rebase", ticket }
+        }
+
+        return undefined
     }
 
-    // Seriality covers the prepare pass a broken merge-side step earns as well as the merge itself:
-    // both are about the branch one worktree writes, so one of them is the most that ever runs.
+    // Seriality covers every merge-side action alike — the squash, the gate that follows it, and
+    // the prepare pass a broken merge-side step earns: all of them are about the branch one
+    // worktree writes, so one of them is the most that ever runs.
     const merges: Action[] = inFlight.some(onMergeTrack)
         ? []
-        : actionable
-              .flatMap<Action>(ticket => {
-                  const repair = repairFor(ticket.number)
-                  if (repair !== undefined && MERGE_SIDE.has(repair)) {
-                      return [{ kind: "prepare", ticket: ticket.number, brokenStep: repair }]
-                  }
-                  return waiting(ticket.number)
-                      ? [
-                            {
-                                kind: "merge",
-                                ticket: ticket.number,
-                                attempt: attempts(events, ticket.number, "rebase") + 1,
-                            },
-                        ]
-                      : []
-              })
-              .slice(0, 1)
+        : actionable.flatMap<Action>(ticket => mergeSide(ticket.number) ?? []).slice(0, 1)
+
+    // A drain starts nothing new, and the gate is not new work: it is the proof of a merge this run
+    // has already made, and a drain that left one unproven would put an ungated squash on the spec
+    // branch — which is the one exception the gate does not have (ADR-0008, ADR-0016).
+    if (draining) {
+        const gates = merges.filter(action => action.kind === "gate")
+        return gates.length > 0 ? gates : idle()
+    }
 
     const slots = maxParallel - inFlight.filter(action => !onMergeTrack(action)).length
     const starts: Action[] = actionable
@@ -224,17 +340,23 @@ export const nextActions = (
             if (repair === "implement") {
                 return [{ kind: "prepare", ticket: ticket.number, brokenStep: repair }]
             }
-            // The one more attempt the prepare pass bought, and a first attempt for a ticket the
-            // log has never mentioned. Both are an implementer with a slot of its own.
+            // A warm worktree gets the implementer it was cut for. The one more attempt the prepare
+            // pass bought gets one too, and it works in the worktree it already has.
             const retrying = prepared(events, ticket.number) === "implement"
-            return retrying || (unattempted(events, ticket.number) && ready(ticket))
-                ? [
-                      {
-                          kind: "implement",
-                          ticket: ticket.number,
-                          attempt: attempts(events, ticket.number, "implement") + 1,
-                      },
-                  ]
+            if (retrying || setUp(events, ticket.number)) {
+                return [
+                    {
+                        kind: "implement",
+                        ticket: ticket.number,
+                        attempt: attempts(events, ticket.number, "implement") + 1,
+                    },
+                ]
+            }
+            // A first attempt for a ticket the log has never mentioned, and the recut a broken setup
+            // earns. Both are a setup, and both take a slot of their own: what they spend is the
+            // machine, and the pool is what bounds how much of it runs at once.
+            return recutting(ticket.number) || (unattempted(events, ticket.number) && ready(ticket))
+                ? [{ kind: "setup", ticket: ticket.number }]
                 : []
         })
         .slice(0, Math.max(slots, 0))

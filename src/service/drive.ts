@@ -4,9 +4,15 @@ import { type EventLog, type Progress, progressOf, skipped } from "../domain/eve
 import type { Interrupts } from "../domain/interrupts.ts"
 import type { PreparedRun } from "../domain/run.ts"
 import type { StepResult } from "./attempt.ts"
+import type { FixTicket } from "./fix.ts"
+import type { RunGate } from "./gate.ts"
 import type { ImplementTicket } from "./implement.ts"
 import type { MergeTicket } from "./merge.ts"
 import type { PrepareTicket } from "./prepare.ts"
+import type { RebaseTicket } from "./rebase.ts"
+import type { ResolveTicket } from "./resolve.ts"
+import type { RevertTicket } from "./revert.ts"
+import type { SetupTicket } from "./setup.ts"
 
 /** The driving port of a run: work the slate until nothing is left to start and nothing is running. */
 export type DriveRun = (run: PreparedRun, options: { maxParallel: number }) => Promise<DriveResult>
@@ -24,12 +30,25 @@ export type DriveResult = {
 
 export type DriveDeps = {
     events: EventLog
+    /** The one attempt a red gate is worth, and no more of the sequence than that (ADR-0009). */
+    fix: FixTicket
+    /** The gate, which follows every merge and is asked for as an action of its own (ADR-0008). */
+    gate: RunGate
     implement: ImplementTicket
     /** The operator's stop signal, read once per pass — never trapped by a step (ADR-0016). */
     interrupts: Interrupts
+    /** The squash onto the spec branch, and the trailer cross-check that guards it (ADR-0026). */
     merge: MergeTicket
     /** The pass a ticket a step left broken gets, mid-run and on a resumed run alike (ADR-0012). */
     prepare: PrepareTicket
+    /** The head of the merge track: every ticket onto the tip, always (ADR-0005). */
+    rebase: RebaseTicket
+    /** The conflict resolver, asked for only where git said there is a conflict (ADR-0025). */
+    resolve: ResolveTicket
+    /** The merge off the branch, and the proof of the tip it leaves behind (ADR-0009). */
+    revert: RevertTicket
+    /** What makes a ticket ready for an implementer, and what a broken one is cut again by. */
+    setup: SetupTicket
     now: Clock
 }
 
@@ -46,7 +65,20 @@ type Settled = { action: Action; result: StepResult }
  * recognisable at all.
  */
 export const createDriveService =
-    ({ events, implement, interrupts, merge, now, prepare }: DriveDeps): DriveRun =>
+    ({
+        events,
+        fix,
+        gate,
+        implement,
+        interrupts,
+        merge,
+        now,
+        prepare,
+        rebase,
+        resolve,
+        revert,
+        setup,
+    }: DriveDeps): DriveRun =>
     async (run, { maxParallel }) => {
         const { root, spec, manifest } = run
         const inFlight = new Map<Action, Promise<Settled>>()
@@ -81,16 +113,52 @@ export const createDriveService =
             // merge is ever handed out is the decision function's rule, not a lock held here
             // (ADR-0006).
             for (const action of actions) {
+                if (action.kind === "setup") {
+                    inFlight.set(
+                        action,
+                        setup(run, action).then(result => ({ action, result })),
+                    )
+                }
                 if (action.kind === "implement") {
                     inFlight.set(
                         action,
                         implement(run, action).then(result => ({ action, result })),
                     )
                 }
+                if (action.kind === "rebase") {
+                    inFlight.set(
+                        action,
+                        rebase(run, action).then(result => ({ action, result })),
+                    )
+                }
+                if (action.kind === "resolve") {
+                    inFlight.set(
+                        action,
+                        resolve(run, action).then(result => ({ action, result })),
+                    )
+                }
                 if (action.kind === "merge") {
                     inFlight.set(
                         action,
                         merge(run, action).then(result => ({ action, result })),
+                    )
+                }
+                if (action.kind === "gate") {
+                    inFlight.set(
+                        action,
+                        gate(run, action).then(result => ({ action, result })),
+                    )
+                }
+                if (action.kind === "fix") {
+                    inFlight.set(
+                        action,
+                        fix(run, action).then(result => ({ action, result })),
+                    )
+                }
+                if (action.kind === "revert") {
+                    inFlight.set(
+                        action,
+                        revert(run, action).then(result => ({ action, result })),
                     )
                 }
                 if (action.kind === "prepare") {
