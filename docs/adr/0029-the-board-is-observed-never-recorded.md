@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded in part by ADR-0030
 ---
 
 # The board is observed, never recorded

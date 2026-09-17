@@ -223,15 +223,15 @@ _Avoid_: result, final status, verdict
 
 **Board**:
 What a run shows while it runs: every ticket of the spec at once, each on the track it is currently
-on. Derived from the event log **and** the driver's live action set, never from the log alone,
-because whether a `running` event is a step that is *happening* is a question the log cannot answer
-(ADR-0019). Nothing about it is written down: it is observed rather than recorded, which is why afk
-has no watcher of its own (ADR-0029).
+on. Derived from the manifest and the event log and from nothing else: it says what the log says,
+and claims nothing about liveness, because a step the log left `running` is one whose end event is
+not written rather than one that is certainly happening (ADR-0030). Nothing about it is written
+down, and `afk <spec> --board-only` draws the same board from the run directory.
 _Avoid_: dashboard, monitor, progress view, TUI
 
 **Trail**:
-A row's steps, across the track that row is on: the ones the log has been through, the one the
-driver is running now, and the ones still ahead. What has happened, what is happening and what is
+A row's steps, across the track that row is on: the ones the log has been through, the one it
+started and has not ended, and the ones still ahead. What has happened, what was begun and what is
 next, on one line. A prepare pass is no step of a trail — it is read at the step it was sent to
 repair, which is the step the domain already routes it by.
 _Avoid_: progress bar, timeline, breadcrumb
@@ -239,8 +239,8 @@ _Avoid_: progress bar, timeline, breadcrumb
 **Interrupted**:
 A step the log left `running` whose action the driver does not hold: the step's process is gone, and
 it is not happening. Only the live action set tells it from a step that is (ADR-0019), which is what
-a resumed run is full of. The board reads such a ticket at the step a prepare pass will be sent to,
-or as beyond repair where no pass would help.
+a resumed run is full of. It is the driver's distinction, drawn to decide what to dispatch; the
+board does not draw it (ADR-0030).
 _Avoid_: stale, orphaned, hung, zombie
 
 **`.afk/`**:
