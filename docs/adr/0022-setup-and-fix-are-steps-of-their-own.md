@@ -64,8 +64,6 @@ session, and two events per attempt is unchanged.
   a reverted ticket from ending on `gate: ok` and reading as verified.
 - A `setup` that fails is an ordinary failed step, exactly as its failure is today. What is new is
   that a `setup` that is *killed* leaves `setup: running` rather than silence.
-- **What recovery does with either step is not decided here.** Whether a broken `setup` is repairable
-  and whose budget it spends, and what recovers a killed `fix` — whose only route back today is
-  inside `fix.ts`'s control flow, so that a killed fix currently reads as beyond repair and leaves
-  its merge sitting on a red spec branch — are open, and this record deliberately stops short of
-  them.
+- **Neither step is repairable, and neither is recovered by an agent.** A broken `setup` is recut
+  (ADR-0024); a killed `fix` goes back to the gate, which is now a sequence the decision function
+  owns (ADR-0023). Both were open when this record was written.

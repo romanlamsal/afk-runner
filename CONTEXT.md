@@ -132,7 +132,8 @@ _Avoid_: phase, stage, state
 **Setup step**:
 Claiming the ticket, cutting its worktree, copying environment files in and running setup —
 everything an implement attempt does before an agent exists. Named for its last act, it is more than
-the setup command, and it is a step so that being killed part-way through it is visible.
+the setup command, and it is a step so that being killed part-way through it is visible. It is never
+repaired: a broken one is thrown away and cut again, on its own budget (ADR-0024).
 _Avoid_: bootstrap, provisioning, pre-flight
 
 **Attempt**:
@@ -155,7 +156,8 @@ _Avoid_: log line, transition, history entry
 **Budget**:
 How many attempts a step gets, counted off its start events in the log. Nothing stores a counter, so
 nothing can hold one that disagrees; a budget no step can be counted for is asserted rather than
-derivable, which is what made `fix` a step (ADR-0022).
+derivable, which is what made `fix` a step (ADR-0022). Each step counts its own, except a resolve,
+which spends its rebase's.
 _Avoid_: retry limit, attempt counter, quota
 
 **Status**:
@@ -227,7 +229,8 @@ _Avoid_: repair agent, doctor, healer
 
 **Prepare agent**:
 The agent that makes a wrecked ticket fit for the normal track to pick up, before a retry mid-run or
-before anything else on a resume. It never lands work.
+before anything else on a resume. It never lands work. Three steps are never sent to it: `setup`,
+which is recut instead; `fix`, which goes back to the gate; and `revert`, which is not undone.
 _Avoid_: recovery agent, triage agent
 
 **PR writer**:

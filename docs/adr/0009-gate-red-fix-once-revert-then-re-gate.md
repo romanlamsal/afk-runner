@@ -24,7 +24,7 @@ status: accepted
 ## Consequences
 
 - The fix agent gets exactly one attempt. This is a budget, not a retry policy. There is no loop to
-  bound: the recovery is called once, by the merge track, for one red gate. **The budget is
+  bound: the decision function gives the fix action once, for one red gate (ADR-0023). **The budget is
   derivable rather than asserted**: a fix is its own step, so it is counted off the log's `fix`
   start events like every other budget (ADR-0022). A run killed between a red gate and its revert
   cannot therefore buy a second one.
