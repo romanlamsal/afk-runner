@@ -1,104 +1,56 @@
 import type { AgentRunner } from "../domain/agent.ts"
 import type { Clock } from "../domain/clock.ts"
-import { type EventDetails, type EventLog, type LifecycleEvent, reverted, statusOf } from "../domain/events.ts"
+import { type EventDetails, type EventLog, type Outcome, statusOf } from "../domain/events.ts"
 import { fixerFault } from "../domain/fix.ts"
 import type { Git } from "../domain/git.ts"
-import type { Ticket } from "../domain/manifest.ts"
+import { ticketOf } from "../domain/manifest.ts"
 import { transcriptPath } from "../domain/paths.ts"
 import { PROFILES } from "../domain/profiles.ts"
 import { fixerPrompt } from "../domain/prompts.ts"
 import type { PreparedRun } from "../domain/run.ts"
-import { revertMessage } from "../domain/squash.ts"
 import { attemptWithAgent, type StepResult } from "./attempt.ts"
-import type { ProveBranch } from "./gate.ts"
 
-/** What a red gate is worth: one fix attempt, and failing that the merge comes back off the branch. */
-export type FixRedGate = (run: PreparedRun, ticket: Ticket) => Promise<StepResult>
+/** The one attempt a red gate is worth, spent in the gate worktree (ADR-0009). */
+export type FixTicket = (run: PreparedRun, action: { ticket: number }) => Promise<StepResult>
 
 export type FixDeps = {
     agent: AgentRunner
     events: EventLog
     git: Git
     now: Clock
-    /** `setup` then `verify`, unrecorded: the reverted tip is proven, not gated (ADR-0009). */
-    prove: ProveBranch
 }
 
 /**
- * The red gate's recovery, and the whole of ADR-0009: one fix attempt under a hard constraint, then
- * the revert, then proving what the revert left behind.
+ * The fix agent's single attempt at a red gate, and nothing else: one step, two events, no sequence.
+ * What follows it — the gate again, and the revert once this budget is spent — is the decision
+ * function's, so that a run killed here resumes into the same sequence a live one would have
+ * carried on with (ADR-0023).
  *
- * The last of those three is what makes the design's claim honest. Without it afk would revert
- * every ticket in turn against a branch that was already broken, blaming each in sequence; with it,
- * a green on the reverted tip *demonstrates* that this merge was the cause, and a red says the
- * branch is broken independently of any ticket and nothing above it is worth continuing.
+ * What is written down is what the attempt came to, never what it proved: a session that died after
+ * committing a fix that works leaves a green branch, and the branch is what afk proves. That is why
+ * this ends at `fix: ok` or `fix: failed` and the gate is what asks the question (ADR-0009).
  *
- * The fix gets exactly one attempt. That is a budget rather than a retry policy, which is why there
- * is no loop here to bound: this is called once, by the merge track, for one red gate.
+ * The attempt is one because the budget is one, counted off the `fix` start events this writes
+ * (ADR-0022). There is no loop here to bound.
  */
 export const createFixService =
-    ({ agent, events, git, now, prove }: FixDeps): FixRedGate =>
-    async (run, { number: ticket, title }) => {
+    ({ agent, events, git, now }: FixDeps): FixTicket =>
+    async (run, { ticket }) => {
         const { root, spec, manifest } = run
+        const listed = ticketOf(manifest, spec, ticket)
+        if (!listed.ok) {
+            return { outcome: "halted", reason: listed.reason }
+        }
 
-        const record = (event: LifecycleEvent): Promise<void> => events.append(root, spec, event)
-
-        /**
-         * The fix attempt's own two events. The step is `gate`, because a second gate is what is
-         * being attempted — the closed step enum is what recovery keys on, and a fix is not
-         * something recovery keys on (ADR-0011).
-         */
-        const fixAttempt = (outcome: "running" | "ok" | "failed", details: EventDetails = {}): Promise<void> =>
-            record({ ticket, step: "gate", outcome, at: now().toISOString(), ...details })
+        const record = (outcome: Outcome, details: EventDetails = {}): Promise<void> =>
+            events.append(root, spec, { ...details, ticket, step: "fix", outcome, at: now().toISOString() })
 
         // The commit the ticket landed as is the spec branch's tip, because the merge track is
         // serial and the gate worktree is the branch's sole writer: nothing can have landed after
-        // it (ADR-0006). It is read *now*, before the fix agent commits on top of it, and whatever
-        // the fix agent adds is undone along with it.
+        // it (ADR-0006). It is read *now*, before the fix agent commits on top of it, and carried
+        // by the start event so that the revert undoes the squash and the fix together even when a
+        // different process is the one that performs it (ADR-0009).
         const landed = await git.revision(root, run.branch)
-
-        /**
-         * The run cannot go on, and the ticket is settled on the way out: a drain that waits on a
-         * ticket nothing will happen to would never end.
-         */
-        const halt = async (reason: string, detail: string = reason): Promise<StepResult> => {
-            await record(reverted(ticket, now(), detail))
-            return { outcome: "halted", reason }
-        }
-
-        /**
-         * Take the merge back off the branch, and then prove the tip it leaves behind. Every path
-         * out of here leaves the ticket failed — a revert afk could not perform and a branch that
-         * is red without the ticket both halt the run as well, and the detail is what tells the
-         * three apart.
-         */
-        const revert = async (): Promise<StepResult> => {
-            await record({ ticket, step: "revert", outcome: "running", at: now().toISOString() })
-
-            if (landed === undefined) {
-                return halt(`the merge of #${ticket} could not be found on ${run.branch} to revert`)
-            }
-
-            const undone = await git.revert(root, {
-                path: run.gate,
-                from: landed,
-                message: revertMessage({ spec, ticket, title }),
-            })
-            if (!undone.ok) {
-                return halt(`the merge of #${ticket} could not be reverted off ${run.branch}: ${undone.reason}`)
-            }
-
-            const proved = await prove(run)
-            if (!proved.ok) {
-                const reason = `${run.branch} is broken independently of any ticket: it is still red with #${ticket} reverted off it`
-                return halt(reason, `${reason}: ${proved.detail}`)
-            }
-
-            await record(
-                reverted(ticket, now(), `the gate was green once #${ticket} was reverted, so its merge was the cause`),
-            )
-            return { outcome: "failed" }
-        }
 
         // One attempt, and never a second, so the transcript is named for the only one there is.
         const transcript = transcriptPath(spec, `t${ticket}-fix-1`, now())
@@ -108,7 +60,7 @@ export const createFixService =
                 prompt: fixerPrompt({
                     spec,
                     ticket,
-                    title,
+                    title: listed.ticket.title,
                     branch: run.branch,
                     verify: manifest.verify,
                     // What the gate said when it went red, quoted for the agent that has to
@@ -123,42 +75,29 @@ export const createFixService =
                 outputSchema: undefined,
                 profile: PROFILES.fixer,
             },
-            sessionId => fixAttempt("running", { sessionId, transcriptPath: transcript }),
+            sessionId => record("running", { sessionId, baseSha: landed, transcriptPath: transcript }),
         )
         const { sessionId, usage } = attempted
+        const details: EventDetails = { sessionId, transcriptPath: transcript, usage }
 
         /**
-         * An attempt the agent itself reported as failed. It is not the question the gate asks —
-         * a session that died after committing a fix that works leaves a green branch, and the
-         * branch is what afk proves — so it is carried as words rather than branched on, and only
-         * reaches the log where the attempt came to nothing anyway (ADR-0009).
+         * An attempt the agent itself reported as failed. It is not the question the gate asks, so
+         * it is carried as words rather than branched on — and it reaches the log beside whatever
+         * afk can see for itself about what was left behind (ADR-0009).
          */
         const failure =
             attempted.outcome === "failed" ? `the fix agent for #${ticket} failed: ${attempted.detail}` : undefined
-
-        const failedWith = (detail: string): Promise<void> =>
-            fixAttempt("failed", {
-                sessionId,
-                transcriptPath: transcript,
-                usage,
-                detail: failure === undefined ? detail : `${failure}, and ${detail}`,
-            })
 
         const fault = fixerFault({
             clean: await git.isClean(root, run.gate),
             moved: (await git.revision(root, run.branch)) !== landed,
         })
-        if (fault !== undefined) {
-            await failedWith(fault)
-            return revert()
+        const said = [failure, fault].filter(word => word !== undefined).join(", and ")
+        if (said !== "") {
+            await record("failed", { ...details, detail: said })
+            return { outcome: "failed" }
         }
 
-        const proved = await prove(run)
-        if (!proved.ok) {
-            await failedWith(proved.detail)
-            return revert()
-        }
-
-        await fixAttempt("ok", { sessionId, transcriptPath: transcript, usage })
+        await record("ok", details)
         return { outcome: "ok" }
     }

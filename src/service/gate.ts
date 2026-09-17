@@ -6,7 +6,6 @@ import { ticketOf } from "../domain/manifest.ts"
 import { ticketWorktree } from "../domain/paths.ts"
 import type { PreparedRun } from "../domain/run.ts"
 import type { StepResult } from "./attempt.ts"
-import type { FixRedGate } from "./fix.ts"
 
 /** The gate: prove the spec branch after a ticket has landed on it. */
 export type RunGate = (run: PreparedRun, action: { ticket: number }) => Promise<StepResult>
@@ -30,8 +29,6 @@ export type ProveDeps = {
 
 export type GateDeps = {
     events: EventLog
-    /** What a red gate is worth: one fix attempt, then the revert and the gate again (ADR-0009). */
-    fix: FixRedGate
     git: Git
     now: Clock
     prove: ProveBranch
@@ -66,11 +63,12 @@ export const createProveBranch =
  * It is an action of its own, given for a ticket whose merge landed and was never proven, so that a
  * run killed between a squash and its gate resumes at the gate rather than at the merge (ADR-0026).
  *
- * What a red gate is worth is still spent from here: the fix service gets the one fix attempt, and
- * failing that takes the merge back off the branch (ADR-0009).
+ * What a red gate is worth is not decided here. The gate records what it found and stops; the fix
+ * attempt, the gate that follows it and the revert that ends the sequence are actions the decision
+ * function gives out of the log (ADR-0009, ADR-0023).
  */
 export const createGateService =
-    ({ events, fix, git, now, prove }: GateDeps): RunGate =>
+    ({ events, git, now, prove }: GateDeps): RunGate =>
     async (run, { ticket }) => {
         const { root, spec, manifest } = run
         const listed = ticketOf(manifest, spec, ticket)
@@ -102,12 +100,10 @@ export const createGateService =
         const proved = await prove(run)
         if (!proved.ok) {
             await record("failed", proved.detail)
-            // A red gate is not the end of the ticket by itself: the fix service spends the one fix
-            // attempt on it, and failing that takes the merge back off the branch and gates what is
-            // left, so that the blame is demonstrated rather than asserted (ADR-0009). What comes
-            // back is the ticket's fate either way.
-            const fixed = await fix(run, listed.ticket)
-            return fixed.outcome === "ok" ? green() : fixed
+            // A red gate is not the end of the ticket by itself, and it is not this service's
+            // business what it is worth: the log says the gate went red, and the decision function
+            // reads the sequence out of it (ADR-0009, ADR-0023).
+            return { outcome: "failed" }
         }
 
         await record("ok")

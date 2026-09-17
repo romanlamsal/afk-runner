@@ -30,6 +30,7 @@ export const STEPS = [
     "resolve",
     "merge",
     "gate",
+    "fix",
     "revert",
     "pull-request",
 ] as const
@@ -85,7 +86,11 @@ const eventSchema = z.object({
      * rather than an agent, and an attempt that never had a session never had one to record.
      */
     sessionId: z.string().optional(),
-    /** The commit a ticket's worktree was cut from, carried by the setup that cut it. */
+    /**
+     * The commit a step's attempt started from, carried by its start event: the commit a ticket's
+     * worktree was cut from by the setup that cut it, and the spec branch's tip a fix agent was let
+     * loose on — which is the merge the revert takes back off, fix commits and all (ADR-0009).
+     */
     baseSha: z.string().optional(),
     /** Where the attempt's transcript is, relative to the repository root. */
     transcriptPath: z.string().optional(),
@@ -231,6 +236,15 @@ export const prepared = (events: readonly LifecycleEvent[], ticket: number): Ste
     const last = statusOf(events, ticket)
     return last?.step === "prepare" && last.outcome === "ok" ? brokenStep(events, ticket) : undefined
 }
+
+/**
+ * What a step's last attempt started from, where it recorded one. The revert reads the fix's: the
+ * spec branch's tip before the fix agent committed on it is the merge that has to come off, and
+ * reading it back off the log is what lets a revert follow a fix the run that started it did not
+ * live to finish (ADR-0009, ADR-0023).
+ */
+export const baseShaOf = (events: readonly LifecycleEvent[], ticket: number, step: Step): string | undefined =>
+    events.findLast(event => event.ticket === ticket && event.step === step && event.baseSha !== undefined)?.baseSha
 
 /**
  * The session a step's last attempt was given, where it was given one at all. An id here was read

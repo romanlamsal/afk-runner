@@ -4,10 +4,12 @@ import { type EventLog, type Progress, progressOf, skipped } from "../domain/eve
 import type { Interrupts } from "../domain/interrupts.ts"
 import type { PreparedRun } from "../domain/run.ts"
 import type { StepResult } from "./attempt.ts"
+import type { FixTicket } from "./fix.ts"
 import type { RunGate } from "./gate.ts"
 import type { ImplementTicket } from "./implement.ts"
 import type { MergeTicket } from "./merge.ts"
 import type { PrepareTicket } from "./prepare.ts"
+import type { RevertTicket } from "./revert.ts"
 import type { SetupTicket } from "./setup.ts"
 
 /** The driving port of a run: work the slate until nothing is left to start and nothing is running. */
@@ -26,6 +28,8 @@ export type DriveResult = {
 
 export type DriveDeps = {
     events: EventLog
+    /** The one attempt a red gate is worth, and no more of the sequence than that (ADR-0009). */
+    fix: FixTicket
     /** The gate, which follows every merge and is asked for as an action of its own (ADR-0008). */
     gate: RunGate
     implement: ImplementTicket
@@ -34,6 +38,8 @@ export type DriveDeps = {
     merge: MergeTicket
     /** The pass a ticket a step left broken gets, mid-run and on a resumed run alike (ADR-0012). */
     prepare: PrepareTicket
+    /** The merge off the branch, and the proof of the tip it leaves behind (ADR-0009). */
+    revert: RevertTicket
     /** What makes a ticket ready for an implementer, and what a broken one is cut again by. */
     setup: SetupTicket
     now: Clock
@@ -52,7 +58,7 @@ type Settled = { action: Action; result: StepResult }
  * recognisable at all.
  */
 export const createDriveService =
-    ({ events, gate, implement, interrupts, merge, now, prepare, setup }: DriveDeps): DriveRun =>
+    ({ events, fix, gate, implement, interrupts, merge, now, prepare, revert, setup }: DriveDeps): DriveRun =>
     async (run, { maxParallel }) => {
         const { root, spec, manifest } = run
         const inFlight = new Map<Action, Promise<Settled>>()
@@ -109,6 +115,18 @@ export const createDriveService =
                     inFlight.set(
                         action,
                         gate(run, action).then(result => ({ action, result })),
+                    )
+                }
+                if (action.kind === "fix") {
+                    inFlight.set(
+                        action,
+                        fix(run, action).then(result => ({ action, result })),
+                    )
+                }
+                if (action.kind === "revert") {
+                    inFlight.set(
+                        action,
+                        revert(run, action).then(result => ({ action, result })),
                     )
                 }
                 if (action.kind === "prepare") {

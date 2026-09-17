@@ -54,6 +54,19 @@ export type Action =
      * the gate rather than at another trip through the merge track (ADR-0008, ADR-0026).
      */
     | { kind: "gate"; ticket: number }
+    /**
+     * The one attempt a red gate is worth: an agent let loose on the spec branch to mend what the
+     * ticket's merge broke. The budget is one, counted off the log's `fix` start events, and what
+     * the attempt came to is never taken as the answer — the gate runs again afterwards, because
+     * the branch is what afk proves (ADR-0009, ADR-0022).
+     */
+    | { kind: "fix"; ticket: number }
+    /**
+     * Take a merge the gate could not prove back off the spec branch, and prove the tip that
+     * leaves behind. It is where the gate-red sequence ends: the ticket failed either way, and a
+     * tip that is still red halts the run (ADR-0009).
+     */
+    | { kind: "revert"; ticket: number }
     /** Record that a ticket will not land, because something it is blocked by will not either. */
     | { kind: "skip"; ticket: number }
     /** Nothing is running and nothing more can start. */
@@ -80,11 +93,18 @@ export type RunParameters = {
 const ATTEMPT_BUDGET = 2
 
 /**
+ * What a red gate is worth: one fix attempt, and failing that the merge comes back off the branch.
+ * A budget rather than a retry policy, and counted off the log's `fix` start events like every
+ * other, so that a run killed mid-fix cannot buy a second one (ADR-0009, ADR-0022).
+ */
+const FIX_BUDGET = 1
+
+/**
  * The steps the merge track owns. What makes them one thing is the spec branch: an action about any
  * of them is an action about the branch one worktree writes, so at most one is ever in flight
  * (ADR-0006).
  */
-const MERGE_SIDE: ReadonlySet<Step> = new Set<Step>(["rebase", "resolve", "merge", "gate", "revert"])
+const MERGE_SIDE: ReadonlySet<Step> = new Set<Step>(["rebase", "resolve", "merge", "gate", "fix", "revert"])
 
 const ticketsOf = (actions: readonly Action[]): ReadonlySet<number> =>
     new Set(actions.flatMap(action => ("ticket" in action ? [action.ticket] : [])))
@@ -93,6 +113,8 @@ const ticketsOf = (actions: readonly Action[]): ReadonlySet<number> =>
 const onMergeTrack = (action: Action): boolean =>
     action.kind === "merge" ||
     action.kind === "gate" ||
+    action.kind === "fix" ||
+    action.kind === "revert" ||
     (action.kind === "prepare" && MERGE_SIDE.has(action.brokenStep))
 
 /**
@@ -166,10 +188,36 @@ export const nextActions = (
         return last?.step === "setup" && last.outcome !== "ok" && attempts(events, ticket, "setup") < ATTEMPT_BUDGET
     }
 
-    /** A ticket nothing more will happen to: no step of its is live, and no pass or recut would help. */
+    /**
+     * Where a ticket stands in the gate-red sequence, or nothing where it is not in one. The whole
+     * of ADR-0009, read off the log rather than held as control flow inside a service: one fix
+     * attempt, the gate again on what it left behind, and the revert once the budget is spent
+     * (ADR-0023).
+     *
+     * A fix is never judged by what the fix agent said, and a `fix: running` a killed run left
+     * behind is no different: the gate follows all three alike, because the branch is what afk
+     * proves. Its start event has already spent the budget, so the sequence carries on to the
+     * revert rather than round again — which is why a killed fix cannot buy a second one.
+     */
+    const afterRedGate = (ticket: number): Action | undefined => {
+        const last = statusOf(events, ticket)
+        if (last?.step === "fix") {
+            return { kind: "gate", ticket }
+        }
+        if (last?.step === "gate" && last.outcome === "failed") {
+            return attempts(events, ticket, "fix") < FIX_BUDGET ? { kind: "fix", ticket } : { kind: "revert", ticket }
+        }
+        return undefined
+    }
+
+    /**
+     * A ticket nothing more will happen to: no step of its is live, and no pass, recut or gate-red
+     * sequence would take it any further.
+     */
     const beyondRepair = (ticket: number): boolean =>
         repairFor(ticket) === undefined &&
         !recutting(ticket) &&
+        afterRedGate(ticket) === undefined &&
         !busy.has(ticket) &&
         (settled(events, ticket) || running(events, ticket))
 
@@ -216,6 +264,11 @@ export const nextActions = (
         const repair = repairFor(ticket)
         if (repair !== undefined && MERGE_SIDE.has(repair)) {
             return { kind: "prepare", ticket, brokenStep: repair }
+        }
+
+        const sequence = afterRedGate(ticket)
+        if (sequence !== undefined) {
+            return sequence
         }
 
         const repaired = prepared(events, ticket)

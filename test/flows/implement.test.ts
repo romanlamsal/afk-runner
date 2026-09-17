@@ -11,11 +11,12 @@ import { mergedTickets } from "../../src/domain/squash.ts"
 import type { StepResult } from "../../src/service/attempt.ts"
 import { createDriveService } from "../../src/service/drive.ts"
 import { createFinishService } from "../../src/service/finish.ts"
-import { createFixService } from "../../src/service/fix.ts"
+import { createFixService, type FixTicket } from "../../src/service/fix.ts"
 import { createGateService, createProveBranch, type RunGate } from "../../src/service/gate.ts"
 import { createImplementService } from "../../src/service/implement.ts"
 import { createMergeService, type MergeTicket } from "../../src/service/merge.ts"
 import { createPrepareService } from "../../src/service/prepare.ts"
+import { createRevertService, type RevertTicket } from "../../src/service/revert.ts"
 import { createSetupService, type SetupTicket } from "../../src/service/setup.ts"
 import { createStartService } from "../../src/service/start.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
@@ -151,27 +152,22 @@ const harness = ({
         now,
     })
 
-    const gateTrack = createGateService({
+    const gateTrack = createGateService({ events: events.log, git: git.git, now, prove })
+
+    // A fix agent that commits a fix on the spec branch and makes the repository green again,
+    // unless this scenario says it is one that cannot.
+    const fixTrack = createFixService({
+        agent: async invocation => {
+            const result = await fixer.run(invocation)
+            if (fixing) {
+                git.commit("afk/4/spec", "the-fix")
+                commands.mend()
+            }
+            return result
+        },
         events: events.log,
-        // A fix agent that commits a fix on the spec branch and makes the repository green again,
-        // unless this scenario says it is one that cannot.
-        fix: createFixService({
-            agent: async invocation => {
-                const result = await fixer.run(invocation)
-                if (fixing) {
-                    git.commit("afk/4/spec", "the-fix")
-                    commands.mend()
-                }
-                return result
-            },
-            events: events.log,
-            git: gitForFix,
-            now,
-            prove,
-        }),
         git: git.git,
         now,
-        prove,
     })
 
     const setupTrack = createSetupService({
@@ -192,6 +188,7 @@ const harness = ({
         concurrency.running -= 1
         return result
     }
+    const revertTrack = createRevertService({ events: events.log, git: gitForFix, now, prove })
 
     /** Counted over both merge-side services, because seriality is about the branch and not one step. */
     const serially =
@@ -206,6 +203,8 @@ const harness = ({
 
     const merge: MergeTicket = serially(mergeTrack)
     const gate: RunGate = serially(gateTrack)
+    const fix: FixTicket = serially(fixTrack)
+    const revert: RevertTicket = serially(revertTrack)
 
     const cli = createCli({
         isInteractive: () => true,
@@ -255,6 +254,8 @@ const harness = ({
                 setup,
                 merge,
                 gate,
+                fix,
+                revert,
                 prepare: createPrepareService({ agent: preparer.run, events: events.log, git: git.git, now }),
                 now,
             }),
@@ -527,6 +528,7 @@ describe("a run whose gate goes red", () => {
             "#11 rebase ok",
             "#11 merge ok",
             "#11 gate failed",
+            "#11 fix ok",
             "#11 gate ok",
             "#12 setup ok",
             "#12 implement ok",
@@ -551,6 +553,7 @@ describe("a run whose gate goes red", () => {
             "#11 rebase ok",
             "#11 merge ok",
             "#11 gate failed",
+            "#11 fix failed",
             "#11 gate failed",
             "#11 revert failed",
             "#12 implement skipped",
@@ -967,6 +970,74 @@ describe("a run that recuts a killed setup", () => {
 
         // then
         expect(settled(events.appended)).toEqual(["#11 setup failed", "#11 setup failed", "#12 implement skipped"])
+    })
+})
+
+describe("a run resumed over a fix a killed run left part-way", () => {
+    /** What a run killed mid-fix leaves: a red gate, a fix start event, and the squash on the branch. */
+    const killedMidFix = (harnessed: ReturnType<typeof harness>): void => {
+        harnessed.git.commit("afk/4/spec", "squash-afk/4/t10", "Ticket 10 (#10)\n\nafk-ticket: 4/10")
+        harnessed.events.appended.push(
+            { ticket: 10, step: "merge", outcome: "ok", at: "2026-09-15T10:00:00.000Z" },
+            { ticket: 10, step: "gate", outcome: "running", at: "2026-09-15T10:01:00.000Z" },
+            { ticket: 10, step: "gate", outcome: "failed", at: "2026-09-15T10:02:00.000Z" },
+            {
+                ticket: 10,
+                step: "fix",
+                outcome: "running",
+                at: "2026-09-15T10:03:00.000Z",
+                sessionId: "the-killed-fix",
+                baseSha: "squash-afk/4/t10",
+            },
+        )
+    }
+
+    /** A repository the ticket's merge broke, so that the reverted tip is what goes green again. */
+    const blamed = { tickets: [ticket(10)], failing: "npm run check", red: "the merge" } as const
+
+    it("should gate what the killed fix left behind, and carry on to the revert", async () => {
+        // given
+        const harnessed = harness(blamed)
+        killedMidFix(harnessed)
+
+        // when
+        await harnessed.run()
+
+        // then
+        expect(settled(harnessed.events.appended)).toEqual([
+            "#10 merge ok",
+            "#10 gate failed",
+            "#10 gate failed",
+            "#10 revert failed",
+        ])
+    })
+
+    it("should never spend a second fix agent on it, because the killed one spent the budget", async () => {
+        // given
+        const harnessed = harness(blamed)
+        killedMidFix(harnessed)
+
+        // when
+        await harnessed.run()
+
+        // then
+        expect(harnessed.fixer.invocations).toEqual([])
+    })
+
+    it("should take the killed fix's merge back off the spec branch rather than leave it red underneath", async () => {
+        // given
+        const harnessed = harness(blamed)
+        killedMidFix(harnessed)
+
+        // when
+        await harnessed.run()
+
+        // then
+        expect(harnessed.git.commitsOn("afk/4/spec")).toEqual([
+            "spec-tip",
+            "squash-afk/4/t10",
+            "revert-squash-afk/4/t10",
+        ])
     })
 })
 

@@ -6,12 +6,14 @@ import type { StepResult } from "../../src/service/attempt.ts"
 import { createGateService, createProveBranch } from "../../src/service/gate.ts"
 import { createFakeCommands } from "../fakes/commands.ts"
 import { createFakeEventLog } from "../fakes/event-log.ts"
-import { createFakeFix } from "../fakes/fix.ts"
 import { createFakeGit } from "../fakes/git.ts"
 
 /**
  * The gate. What is asserted is which commands ran where, and what the log says the spec branch came
- * to — the only thing in the run that produces **verified** — and what a red one is handed to.
+ * to — the only thing in the run that produces **verified**.
+ *
+ * What a red gate is worth is not here: it is the decision function's sequence, asserted against it
+ * directly in `test/domain/decide.test.ts` (ADR-0023).
  */
 
 const MANIFEST: Manifest = {
@@ -33,25 +35,21 @@ const RUN: PreparedRun = {
 type Setup = {
     /** The command that goes red in this repository; undefined is one where both pass. */
     failing?: string
-    /** The tickets whose red gate the one fix attempt makes green. */
-    fixed?: readonly number[]
 }
 
-const harness = ({ failing, fixed = [] }: Setup = {}) => {
+const harness = ({ failing }: Setup = {}) => {
     const commands = createFakeCommands(failing)
     const events = createFakeEventLog()
-    const fix = createFakeFix(fixed)
     const git = createFakeGit()
 
     const gate = createGateService({
         events: events.log,
-        fix: fix.fix,
         git: git.git,
         now: () => new Date(),
         prove: createProveBranch({ commands: commands.run }),
     })
 
-    return { commands, events, fix, git, gate: (ticket = 7): Promise<StepResult> => gate(RUN, { ticket }) }
+    return { commands, events, git, gate: (ticket = 7): Promise<StepResult> => gate(RUN, { ticket }) }
 }
 
 const steps = (appended: readonly LifecycleEvent[]): string[] => appended.map(event => `${event.step} ${event.outcome}`)
@@ -143,41 +141,16 @@ describe("the gate service: a spec branch that does not hold up", () => {
     })
 })
 
-describe("the gate service: what a red gate is worth", () => {
-    it("should spend no fix attempt on a ticket it proved first time", async () => {
+describe("the gate service: what it reports", () => {
+    it("should report a red as the ticket's step failing, and leave what that is worth to the log's reader", async () => {
         // given
-        const { gate, fix } = harness()
-
-        // when
-        await gate()
-
-        // then
-        expect(fix.attempted).toEqual([])
-    })
-
-    it("should hand a red gate to the fix service rather than end the ticket there (ADR-0009)", async () => {
-        // given
-        const { gate, fix } = harness({ failing: "npm run check" })
-
-        // when
-        await gate()
-
-        // then
-        expect(fix.attempted).toEqual([7])
-    })
-
-    it.each([
-        ["could not save", [], { outcome: "failed" }],
-        ["made green", [7], { outcome: "ok" }],
-    ] as const)("should report the fate of a ticket the one fix attempt %s", async (_name, fixed, expected) => {
-        // given
-        const { gate } = harness({ failing: "npm run check", fixed })
+        const { gate } = harness({ failing: "npm run check" })
 
         // when
         const result = await gate()
 
         // then
-        expect(result).toEqual(expected)
+        expect(result).toEqual({ outcome: "failed" })
     })
 
     it("should halt the run for a ticket the manifest does not list", async () => {
@@ -204,7 +177,7 @@ describe("the gate service: the worktree a verified ticket leaves behind", () =>
         expect(git.removed).toEqual([".afk/4/t7"])
     })
 
-    it("should keep the worktree of a ticket the fix attempt could not save, because somebody has to read it", async () => {
+    it("should keep the worktree of a ticket whose gate went red, because somebody has to read it", async () => {
         // given
         const { gate, git } = harness({ failing: "npm run check" })
 
@@ -213,16 +186,5 @@ describe("the gate service: the worktree a verified ticket leaves behind", () =>
 
         // then
         expect(git.removed).toEqual([])
-    })
-
-    it("should remove the worktree of a ticket the one fix attempt made green", async () => {
-        // given
-        const { gate, git } = harness({ failing: "npm run check", fixed: [7] })
-
-        // when
-        await gate()
-
-        // then
-        expect(git.removed).toEqual([".afk/4/t7"])
     })
 })

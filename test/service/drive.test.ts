@@ -70,6 +70,8 @@ type Setup = {
     implementing?: StepResult
     /** What the setup service comes to, which is what an implementer is waited on by. */
     settingUp?: StepResult
+    /** What the gate comes to, which is what puts a ticket into the gate-red sequence or not. */
+    gating?: "ok" | "failed"
     /** Called as each implementer settles, which is the only moment an interrupt is worth aiming at. */
     duringImplement?: (interrupt: () => void) => void
 }
@@ -78,6 +80,7 @@ const harness = ({
     log = [],
     implementing = { outcome: "ok" },
     settingUp = { outcome: "ok" },
+    gating = "ok",
     duringImplement,
 }: Setup = {}) => {
     const events = createFakeEventLog(log)
@@ -87,6 +90,8 @@ const harness = ({
     const merged: Extract<Action, { kind: "merge" }>[] = []
     const gated: Extract<Action, { kind: "gate" }>[] = []
     const prepared: Extract<Action, { kind: "prepare" }>[] = []
+    const fixed: Extract<Action, { kind: "fix" }>[] = []
+    const reverted: Extract<Action, { kind: "revert" }>[] = []
 
     const drive = createDriveService({
         events: events.log,
@@ -110,8 +115,18 @@ const harness = ({
         },
         gate: async (_run, action) => {
             gated.push({ kind: "gate", ...action })
-            await settle(events, action.ticket, "gate", "ok")
-            return { outcome: "ok" }
+            await settle(events, action.ticket, "gate", gating)
+            return { outcome: gating }
+        },
+        fix: async (_run, action) => {
+            fixed.push({ kind: "fix", ...action })
+            await settle(events, action.ticket, "fix", "failed")
+            return { outcome: "failed" }
+        },
+        revert: async (_run, action) => {
+            reverted.push({ kind: "revert", ...action })
+            await settle(events, action.ticket, "revert", "failed")
+            return { outcome: "failed" }
         },
         prepare: async (_run, action) => {
             prepared.push({ kind: "prepare", ...action })
@@ -120,7 +135,7 @@ const harness = ({
         },
     })
 
-    return { drive, events, cut, implemented, merged, gated, prepared, interrupt }
+    return { drive, events, cut, implemented, merged, gated, prepared, fixed, reverted, interrupt }
 }
 
 describe("createDriveService", () => {
@@ -155,6 +170,28 @@ describe("createDriveService", () => {
 
         // then
         expect(merged.map(action => action.ticket)).toContain(7)
+    })
+
+    it("should give a ticket whose gate went red to the fix service", async () => {
+        // given
+        const { drive, fixed } = harness({ gating: "failed" })
+
+        // when
+        await drive(RUN, { maxParallel: 2 })
+
+        // then
+        expect(fixed.map(action => action.ticket)).toEqual([7])
+    })
+
+    it("should give a ticket whose gate is red again after its one fix to the revert service", async () => {
+        // given
+        const { drive, reverted } = harness({ gating: "failed" })
+
+        // when
+        await drive(RUN, { maxParallel: 2 })
+
+        // then
+        expect(reverted.map(action => action.ticket)).toEqual([7])
     })
 
     it("should give a merged ticket to the gate service", async () => {

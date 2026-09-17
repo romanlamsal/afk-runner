@@ -21,6 +21,7 @@ import { createImplementService } from "./service/implement.ts"
 import { createMergeService } from "./service/merge.ts"
 import { createPlanService } from "./service/plan.ts"
 import { createPrepareService } from "./service/prepare.ts"
+import { createRevertService } from "./service/revert.ts"
 import { createSetupService } from "./service/setup.ts"
 import { createStartService } from "./service/start.ts"
 
@@ -85,13 +86,9 @@ export const assembleCli = (): Cli => {
         implement: createImplementService({ agent, events, git, now }),
         setup: createSetupService({ commands, environment, events, git, now, tracker }),
         merge: createMergeService({ agent, events, git, now }),
-        gate: createGateService({
-            events,
-            fix: createFixService({ agent, events, git, now, prove }),
-            git,
-            now,
-            prove,
-        }),
+        gate: createGateService({ events, git, now, prove }),
+        fix: createFixService({ agent, events, git, now }),
+        revert: createRevertService({ events, git, now, prove }),
         prepare: createPrepareService({ agent, events, git, now }),
         now,
     })
