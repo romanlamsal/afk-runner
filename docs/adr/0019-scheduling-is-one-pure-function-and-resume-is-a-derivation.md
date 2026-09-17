@@ -49,7 +49,8 @@ existing run; it changes no behaviour (ADR-0014).
 - **Most of the test suite is this function called directly** — no fakes, no fixtures, no git.
   Inputs are a manifest and a list of events; output is a list of actions. Slate membership and
   ordering, transitive skip, draining, the retry budget, merge-track seriality, stale detection and
-  the gate-red sequence (ADR-0023) are all asserted here.
+  the gate-red sequence (ADR-0023) are all asserted here. The actions it may give are the steps
+  themselves, one for one (ADR-0026).
 - **The domain enforces merge-track seriality**: it never emits a second merge-side action while one
   is in flight. That is a correctness precondition, so it is asserted by a test rather than left
   implicit in the shape of the driver.

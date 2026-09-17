@@ -20,7 +20,8 @@ event puts the entire history in the crash window, every time.
 
 `step` is closed: `setup → implement → rebase → resolve → merge → gate`, plus `fix` when the gate
 goes red, `revert` when the fix does not save it, and `prepare` when a step is recovered (ADR-0012,
-ADR-0022). `outcome` is `running | ok | failed | skipped`.
+ADR-0022). `outcome` is `running | ok | failed | skipped`, plus `conflicted` for a rebase git
+stopped part-way (ADR-0025).
 
 **An event is appended when a step starts, and a second when it ends.** The start event carries
 `running` and the attempt's `sessionId` as soon as that id is observed (ADR-0017); the end event
@@ -45,7 +46,9 @@ conflict resolver's, and a retried implementer's is not its first attempt's.
 - **A closed enum of failure reasons.** Rejected. A laptop that slept, a connection that dropped, a
   rebase that would not land and a gate that went red are not usefully the same shape, and guessing
   the set before hitting it is how folklore starts. **The step is what recovery keys on**; `detail`
-  is free text and is never branched on.
+  is free text and is never branched on. This is about **reasons afk would ascribe**, and it was
+  stated broadly enough to forbid an outcome the tool itself draws, which was never the risk:
+  ADR-0025 states the boundary and grows the enum by one.
 - **Write the event only when the step ends.** Rejected. A run killed mid-step then leaves no record
   that the step ever began — no `running`, no `sessionId`, nothing to resume — which is the crash
   window this log exists to close.

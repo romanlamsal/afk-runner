@@ -11,7 +11,8 @@ part-way through a function call. A run killed during the fix attempt therefore 
 into the sequence at all: its ticket read as beyond repair, and its merge sat on a spec branch the
 run kept merging onto — the state ADR-0009's prove-the-tip step exists to prevent.
 
-**Decision: `fix`, `gate` and `revert` become actions the decision function emits.** It reads the
+**Decision: `fix`, `gate` and `revert` become actions the decision function emits.** (These three
+turned out to be an instance of a general rule rather than a set of their own — ADR-0026.) It reads the
 log and gives the next one; the services perform one step each and append their events. Nothing
 outside the function knows what follows a red gate.
 

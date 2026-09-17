@@ -130,7 +130,8 @@ the last lifecycle event, which is a step and an outcome together.
 **Step**:
 The closed vocabulary recovery keys on: `setup`, `implement`, `prepare`, `rebase`, `resolve`,
 `merge`, `gate`, `fix`, `revert`. A phase that can be killed on its own, or that carries a budget of
-its own, is a step of its own (ADR-0022).
+its own, is a step of its own (ADR-0022). Each step is also an action the decision function can
+give: the action set is the step set, one for one (ADR-0026).
 _Avoid_: phase, stage, state
 
 **Setup step**:
@@ -173,6 +174,11 @@ _Avoid_: state, phase, stage
 A ticket whose implementer reported back and whose work has gone no further. What the merge track
 draws from, exactly as the slate draws from verified blockers.
 _Avoid_: done, finished, complete, ready
+
+**Conflicted**:
+A ticket whose rebase git stopped part-way. A state of its own rather than a failure, because git
+draws the distinction and afk only reads it (ADR-0025). It is where the conflict resolver starts.
+_Avoid_: stuck, unmergeable, broken
 
 **Verified**:
 A ticket whose gate went green — the only status the slate accepts as a satisfied blocker.
