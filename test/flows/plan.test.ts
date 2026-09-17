@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { createCli } from "../../src/cli/cli.ts"
 import { EXIT } from "../../src/cli/exit-codes.ts"
 import { createRun } from "../../src/cli/run.ts"
+import { started } from "../../src/domain/events.ts"
 import type { Manifest } from "../../src/domain/manifest.ts"
 import { createPlanService } from "../../src/service/plan.ts"
 import { createStartService } from "../../src/service/start.ts"
@@ -71,7 +72,7 @@ const harness = (reply: { structuredOutput: unknown } = { structuredOutput: MANI
             printError: line => errors.push(line),
         }),
     })
-    return { cli, agent, git, manifests, operator, printed, errors }
+    return { cli, agent, events, git, manifests, operator, printed, errors }
 }
 
 describe("afk <spec> --plan-only", () => {
@@ -139,5 +140,35 @@ describe("afk <spec> --plan-only", () => {
 
         // then
         expect(manifests.written).toEqual([])
+    })
+})
+
+/**
+ * The pairing the README documents for a run with no terminal, and the reason `plan` needed a
+ * predicate rather than a file check: planning appends to the log, so "the log exists" would have
+ * made the second half refuse the first half's work (ADR-0028).
+ */
+describe("afk <spec> --plan-only, then --implement-only", () => {
+    it("should take the plan it just wrote, rather than refusing over a run", async () => {
+        // given — the stubbed driver works no slate, so the run ends without a pull request
+        const { cli, errors } = harness()
+        await cli(["4", "--plan-only"])
+
+        // when
+        await cli(["4", "--implement-only"])
+
+        // then
+        expect(errors).toEqual(["afk: this run was not taken as far as a pull request"])
+    })
+
+    it("should leave a log that is not yet a run", async () => {
+        // given
+        const { cli, events } = harness()
+
+        // when
+        await cli(["4", "--plan-only"])
+
+        // then
+        expect(started(events.appended)).toBe(false)
     })
 })

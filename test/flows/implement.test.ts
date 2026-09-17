@@ -924,7 +924,7 @@ describe("a run resumed over a log that is not empty", () => {
 
     it("should never squash a ticket the spec branch already carries a second time", async () => {
         // given
-        const { run, git, events } = harness({ tickets: [ticket(10)] })
+        const { run, git, events } = harness({ tickets: [ticket(10)], resume: true })
         git.commit("afk/4/spec", "squash-afk/4/t10", "Ticket 10 (#10)\n\nafk-ticket: 4/10")
         events.appended.push({ ticket: 10, step: "merge", outcome: "ok", at: "2026-09-15T10:00:00.000Z" })
 

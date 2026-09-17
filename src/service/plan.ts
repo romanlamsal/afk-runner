@@ -52,18 +52,18 @@ export const createPlanService =
         const { sessionId, usage } = attempt
 
         /** The planner failing, or returning something a manifest cannot be read out of. */
-        const failed = async (reason: string): Promise<PlanResult> => {
+        const recordFailure = async (reason: string): Promise<PlanResult> => {
             await record("failed", { sessionId, transcriptPath: transcript, usage, detail: reason })
             return { ok: false, reason }
         }
 
         if (attempt.outcome === "failed") {
-            return failed(`the planner failed: ${attempt.detail}`)
+            return recordFailure(`the planner failed: ${attempt.detail}`)
         }
 
         const read = readPlannedManifest(attempt.structuredOutput, spec)
         if (!read.ok) {
-            return failed(read.reason)
+            return recordFailure(read.reason)
         }
 
         await manifests.write(root, spec, read.manifest)

@@ -558,39 +558,27 @@ describe("a conflicted rebase", () => {
  * itself (ADR-0028).
  */
 describe("started", () => {
-    it("should be false for a log that holds only a plan", () => {
+    const plan = { step: "plan" as const, outcome: "ok" as const, at: "2026-09-15T11:18:38.314Z" }
+    const opened = { step: "pull-request" as const, outcome: "ok" as const, at: "2026-09-15T11:18:38.314Z" }
+
+    it.each([
+        ["not be started for an empty log", [], false],
+        ["not be started for a log holding only a plan", [plan], false],
+        ["not be started for a log holding only run-level steps", [plan, opened], false],
+        ["be started once the log names a ticket", [plan, event(10, "implement", "running")], true],
+        [
+            "be started for a skip, a ticket nothing attempted being a run all the same",
+            [plan, skipped(10, new Date())],
+            true,
+        ],
+    ] as const)("should %s", (_name, events, expected) => {
         // given
-        const events = [{ step: "plan" as const, outcome: "ok" as const, at: "2026-09-15T11:18:38.314Z" }]
+        const log: readonly LifecycleEvent[] = events
 
         // when
-        const began = started(events)
+        const began = started(log)
 
         // then
-        expect(began).toBe(false)
-    })
-
-    it("should be true once a ticket has been attempted", () => {
-        // given
-        const events = [
-            { step: "plan" as const, outcome: "ok" as const, at: "2026-09-15T11:18:38.314Z" },
-            event(10, "implement", "running"),
-        ]
-
-        // when
-        const began = started(events)
-
-        // then
-        expect(began).toBe(true)
-    })
-
-    it("should be false for an empty log", () => {
-        // given
-        const events: LifecycleEvent[] = []
-
-        // when
-        const began = started(events)
-
-        // then
-        expect(began).toBe(false)
+        expect(began).toBe(expected)
     })
 })

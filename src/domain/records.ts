@@ -5,8 +5,8 @@ export type Records = {
     /** Whether this spec has a manifest. */
     manifest: boolean
     /**
-     * Whether a run has started, which is a ticket having been attempted rather than the event log
-     * being on disk — planning writes an event before any ticket is touched (ADR-0028).
+     * Whether a run has begun: the log names a ticket, rather than the event log being on disk —
+     * planning appends an event before any ticket is touched (ADR-0028).
      */
     started: boolean
 }

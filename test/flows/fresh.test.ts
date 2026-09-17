@@ -50,7 +50,7 @@ const harness = () => {
     const events = createFakeEventLog([
         { ticket: 10, step: "implement", outcome: "running", at: "2026-09-15T11:18:38.314Z" },
     ])
-    const records = createFakeRunRecords({ onRemove: () => events.appended.splice(0) })
+    const records = createFakeRunRecords({ log: events })
     const tracker = createFakeTracker({ openFor: ["afk/4/spec"] })
     const printed: string[] = []
     const errors: string[] = []

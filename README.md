@@ -129,7 +129,7 @@ ignores itself, so it never appears in your repository's status and nothing in i
 | | |
 | --- | --- |
 | `manifest.json` | the tickets, their edges, and the two commands as confirmed |
-| `events.jsonl` | the append-only lifecycle log, one JSON object per line. A ticket's status is its last event, derived on read and never stored |
+| `events.jsonl` | the append-only lifecycle log, one JSON object per line. A ticket's status is its last event, derived on read and never stored. The `plan` and `pull-request` entries are about the run and name no ticket |
 | `gate/` | the gate worktree, re-created at every process start |
 | `t<n>/` | one worktree per ticket, removed once the ticket is verified. A failed or skipped ticket keeps its own, along with its branch — that is what the prepare agent reads |
 | `transcripts/` | one file per agent attempt, written as the stream arrives |

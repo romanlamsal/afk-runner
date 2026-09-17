@@ -77,10 +77,18 @@ because the field no longer means what its old name said. The store stopped answ
 at all: the domain reads the log and applies its own rule, which is where the rule belonged.
 
 That file-existence check was already a proxy rather than the fact, and `plan` is only what made it
-stop being a good one. A fake had been hiding it too: `createFakeRunRecords` carried its own
-`hasEvents` flag beside the event-log fake, so tests could seed a log full of ticket events while
-the store insisted there was no run — a state the real system cannot be in. Seven flow tests were
-resting on it, and now pass `--resume`, which is what the CLI always required of them.
+stop being a good one. Two fakes had been hiding the same kind of thing, and writing one end-to-end
+test for the pairing found both:
+
+- `createFakeRunRecords` carried its own `hasEvents` flag beside the event-log fake, so a test could
+  seed a log full of ticket events while the store insisted there was no run — a state the real
+  system cannot be in. It now takes the event log and empties it when the run directory goes, so the
+  two agree by construction. Eight flow tests were resting on the old fiction and now pass
+  `--resume`, which is what the CLI always required of them.
+- `createFakeManifestStore` ignored its own writes, always answering with whatever it was seeded
+  with. A real store round-trips, and a fake that does not cannot tell `--plan-only` followed by
+  `--implement-only` from a spec nothing has planned — which is the one sequence this decision is
+  about.
 
 `--force-fresh` deletes a log holding only a plan, along with the rest of the run directory. A plan
 event is a record of the run, not of the manifest, and the manifest survives on its own (ADR-0014).

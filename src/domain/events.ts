@@ -141,10 +141,11 @@ export type EventLog = {
 }
 
 /**
- * Whether this spec has a run, which is what forbids a mode from starting over one (ADR-0014).
+ * Whether a run has begun for this spec, which is what forbids a mode from starting over one
+ * (ADR-0014).
  *
- * A ticket having been attempted, rather than the log file being there: `plan` writes a run-level
- * event before any ticket is touched, so file existence would make `--plan-only` followed by
+ * The log naming a ticket, rather than the log file being there: `plan` appends a run-level event
+ * before any ticket is touched, so file existence would make `--plan-only` followed by
  * `--implement-only` refuse itself (ADR-0028).
  */
 export const started = (events: readonly LifecycleEvent[]): boolean => events.some(event => event.ticket !== undefined)
