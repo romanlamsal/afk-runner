@@ -11,13 +11,15 @@ export type ParsedArgs = {
     extra: string[]
     planOnly: boolean
     implementOnly: boolean
+    boardOnly: boolean
     resume: boolean
     forceFresh: boolean
     maxParallel: string | undefined
     unknownFlags: string[]
 }
 
-export const USAGE = "afk <spec> [--plan-only | --implement-only] [--resume] [--force-fresh] [--max-parallel <n>]"
+export const USAGE =
+    "afk <spec> [--plan-only | --implement-only | --board-only] [--resume] [--force-fresh] [--max-parallel <n>]"
 
 /**
  * The spec and the surplus positionals are both declared optional so that cleye never exits on
@@ -37,6 +39,11 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
                 implementOnly: {
                     type: Boolean,
                     description: "Implement an existing manifest without planning again",
+                    default: false,
+                },
+                boardOnly: {
+                    type: Boolean,
+                    description: "Draw this spec's board from its run directory and exit. Reads, never writes",
                     default: false,
                 },
                 resume: {
@@ -68,6 +75,7 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
         extra: parsed._.extra,
         planOnly: parsed.flags.planOnly,
         implementOnly: parsed.flags.implementOnly,
+        boardOnly: parsed.flags.boardOnly,
         resume: parsed.flags.resume,
         forceFresh: parsed.flags.forceFresh,
         maxParallel: parsed.flags.maxParallel,

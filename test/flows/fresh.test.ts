@@ -15,6 +15,7 @@ import { createFakeGit, type FakeRepository } from "../fakes/git.ts"
 import { createFakeManifestStore } from "../fakes/manifest-store.ts"
 import { createFakeOperator } from "../fakes/operator.ts"
 import { createFakeRunRecords } from "../fakes/run-records.ts"
+import { createStubShowBoard } from "../fakes/show-board.ts"
 import { createFakeTracker } from "../fakes/tracker.ts"
 
 /**
@@ -59,6 +60,7 @@ const harness = () => {
         isInteractive: () => true,
         printError: line => errors.push(line),
         run: createRun({
+            showBoard: createStubShowBoard(),
             fresh: createFreshService({
                 cwd: "/repo",
                 git: git.git,

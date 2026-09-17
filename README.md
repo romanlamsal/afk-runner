@@ -28,7 +28,7 @@ node ~/code/afk/src/main.ts 42
 `package.json` declares an `afk` bin, so `npm link` or a shell alias gets you:
 
 ```
-afk <spec> [--plan-only | --implement-only] [--resume] [--force-fresh] [--max-parallel <n>]
+afk <spec> [--plan-only | --implement-only | --board-only] [--resume] [--force-fresh] [--max-parallel <n>]
 ```
 
 | invocation | |
@@ -36,13 +36,15 @@ afk <spec> [--plan-only | --implement-only] [--resume] [--force-fresh] [--max-pa
 | bare | plan, confirm, implement. Refuses when a manifest or a run already exists, naming the flag to use |
 | `--plan-only` | plan the spec, write the manifest, print the execution order, exit |
 | `--implement-only` | implement an existing manifest without planning again. Refuses an existing run unless `--resume` consents |
+| `--board-only` | draw this spec's board from its run directory and exit. It reads and never writes, so it can be pointed at a run in flight. Refuses a spec that has never been planned: the rows and the frame's height come from the manifest |
 | `--resume` | consent to continuing an existing run. It changes no behaviour — a resumed run is the ordinary loop against a log that is not empty |
 | `--force-fresh` | delete this spec's branches local and remote, its run directory and its pull request, then start over. No prompt: the flag is the consent |
 | `--max-parallel <n>` | implementer slots, default 3 |
 
 `--plan-only` and `--implement-only` name different halves of a run and cannot be combined; neither
 can `--force-fresh` and `--implement-only`, because starting over deletes the manifest the second
-one requires. Either pair exits `2`.
+one requires. `--board-only` starts nothing, so it combines with neither mode flag, nor with
+`--force-fresh`, which deletes the run it would draw. Any of these pairs exits `2`.
 
 A bare invocation needs a terminal: with nobody there to answer the confirmation, afk refuses rather
 than continuing unsupervised. With no TTY, pass `--plan-only` or `--implement-only`.
@@ -148,6 +150,10 @@ clone.
 | `2` | misuse — the arguments were refused: a bad flag combination, or no terminal without an explicit mode |
 | `3` | halted — afk refused to start, or the run stopped itself, or it opened no pull request |
 | `130` | a second interrupt killed the run |
+
+`--board-only` exits with the run's own code, read from the same classification: `0` where the log
+says every ticket of the manifest was verified, `1` otherwise, and `3` for a spec that was never
+planned.
 
 A refusal to *start* — no manifest to implement, a run that already exists, nothing that is a git
 worktree, a confirmation the operator closed — is `3` rather than `2`: the arguments were fine, and

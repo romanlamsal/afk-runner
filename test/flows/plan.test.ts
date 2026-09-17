@@ -16,6 +16,7 @@ import { createFakeGit } from "../fakes/git.ts"
 import { createFakeManifestStore } from "../fakes/manifest-store.ts"
 import { createFakeOperator } from "../fakes/operator.ts"
 import { createFakeRunRecords } from "../fakes/run-records.ts"
+import { createStubShowBoard } from "../fakes/show-board.ts"
 
 /**
  * The second of the spec's three seams: the assembled run, driven through fake ports from the
@@ -64,6 +65,7 @@ const harness = (reply: { structuredOutput: unknown } = { structuredOutput: MANI
         isInteractive: () => true,
         printError: line => errors.push(line),
         run: createRun({
+            showBoard: createStubShowBoard(),
             start,
             fresh: createStubFresh(),
             drive: createStubDrive(),

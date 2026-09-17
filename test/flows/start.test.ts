@@ -17,6 +17,7 @@ import { createFakeGit } from "../fakes/git.ts"
 import { createFakeManifestStore } from "../fakes/manifest-store.ts"
 import { createFakeOperator } from "../fakes/operator.ts"
 import { createFakeRunRecords } from "../fakes/run-records.ts"
+import { createStubShowBoard } from "../fakes/show-board.ts"
 
 /**
  * The bare invocation, from the argument vector to a run that is ready to implement: plan, confirm,
@@ -43,6 +44,7 @@ const harness = ({ trunk, answer }: { trunk?: TrunkState; answer?: Commands } = 
         isInteractive: () => true,
         printError: line => errors.push(line),
         run: createRun({
+            showBoard: createStubShowBoard(),
             fresh: createStubFresh(),
             drive: createStubDrive(),
             finish: createStubFinish(),

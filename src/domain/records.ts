@@ -1,4 +1,4 @@
-import type { Mode } from "./mode.ts"
+import type { StartMode } from "./mode.ts"
 
 /** What earlier invocations for this spec left on disk. */
 export type Records = {
@@ -48,7 +48,7 @@ export const refusalToStart = ({
     consented,
 }: {
     spec: number
-    mode: Mode
+    mode: StartMode
     records: Records
     consented: boolean
 }): string | undefined => {

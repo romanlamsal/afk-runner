@@ -13,6 +13,7 @@ import { createGitHubTracker } from "./infrastructure/tracker.ts"
 import { createFileEventLog } from "./repository/event-log.ts"
 import { createFileManifestStore } from "./repository/manifest-store.ts"
 import { createFileRunRecordStore } from "./repository/run-records.ts"
+import { createShowBoardService } from "./service/board.ts"
 import { createDriveService } from "./service/drive.ts"
 import { createFinishService } from "./service/finish.ts"
 import { createFixService } from "./service/fix.ts"
@@ -120,6 +121,7 @@ export const assembleCli = (): Cli => {
         printError,
         run: createRun({
             fresh: createFreshService({ cwd, git, records, tracker }),
+            showBoard: createShowBoardService({ board, cwd, events, git, manifests }),
             start,
             drive,
             finish: createFinishService({ agent, events, git, now, tracker }),

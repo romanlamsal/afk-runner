@@ -10,6 +10,7 @@ import type { DriveResult } from "../../src/service/drive.ts"
 import type { FinishResult } from "../../src/service/finish.ts"
 import type { FreshResult } from "../../src/service/fresh.ts"
 import type { StartRequest, StartResult } from "../../src/service/start.ts"
+import { createStubShowBoard } from "../fakes/show-board.ts"
 
 const MANIFEST: Manifest = {
     spec: 4,
@@ -58,6 +59,7 @@ const harness = (
     const ended: Progress[] = []
     const freshened: number[] = []
     const run = createRun({
+        showBoard: createStubShowBoard(),
         fresh: async spec => {
             freshened.push(spec)
             return cleared

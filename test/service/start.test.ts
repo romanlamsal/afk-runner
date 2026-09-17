@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { TrunkState } from "../../src/domain/git.ts"
 import type { Manifest } from "../../src/domain/manifest.ts"
-import type { Mode } from "../../src/domain/mode.ts"
+import type { StartMode } from "../../src/domain/mode.ts"
 import type { Commands } from "../../src/domain/operator.ts"
 import { createStartService, type StartResult } from "../../src/service/start.ts"
 import { createFakeEnvironment } from "../fakes/environment.ts"
@@ -19,7 +19,7 @@ const MANIFEST: Manifest = {
 }
 
 type Setup = {
-    mode?: Mode
+    mode?: StartMode
     consented?: boolean
     /** What the repository looks like: its root, its trunk, whether a worktree can be checked out. */
     repository?: Parameters<typeof createFakeGit>[0]

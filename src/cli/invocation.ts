@@ -26,6 +26,9 @@ const positiveInteger = (value: string): number | undefined => {
 }
 
 const mode = (args: ParsedArgs): Mode => {
+    if (args.boardOnly) {
+        return "board-only"
+    }
     if (args.planOnly) {
         return "plan-only"
     }
@@ -69,6 +72,19 @@ export const resolveInvocation = (args: ParsedArgs, env: { interactive: boolean 
 
     if (args.planOnly && args.implementOnly) {
         return refuse("--plan-only and --implement-only cannot be combined: each names a different half of a run")
+    }
+
+    // Looking at a run is not a half of one. The mode flags say what to do to a spec and
+    // --board-only says only what to show of it, so a pair of them names two different invocations
+    // rather than one (ADR-0030).
+    if (args.boardOnly && (args.planOnly || args.implementOnly)) {
+        return refuse("--board-only starts nothing, so it cannot be combined with --plan-only or --implement-only")
+    }
+
+    // --board-only draws the run directory --force-fresh deletes, so the pair asks to be shown what
+    // it just threw away.
+    if (args.boardOnly && args.forceFresh) {
+        return refuse("--force-fresh deletes the run --board-only draws: pass --board-only on its own to look at it")
     }
 
     // The manifest lives in the run directory, so starting over takes it with it. The pair asks for

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest"
-import type { Mode } from "../../src/domain/mode.ts"
+import type { StartMode } from "../../src/domain/mode.ts"
 import { type Records, refusalToStart } from "../../src/domain/records.ts"
 
 const records = (overrides: Partial<Records> = {}): Records => ({ manifest: false, started: false, ...overrides })
 
-const refusal = (mode: Mode, present: Partial<Records> = {}, consented = false): string | undefined =>
+const refusal = (mode: StartMode, present: Partial<Records> = {}, consented = false): string | undefined =>
     refusalToStart({ spec: 4, mode, records: records(present), consented })
 
 describe("refusalToStart", () => {
@@ -12,7 +12,7 @@ describe("refusalToStart", () => {
         ["plan-and-implement", {}],
         ["plan-only", {}],
         ["implement-only", { manifest: true }],
-    ] as const satisfies readonly (readonly [Mode, Partial<Records>])[])(
+    ] as const satisfies readonly (readonly [StartMode, Partial<Records>])[])(
         "should let %s start against a repository with nothing in its way",
         (mode, present) => {
             // given — the records that mode expects to find, from the table above
