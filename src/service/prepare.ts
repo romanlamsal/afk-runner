@@ -5,6 +5,7 @@ import { attempts, type BrokenStep, type EventDetails, type EventLog, type Outco
 import type { Git } from "../domain/git.ts"
 import { ticketOf } from "../domain/manifest.ts"
 import { ticketWorktree, transcriptPath } from "../domain/paths.ts"
+import { PROFILES } from "../domain/profiles.ts"
 import { preparerPrompt } from "../domain/prompts.ts"
 import type { PreparedRun } from "../domain/run.ts"
 import { attemptWithAgent, type StepResult } from "./attempt.ts"
@@ -71,16 +72,17 @@ export const createPrepareService =
                 // continuing is the one the step that broke was given (ADR-0017).
                 resumeSessionId: undefined,
                 outputSchema: undefined,
+                profile: PROFILES.preparer,
             },
             sessionId => record("running", { sessionId, transcriptPath: transcript }),
         )
-        const { sessionId } = attempted
+        const { sessionId, usage } = attempted
 
         if (attempted.outcome === "failed") {
-            await record("failed", { sessionId, transcriptPath: transcript, detail: attempted.detail })
+            await record("failed", { sessionId, transcriptPath: transcript, usage, detail: attempted.detail })
             return { outcome: "failed" }
         }
 
-        await record("ok", { sessionId, transcriptPath: transcript })
+        await record("ok", { sessionId, transcriptPath: transcript, usage })
         return { outcome: "ok" }
     }

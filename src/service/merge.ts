@@ -5,6 +5,7 @@ import { type EventDetails, type EventLog, type Outcome, resolutionNote, type St
 import type { Git } from "../domain/git.ts"
 import { ticketOf } from "../domain/manifest.ts"
 import { ticketWorktree, transcriptPath } from "../domain/paths.ts"
+import { PROFILES } from "../domain/profiles.ts"
 import { resolverPrompt } from "../domain/prompts.ts"
 import { readResolutionNote, resolutionJsonSchema, resolverFault } from "../domain/resolution.ts"
 import type { PreparedRun } from "../domain/run.ts"
@@ -188,13 +189,19 @@ export const createMergeService =
                 transcriptPath: transcript,
                 resumeSessionId: undefined,
                 outputSchema: resolutionJsonSchema(),
+                profile: PROFILES.resolver,
             },
             sessionId => record("resolve", "running", { sessionId, transcriptPath: transcript }),
         )
-        const { sessionId } = attempted
+        const { sessionId, usage } = attempted
 
         if (attempted.outcome === "failed") {
-            await record("resolve", "failed", { sessionId, transcriptPath: transcript, detail: attempted.detail })
+            await record("resolve", "failed", {
+                sessionId,
+                transcriptPath: transcript,
+                usage,
+                detail: attempted.detail,
+            })
             return abandon(`the conflict resolver for #${ticket} failed: ${attempted.detail}`)
         }
 
@@ -205,7 +212,7 @@ export const createMergeService =
             ahead: landed !== undefined && landed !== tip,
         })
         if (fault !== undefined) {
-            await record("resolve", "failed", { sessionId, transcriptPath: transcript, detail: fault })
+            await record("resolve", "failed", { sessionId, transcriptPath: transcript, usage, detail: fault })
             return abandon(fault)
         }
 
@@ -215,6 +222,7 @@ export const createMergeService =
         await record("resolve", "ok", {
             sessionId,
             transcriptPath: transcript,
+            usage,
             detail: readResolutionNote(attempted.structuredOutput),
         })
         await record("rebase", "ok")

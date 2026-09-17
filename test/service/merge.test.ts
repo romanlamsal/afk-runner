@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { AgentResult } from "../../src/domain/agent.ts"
 import type { LifecycleEvent } from "../../src/domain/events.ts"
 import type { Manifest } from "../../src/domain/manifest.ts"
+import { PROFILES } from "../../src/domain/profiles.ts"
 import type { PreparedRun } from "../../src/domain/run.ts"
 import type { StepResult } from "../../src/service/attempt.ts"
 import { createMergeService } from "../../src/service/merge.ts"
@@ -569,5 +570,21 @@ describe("the merge service: a rebase that cannot land", () => {
 
         // then
         expect(result).toEqual({ outcome: "halted", reason: "#99 is not a ticket of spec #4" })
+    })
+})
+
+describe("the merge service: the conflict resolver's profile", () => {
+    /** A repository whose ticket branch conflicts, so that a resolver is invoked at all. */
+    const colliding: FakeRepository = { ...REPOSITORY, colliding: ["afk/4/t7"] }
+
+    it("should be the role's own, and no other role's", async () => {
+        // given
+        const { merge, agent } = harness({ repository: colliding })
+
+        // when
+        await merge()
+
+        // then
+        expect(agent.invocations.at(0)?.profile).toBe(PROFILES.resolver)
     })
 })

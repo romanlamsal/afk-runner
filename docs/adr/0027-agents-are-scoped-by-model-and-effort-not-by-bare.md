@@ -78,7 +78,9 @@ definition, and the tier afk asked for is the tier that runs whatever upstream s
   argument; ADR-0011's log is where it becomes a reading.
 - **Context size stays a ticket-granularity problem.** Half of measured usage sat above 150k context,
   which is a long implementer transcript, which is a large ticket. ADR-0002 bars afk from
-  second-guessing that, so afk records the size and the planner's output is where it gets fixed.
+  second-guessing that, so afk records what the attempt consumed and the planner's output is where
+  it gets fixed. Not the context's peak size, which the stream does not report — the token counts
+  are the proxy, and a large one is the signal to look at the ticket.
 - **This record exists because `--bare` will look obvious again.** When it becomes the default for
   `-p`, the work is to keep afk's context and plugins explicit under it — not to adopt it for the
   saving, which was measured and was not there.

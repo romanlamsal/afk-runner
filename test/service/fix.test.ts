@@ -3,6 +3,7 @@ import type { AgentResult } from "../../src/domain/agent.ts"
 import type { CommandRunner } from "../../src/domain/commands.ts"
 import type { LifecycleEvent } from "../../src/domain/events.ts"
 import type { Manifest, Ticket } from "../../src/domain/manifest.ts"
+import { PROFILES } from "../../src/domain/profiles.ts"
 import type { PreparedRun } from "../../src/domain/run.ts"
 import type { StepResult } from "../../src/service/attempt.ts"
 import { createFixService } from "../../src/service/fix.ts"
@@ -429,5 +430,18 @@ describe("the fix service: a revert it cannot perform", () => {
             outcome: "halted",
             reason: "the merge of #7 could not be found on afk/4/spec to revert",
         })
+    })
+})
+
+describe("the fix service: the fix agent's profile", () => {
+    it("should be the role's own, and no other role's", async () => {
+        // given
+        const { fix, agent } = harness()
+
+        // when
+        await fix()
+
+        // then
+        expect(agent.invocations.at(0)?.profile).toBe(PROFILES.fixer)
     })
 })

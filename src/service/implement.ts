@@ -8,6 +8,7 @@ import type { Git } from "../domain/git.ts"
 import { implementerFault } from "../domain/implementer.ts"
 import { ticketOf } from "../domain/manifest.ts"
 import { ticketWorktree, transcriptPath } from "../domain/paths.ts"
+import { PROFILES } from "../domain/profiles.ts"
 import { implementerPrompt } from "../domain/prompts.ts"
 import type { PreparedRun } from "../domain/run.ts"
 import type { Tracker } from "../domain/tracker.ts"
@@ -113,13 +114,14 @@ export const createImplementService =
                 transcriptPath: transcript,
                 resumeSessionId,
                 outputSchema: undefined,
+                profile: PROFILES.implementer,
             },
             sessionId => record("running", { sessionId, baseSha }),
         )
-        const { sessionId } = attempted
+        const { sessionId, usage } = attempted
 
         if (attempted.outcome === "failed") {
-            await record("failed", { sessionId, baseSha, detail: attempted.detail })
+            await record("failed", { sessionId, baseSha, usage, detail: attempted.detail })
             return { outcome: "failed" }
         }
 
@@ -127,10 +129,10 @@ export const createImplementService =
         const onBase = tip !== undefined && (await git.contains(root, { rev: branch, commit: baseSha }))
         const fault = implementerFault({ baseSha, tip, onBase })
         if (fault !== undefined) {
-            await record("failed", { sessionId, baseSha, detail: fault })
+            await record("failed", { sessionId, baseSha, usage, detail: fault })
             return { outcome: "failed" }
         }
 
-        await record("ok", { sessionId, baseSha })
+        await record("ok", { sessionId, baseSha, usage })
         return { outcome: "ok" }
     }

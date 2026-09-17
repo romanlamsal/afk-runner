@@ -3,6 +3,7 @@ import { createWriteStream } from "node:fs"
 import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import type { AgentInvocation, AgentResult, AgentRunner } from "../domain/agent.ts"
+import type { Model } from "../domain/profiles.ts"
 import { INVOCATION_TIMEOUT_MS } from "../domain/timeout.ts"
 import { minutes, registerChild, terminateGroup } from "./process.ts"
 import { createStreamReader } from "./stream-json.ts"
@@ -24,13 +25,31 @@ const CLAUDE_FLAGS = [
     "Bash(git push:*)",
 ]
 
+/**
+ * The profile's subagent model, as the one thing that reaches a subagent afk did not start: an
+ * `env` block passed as argv rather than exported, so it is the invocation that says it and not
+ * whatever shell launched the run.
+ *
+ * `_FORCE` is not optional. Without it the model is a default that a subagent definition's own
+ * `model` field outranks, so the model that ran would be a property of whatever skills the target
+ * repository happens to carry (ADR-0027).
+ */
+const subagentSettings = (model: Model): string =>
+    JSON.stringify({ env: { CLAUDE_CODE_SUBAGENT_MODEL: model, CLAUDE_CODE_SUBAGENT_MODEL_FORCE: "1" } })
+
 /** Enough of the tail to name a failure, without holding a wedged agent's whole error output. */
 const STDERR_TAIL = 2000
 
-const commandLine = (invocation: AgentInvocation): string[] => [
+export const commandLine = (invocation: AgentInvocation): string[] => [
     "-p",
     invocation.prompt,
     ...CLAUDE_FLAGS,
+    "--model",
+    invocation.profile.model,
+    "--effort",
+    invocation.profile.effort,
+    "--settings",
+    subagentSettings(invocation.profile.subagentModel),
     "--output-format",
     "stream-json",
     "--verbose",
@@ -61,8 +80,8 @@ export const createClaudeAgentRunner = ({
             registerChild(child)
 
             const settle = (outcome: AgentResult["outcome"], detail: string): void => {
-                const { sessionId, structuredOutput } = reader.reading()
-                resolve({ outcome, sessionId, structuredOutput, detail })
+                const { sessionId, structuredOutput, usage } = reader.reading()
+                resolve({ outcome, sessionId, structuredOutput, detail, usage })
             }
 
             let pending = ""

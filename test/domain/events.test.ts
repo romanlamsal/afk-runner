@@ -331,3 +331,56 @@ describe("sessionOf", () => {
         expect(session).toBeUndefined()
     })
 })
+
+/**
+ * The counts an attempt consumed, and nothing priced. ADR-0027: the agent CLI computes a dollar
+ * figure locally at list price and it is not a bill, so the log must not carry one — a figure in
+ * the log is a figure somebody will later read as spend.
+ */
+describe("an event's usage", () => {
+    const counts = {
+        inputTokens: 1600,
+        outputTokens: 29700,
+        cacheReadInputTokens: 1600000,
+        cacheCreationInputTokens: 86500,
+    }
+
+    it("should keep the counts an agent step reported", () => {
+        // given
+        const raw = { ticket: 7, step: "implement", outcome: "ok", at: "2026-09-15T11:18:38.314Z", usage: counts }
+
+        // when
+        const read = readEvent(raw)
+
+        // then
+        expect(read?.usage).toEqual(counts)
+    })
+
+    it("should keep no dollar figure, whatever a writer tried to put in one", () => {
+        // given
+        const raw = {
+            ticket: 7,
+            step: "implement",
+            outcome: "ok",
+            at: "2026-09-15T11:18:38.314Z",
+            usage: { ...counts, totalCostUsd: 3.38 },
+        }
+
+        // when
+        const read = readEvent(raw)
+
+        // then
+        expect(read?.usage).not.toHaveProperty("totalCostUsd")
+    })
+
+    it("should be absent on a step that ran commands and held no session", () => {
+        // given
+        const raw = { ticket: 7, step: "merge", outcome: "ok", at: "2026-09-15T11:18:38.314Z" }
+
+        // when
+        const read = readEvent(raw)
+
+        // then
+        expect(read?.usage).toBeUndefined()
+    })
+})

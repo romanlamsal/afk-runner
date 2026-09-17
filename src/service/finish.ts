@@ -3,6 +3,7 @@ import type { Clock } from "../domain/clock.ts"
 import type { Progress } from "../domain/events.ts"
 import type { Git } from "../domain/git.ts"
 import { transcriptPath } from "../domain/paths.ts"
+import { PROFILES } from "../domain/profiles.ts"
 import { pullRequestWriterPrompt } from "../domain/prompts.ts"
 import {
     composePullRequest,
@@ -67,6 +68,7 @@ export const createFinishService =
             resumeSessionId: undefined,
             onSessionId: undefined,
             outputSchema: pullRequestJsonSchema(),
+            profile: PROFILES.pullRequestWriter,
         })
 
         const pullRequest = composePullRequest({

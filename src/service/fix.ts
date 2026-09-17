@@ -5,6 +5,7 @@ import { fixerFault } from "../domain/fix.ts"
 import type { Git } from "../domain/git.ts"
 import type { Ticket } from "../domain/manifest.ts"
 import { transcriptPath } from "../domain/paths.ts"
+import { PROFILES } from "../domain/profiles.ts"
 import { fixerPrompt } from "../domain/prompts.ts"
 import type { PreparedRun } from "../domain/run.ts"
 import { revertMessage } from "../domain/squash.ts"
@@ -120,10 +121,11 @@ export const createFixService =
                 transcriptPath: transcript,
                 resumeSessionId: undefined,
                 outputSchema: undefined,
+                profile: PROFILES.fixer,
             },
             sessionId => fixAttempt("running", { sessionId, transcriptPath: transcript }),
         )
-        const { sessionId } = attempted
+        const { sessionId, usage } = attempted
 
         /**
          * An attempt the agent itself reported as failed. It is not the question the gate asks —
@@ -138,6 +140,7 @@ export const createFixService =
             fixAttempt("failed", {
                 sessionId,
                 transcriptPath: transcript,
+                usage,
                 detail: failure === undefined ? detail : `${failure}, and ${detail}`,
             })
 
@@ -156,6 +159,6 @@ export const createFixService =
             return revert()
         }
 
-        await fixAttempt("ok", { sessionId, transcriptPath: transcript })
+        await fixAttempt("ok", { sessionId, transcriptPath: transcript, usage })
         return { outcome: "ok" }
     }

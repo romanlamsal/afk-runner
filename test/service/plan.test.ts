@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { AgentResult } from "../../src/domain/agent.ts"
 import { type Manifest, manifestJsonSchema } from "../../src/domain/manifest.ts"
+import { PROFILES } from "../../src/domain/profiles.ts"
 import { createPlanService, type PlanSpec } from "../../src/service/plan.ts"
 import { createFakeAgent, type FakeAgent } from "../fakes/agent.ts"
 import { createFakeManifestStore, type FakeManifestStore } from "../fakes/manifest-store.ts"
@@ -129,5 +130,16 @@ describe("createPlanService", () => {
 
         // then
         expect(manifests.written).toEqual([])
+    })
+
+    it("should invoke the planner at its own profile, and no other role's", async () => {
+        // given
+        const { plan, agent } = harness()
+
+        // when
+        await plan(ROOT, 4)
+
+        // then
+        expect(agent.invocations.at(0)?.profile).toBe(PROFILES.planner)
     })
 })

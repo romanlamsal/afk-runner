@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { usageSchema } from "./agent.ts"
 
 /**
  * The lifecycle event log: the record of what was attempted and how far it got.
@@ -55,6 +56,16 @@ const eventSchema = z.object({
      * reaches the squash body this way — but nothing ever branches on it.
      */
     detail: z.string().optional(),
+    /**
+     * What this attempt consumed, carried by an agent step's end event. It is what makes "which
+     * step burns the allowance" a reading rather than an argument, and so what a profile is dialled
+     * against (ADR-0027).
+     *
+     * Absent rather than zero where no agent ran: a step that runs commands holds no session and
+     * spends no tokens, and a zero there would read as an agent that used nothing — a different
+     * claim, and a bug report rather than the design.
+     */
+    usage: usageSchema.optional(),
 })
 
 export type LifecycleEvent = z.infer<typeof eventSchema>
@@ -64,7 +75,7 @@ export type LifecycleEvent = z.infer<typeof eventSchema>
  * than a copy per service, because which fields may vary is a property of the event and the event
  * is defined here.
  */
-export type EventDetails = Pick<LifecycleEvent, "sessionId" | "baseSha" | "transcriptPath" | "detail">
+export type EventDetails = Pick<LifecycleEvent, "sessionId" | "baseSha" | "transcriptPath" | "detail" | "usage">
 
 /**
  * One line of the log, or nothing. The log is read defensively on purpose: the last line of one a

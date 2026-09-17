@@ -2,6 +2,7 @@ import type { AgentRunner } from "../domain/agent.ts"
 import type { Clock } from "../domain/clock.ts"
 import { type Manifest, type ManifestStore, manifestJsonSchema, readPlannedManifest } from "../domain/manifest.ts"
 import { transcriptPath } from "../domain/paths.ts"
+import { PROFILES } from "../domain/profiles.ts"
 import { plannerPrompt } from "../domain/prompts.ts"
 
 /** The driving port: plan a spec in the target repository, leaving a manifest behind. */
@@ -32,6 +33,7 @@ export const createPlanService =
             resumeSessionId: undefined,
             onSessionId: undefined,
             outputSchema: manifestJsonSchema(),
+            profile: PROFILES.planner,
         })
 
         if (attempt.outcome === "failed") {

@@ -252,6 +252,19 @@ _Avoid_: recovery agent, triage agent
 The agent that writes the spec PR's title and summary.
 _Avoid_: summariser, scribe
 
+**Agent profile**:
+What one role is invoked with: the model and effort of the agent afk starts, and the model of every
+agent that one spawns. One per role, and the only thing that distinguishes two invocations besides
+the prompt and the schema. It is why afk does not run `--bare`: the preamble was never the cost, and
+the fan-out is (ADR-0027).
+_Avoid_: tier, agent config, model settings
+
+**Fan-out**:
+The agents a role's skills spawn inside its own invocation. afk starts one agent per attempt and
+never these, so the only thing that reaches them is the profile's `subagentModel` — which is where
+most of a run's consumption goes.
+_Avoid_: subagents, sub-tasks, children
+
 ## Code
 
 **Layer**:

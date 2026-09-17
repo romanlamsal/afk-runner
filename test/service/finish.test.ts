@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Progress } from "../../src/domain/events.ts"
+import { PROFILES } from "../../src/domain/profiles.ts"
 import type { PreparedRun } from "../../src/domain/run.ts"
 import { createFinishService } from "../../src/service/finish.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
@@ -248,5 +249,18 @@ describe("the finish service: what it does not report success over", () => {
                 "the pull request for afk/4/spec could not be opened: " +
                 "a pull request for afk/4/spec already exists",
         })
+    })
+})
+
+describe("the finish service: the pull request writer's profile", () => {
+    it("should be the role's own, and no other role's", async () => {
+        // given
+        const { finish, agent } = harness()
+
+        // when
+        await finish({ verified: [5, 6] })
+
+        // then
+        expect(agent.invocations.at(0)?.profile).toBe(PROFILES.pullRequestWriter)
     })
 })

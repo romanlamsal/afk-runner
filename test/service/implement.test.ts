@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { AgentResult } from "../../src/domain/agent.ts"
 import type { LifecycleEvent } from "../../src/domain/events.ts"
 import type { Manifest } from "../../src/domain/manifest.ts"
+import { PROFILES } from "../../src/domain/profiles.ts"
 import type { PreparedRun } from "../../src/domain/run.ts"
 import type { StepResult } from "../../src/service/attempt.ts"
 import { createImplementService } from "../../src/service/implement.ts"
@@ -337,5 +338,54 @@ describe("the implement service: the session a retry continues", () => {
 
         // then
         expect(agent.invocations[0]?.resumeSessionId).toBe(expected)
+    })
+})
+
+describe("the implement service: the implementer's profile", () => {
+    it("should be the role's own, and no other role's", async () => {
+        // given
+        const { implement, agent } = harness()
+
+        // when
+        await implement()
+
+        // then
+        expect(agent.invocations.at(0)?.profile).toBe(PROFILES.implementer)
+    })
+})
+
+/**
+ * What the profile is dialled against. The counts are the agent port's, recorded as the attempt
+ * ends — there is nothing to record when it starts, which is the distinction the log rests on
+ * (ADR-0027).
+ */
+describe("the implement service: what an attempt consumed", () => {
+    const USAGE = {
+        inputTokens: 1600,
+        outputTokens: 29700,
+        cacheReadInputTokens: 1600000,
+        cacheCreationInputTokens: 86500,
+    }
+
+    it("should record what the attempt consumed on the end event", async () => {
+        // given
+        const { implement, events } = harness({ reply: { usage: USAGE } })
+
+        // when
+        await implement()
+
+        // then
+        expect(events.appended.at(-1)?.usage).toEqual(USAGE)
+    })
+
+    it("should leave the start event's usage absent, nothing having been consumed before the agent ran", async () => {
+        // given
+        const { implement, events } = harness({ reply: { usage: USAGE } })
+
+        // when
+        await implement()
+
+        // then
+        expect(events.appended[0]?.usage).toBeUndefined()
     })
 })
