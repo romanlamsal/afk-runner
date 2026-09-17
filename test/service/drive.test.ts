@@ -87,6 +87,7 @@ const harness = ({
     const { interrupts, interrupt } = createFakeInterrupts()
     const cut: Extract<Action, { kind: "setup" }>[] = []
     const implemented: Extract<Action, { kind: "implement" }>[] = []
+    const rebased: Extract<Action, { kind: "rebase" }>[] = []
     const merged: Extract<Action, { kind: "merge" }>[] = []
     const gated: Extract<Action, { kind: "gate" }>[] = []
     const prepared: Extract<Action, { kind: "prepare" }>[] = []
@@ -107,6 +108,15 @@ const harness = ({
             await settle(events, action.ticket, "implement", implementing.outcome)
             duringImplement?.(interrupt)
             return implementing
+        },
+        rebase: async (_run, action) => {
+            rebased.push({ kind: "rebase", ...action })
+            await settle(events, action.ticket, "rebase", "ok")
+            return { outcome: "ok" }
+        },
+        resolve: async (_run, action) => {
+            await settle(events, action.ticket, "resolve", "ok")
+            return { outcome: "ok" }
         },
         merge: async (_run, action) => {
             merged.push({ kind: "merge", ...action })
@@ -135,7 +145,7 @@ const harness = ({
         },
     })
 
-    return { drive, events, cut, implemented, merged, gated, prepared, fixed, reverted, interrupt }
+    return { drive, events, cut, implemented, rebased, merged, gated, prepared, fixed, reverted, interrupt }
 }
 
 describe("createDriveService", () => {
@@ -161,7 +171,18 @@ describe("createDriveService", () => {
         expect(implemented.map(action => action.ticket)).toContain(7)
     })
 
-    it("should give an implemented ticket to the merge service", async () => {
+    it("should give an implemented ticket to the rebase service", async () => {
+        // given
+        const { drive, rebased } = harness()
+
+        // when
+        await drive(RUN, { maxParallel: 2 })
+
+        // then
+        expect(rebased.map(action => action.ticket)).toContain(7)
+    })
+
+    it("should give a rebased ticket to the merge service", async () => {
         // given
         const { drive, merged } = harness()
 

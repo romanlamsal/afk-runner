@@ -194,6 +194,27 @@ export const merged = (events: readonly LifecycleEvent[], ticket: number): boole
 }
 
 /**
+ * A ticket whose rebase git stopped part-way: the one state a `resolve` is ever taken out of, and
+ * the reason the conflict resolver is never handed a worktree it has no move in (ADR-0025).
+ */
+export const conflicted = (events: readonly LifecycleEvent[], ticket: number): boolean => {
+    const last = statusOf(events, ticket)
+    return last?.step === "rebase" && last.outcome === "conflicted"
+}
+
+/**
+ * A ticket sitting on the spec branch's tip that has not been landed on it: what the squash draws
+ * from, exactly as the merge track draws from an implemented ticket.
+ *
+ * Two steps produce it and they are one state, because the ticket's work is on the tip either way:
+ * a rebase git carried through by itself, and one a conflict resolver finished (ADR-0005).
+ */
+export const rebased = (events: readonly LifecycleEvent[], ticket: number): boolean => {
+    const last = statusOf(events, ticket)
+    return (last?.step === "rebase" || last?.step === "resolve") && last.outcome === "ok"
+}
+
+/**
  * What the ticket's conflict resolver said it did, where there was a conflict at all. The note is
  * kept as the resolve event's detail and read back from there, so that a merge landing work an
  * earlier process resolved still quotes it in the squash body (ADR-0007).

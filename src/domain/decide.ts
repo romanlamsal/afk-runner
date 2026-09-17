@@ -2,10 +2,12 @@ import {
     attempts,
     type BrokenStep,
     brokenStep,
+    conflicted,
     implemented,
     type LifecycleEvent,
     merged,
     prepared,
+    rebased,
     repairableStep,
     running,
     type Step,
@@ -44,10 +46,26 @@ export type Action =
      */
     | { kind: "prepare"; ticket: number; brokenStep: BrokenStep }
     /**
-     * Take an implemented ticket through the merge track: rebase onto the spec branch's tip, and
-     * land it there. At most one of these is ever in flight (ADR-0006).
+     * Put an implemented ticket onto the spec branch's tip, in the ticket's own worktree — always,
+     * and without probing first (ADR-0005). It is the first of the three moves the merge track is
+     * made of, and at most one move of that track is ever in flight (ADR-0006).
      */
-    | { kind: "merge"; ticket: number; attempt: number }
+    | { kind: "rebase"; ticket: number }
+    /**
+     * Hand a conflict resolver the rebase git stopped part-way. It is given for a `rebase:
+     * conflicted` and for nothing else, so that an agent is never turned loose on a worktree with
+     * nothing to resolve in it (ADR-0025, ADR-0026).
+     *
+     * `attempt` is the trip through the merge track it belongs to, counted off the rebase start
+     * events — because a resolve spends the rebase's budget rather than one of its own.
+     */
+    | { kind: "resolve"; ticket: number; attempt: number }
+    /**
+     * Land a rebased ticket on the spec branch: the squash, and the trailer cross-check that guards
+     * the window a run killed between a squash and its event leaves behind. That, and nothing else
+     * (ADR-0026).
+     */
+    | { kind: "merge"; ticket: number }
     /**
      * Prove the spec branch with a ticket's merge on it. It follows every merge without exception,
      * and it is an action of its own so that a run killed between a squash and its gate resumes at
@@ -111,6 +129,8 @@ const ticketsOf = (actions: readonly Action[]): ReadonlySet<number> =>
 
 /** Whether an action is one about the spec branch, which is the set seriality is enforced over. */
 const onMergeTrack = (action: Action): boolean =>
+    action.kind === "rebase" ||
+    action.kind === "resolve" ||
     action.kind === "merge" ||
     action.kind === "gate" ||
     action.kind === "fix" ||
@@ -153,13 +173,12 @@ export const nextActions = (
 
         // A step nothing ended: a killed run, not a ticket that failed. The attempt was never
         // answered, so the budget — which exists to stop a *failure* repeating — does not apply.
-        //
-        // A conflicted rebase is one of those: git stopped it part-way and the run that was going
-        // to hand it to a resolver is gone, so the pass is instructed by the rebase exactly as it
-        // was when the same kill left a `rebase: running` behind (ADR-0025).
-        if (last.outcome === "running" || last.outcome === "conflicted") {
+        if (last.outcome === "running") {
             return repairableStep(broke) ? broke : undefined
         }
+        // A conflicted rebase is not a step that broke. It is a state of the machine with a move
+        // out of it — the resolve — and the same move whether the run that recorded it is still
+        // alive or was killed on the spot (ADR-0025, ADR-0026).
         if (last.outcome !== "failed") {
             return undefined
         }
@@ -271,6 +290,13 @@ export const nextActions = (
             return sequence
         }
 
+        // The one move out of a conflict, and the only place a conflict resolver is ever called
+        // from. A killed run that left the conflict behind gets the same move, because where the
+        // ticket is is what the log says and not which process said it (ADR-0025, ADR-0026).
+        if (conflicted(events, ticket)) {
+            return { kind: "resolve", ticket, attempt: attempts(events, ticket, "rebase") }
+        }
+
         const repaired = prepared(events, ticket)
         // A ticket that landed and was never proven. A run killed between a squash and its gate
         // leaves one, and nothing else would ever dispatch it again — so without this the gate
@@ -278,8 +304,15 @@ export const nextActions = (
         if (merged(events, ticket) || repaired === "gate") {
             return { kind: "gate", ticket }
         }
-        if (implemented(events, ticket) || (repaired !== undefined && MERGE_SIDE.has(repaired))) {
-            return { kind: "merge", ticket, attempt: attempts(events, ticket, "rebase") + 1 }
+        // A ticket on the tip, however it got there, and the pass a broken squash earned: both want
+        // the squash, and the cross-check inside it is what makes asking twice harmless.
+        if (rebased(events, ticket) || repaired === "merge") {
+            return { kind: "merge", ticket }
+        }
+        // The head of the merge track. A pass sent to a rebase or to a resolve comes back here too:
+        // what it repaired is a trip through the track, and a trip starts at the rebase.
+        if (implemented(events, ticket) || repaired === "rebase" || repaired === "resolve") {
+            return { kind: "rebase", ticket }
         }
 
         return undefined

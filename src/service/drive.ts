@@ -9,6 +9,8 @@ import type { RunGate } from "./gate.ts"
 import type { ImplementTicket } from "./implement.ts"
 import type { MergeTicket } from "./merge.ts"
 import type { PrepareTicket } from "./prepare.ts"
+import type { RebaseTicket } from "./rebase.ts"
+import type { ResolveTicket } from "./resolve.ts"
 import type { RevertTicket } from "./revert.ts"
 import type { SetupTicket } from "./setup.ts"
 
@@ -35,9 +37,14 @@ export type DriveDeps = {
     implement: ImplementTicket
     /** The operator's stop signal, read once per pass — never trapped by a step (ADR-0016). */
     interrupts: Interrupts
+    /** The squash onto the spec branch, and the trailer cross-check that guards it (ADR-0026). */
     merge: MergeTicket
     /** The pass a ticket a step left broken gets, mid-run and on a resumed run alike (ADR-0012). */
     prepare: PrepareTicket
+    /** The head of the merge track: every ticket onto the tip, always (ADR-0005). */
+    rebase: RebaseTicket
+    /** The conflict resolver, asked for only where git said there is a conflict (ADR-0025). */
+    resolve: ResolveTicket
     /** The merge off the branch, and the proof of the tip it leaves behind (ADR-0009). */
     revert: RevertTicket
     /** What makes a ticket ready for an implementer, and what a broken one is cut again by. */
@@ -58,7 +65,20 @@ type Settled = { action: Action; result: StepResult }
  * recognisable at all.
  */
 export const createDriveService =
-    ({ events, fix, gate, implement, interrupts, merge, now, prepare, revert, setup }: DriveDeps): DriveRun =>
+    ({
+        events,
+        fix,
+        gate,
+        implement,
+        interrupts,
+        merge,
+        now,
+        prepare,
+        rebase,
+        resolve,
+        revert,
+        setup,
+    }: DriveDeps): DriveRun =>
     async (run, { maxParallel }) => {
         const { root, spec, manifest } = run
         const inFlight = new Map<Action, Promise<Settled>>()
@@ -103,6 +123,18 @@ export const createDriveService =
                     inFlight.set(
                         action,
                         implement(run, action).then(result => ({ action, result })),
+                    )
+                }
+                if (action.kind === "rebase") {
+                    inFlight.set(
+                        action,
+                        rebase(run, action).then(result => ({ action, result })),
+                    )
+                }
+                if (action.kind === "resolve") {
+                    inFlight.set(
+                        action,
+                        resolve(run, action).then(result => ({ action, result })),
                     )
                 }
                 if (action.kind === "merge") {

@@ -16,6 +16,8 @@ import { createGateService, createProveBranch, type RunGate } from "../../src/se
 import { createImplementService } from "../../src/service/implement.ts"
 import { createMergeService, type MergeTicket } from "../../src/service/merge.ts"
 import { createPrepareService } from "../../src/service/prepare.ts"
+import { createRebaseService, type RebaseTicket } from "../../src/service/rebase.ts"
+import { createResolveService, type ResolveTicket } from "../../src/service/resolve.ts"
 import { createRevertService, type RevertTicket } from "../../src/service/revert.ts"
 import { createSetupService, type SetupTicket } from "../../src/service/setup.ts"
 import { createStartService } from "../../src/service/start.ts"
@@ -98,7 +100,7 @@ const harness = ({
     const preparer = createFakeAgent(preparing ? {} : { outcome: "failed", detail: "the pass got nowhere" })
     /** How many implementers a ticket has had, which is what makes a second attempt different. */
     const attempted = new Map<number, number>()
-    const resolver = createFakeAgent()
+    const resolver = createFakeAgent({ structuredOutput: { note: "both sides added a field; kept both" } })
     const fixer = createFakeAgent()
     const writer = createFakeAgent({ structuredOutput: { title: "Layerless afk", summary: "One branch." } })
     const commands = createFakeCommands(failing)
@@ -137,7 +139,9 @@ const harness = ({
               }
             : git.git
 
-    const mergeTrack = createMergeService({
+    const rebaseTrack = createRebaseService({ events: events.log, git: git.git, now })
+
+    const resolveTrack = createResolveService({
         // A conflict resolver that finishes the rebase it was called for, unless this scenario says
         // it is one that cannot.
         agent: async invocation => {
@@ -151,6 +155,8 @@ const harness = ({
         git: git.git,
         now,
     })
+
+    const mergeTrack = createMergeService({ events: events.log, git: git.git, now })
 
     const gateTrack = createGateService({ events: events.log, git: git.git, now, prove })
 
@@ -201,6 +207,8 @@ const harness = ({
             return result
         }
 
+    const rebase: RebaseTicket = serially(rebaseTrack)
+    const resolve: ResolveTicket = serially(resolveTrack)
     const merge: MergeTicket = serially(mergeTrack)
     const gate: RunGate = serially(gateTrack)
     const fix: FixTicket = serially(fixTrack)
@@ -252,6 +260,8 @@ const harness = ({
                     now,
                 }),
                 setup,
+                rebase,
+                resolve,
                 merge,
                 gate,
                 fix,
@@ -673,6 +683,47 @@ describe("a run's merge track", () => {
         expect(resolver.invocations.map(invocation => invocation.cwd)).toEqual([".afk/4/t10"])
     })
 
+    it("should take a conflicting ticket through the rebase, the resolve and the merge in turn", async () => {
+        // given — the three moves the merge track is made of, each an action of its own (ADR-0026)
+        const { run, events } = harness({ tickets: [ticket(10)], colliding: [10] })
+
+        // when
+        await run()
+
+        // then
+        expect(settled(events.appended)).toEqual([
+            "#10 setup ok",
+            "#10 implement ok",
+            "#10 rebase conflicted",
+            "#10 resolve ok",
+            "#10 merge ok",
+            "#10 gate ok",
+            "pull-request ok",
+        ])
+    })
+
+    it("should land the work a resolved conflict left on the spec branch", async () => {
+        // given
+        const { run, git } = harness({ tickets: [ticket(10)], colliding: [10] })
+
+        // when
+        await run()
+
+        // then
+        expect(git.commitsOn("afk/4/spec")).toEqual(["spec-tip", "squash-afk/4/t10"])
+    })
+
+    it("should quote the resolver's note in the squash the merge lands", async () => {
+        // given — the note belongs to the resolve event, and the merge reads it back (ADR-0007)
+        const { run, git } = harness({ tickets: [ticket(10)], colliding: [10] })
+
+        // when
+        await run()
+
+        // then
+        expect(git.messageOf("squash-afk/4/t10")).toContain("Conflict resolution: both sides added a field; kept both")
+    })
+
     it("should spend no resolver on a ticket that rebased by itself", async () => {
         // given
         const { run, resolver } = harness({ tickets: [ticket(10)] })
@@ -701,11 +752,9 @@ describe("a run's merge track", () => {
             "#11 implement ok",
             "#11 rebase conflicted",
             "#11 resolve failed",
-            "#11 rebase failed",
             "#11 prepare ok",
             "#11 rebase conflicted",
             "#11 resolve failed",
-            "#11 rebase failed",
             "#12 implement skipped",
         ])
     })

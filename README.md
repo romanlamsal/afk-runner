@@ -62,8 +62,9 @@ than continuing unsupervised. With no TTY, pass `--plan-only` or `--implement-on
    a step of its own, so a run killed during it is visible and costs the ticket an attempt. A setup
    that broke is never repaired: the worktree is thrown away and cut again, and a ticket gets two
    before it fails. Its implementer then runs `verify` on its own work before reporting back.
-5. **Merge, serially.** One ticket at a time: rebase onto the spec branch's tip, resolve conflicts
-   in the ticket's own worktree when there are any, squash into the spec branch.
+5. **Merge, serially.** One ticket at a time, and three moves of its own: rebase onto the spec
+   branch's tip; where git stopped on a conflict, resolve it in the ticket's own worktree; squash
+   into the spec branch. A run killed between any two of them resumes at the next one.
 6. **Gate.** `setup` then `verify` on the spec branch, after every merge — so a red result names
    one merge. Green is the only thing that makes a ticket **verified**. Red gets one fix attempt
    constrained to fix the cause and never the signal; still red and the merge is reverted, the
