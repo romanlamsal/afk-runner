@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest"
-import type { Action } from "../../src/domain/decide.ts"
 import type { LifecycleEvent } from "../../src/domain/events.ts"
 import type { Manifest } from "../../src/domain/manifest.ts"
 import type { PreparedRun } from "../../src/domain/run.ts"
@@ -9,10 +8,11 @@ import { createFakeEventLog, type FakeEventLog } from "../fakes/event-log.ts"
 import { createFakeInterrupts } from "../fakes/interrupts.ts"
 
 /**
- * The loop, and deliberately nothing else. Every rule about *what* to start belongs to the decision
- * function and is asserted against it directly; what is asserted here is that the loop asks, starts
- * what it was told to, waits, and asks again — and what it comes to when a step halts the run or the
- * operator stops it.
+ * The loop, and deliberately nothing else. Which action follows which is the decision function's,
+ * and is asserted against it directly in `test/domain/decide.test.ts` — never a second time through
+ * fakes. What is asserted here is what the loop alone owns: that an action reaches the service that
+ * performs it, that a skip is written down rather than dispatched, and what the run comes to when a
+ * step halts it or the operator stops it.
  *
  * The real decision function is used rather than a double: it is pure, and a fake of it would make
  * these tests assert the fake.
@@ -55,7 +55,7 @@ const settle = async (
     events: FakeEventLog,
     ticket: number,
     step: LifecycleEvent["step"],
-    outcome: "ok" | "failed" | "halted",
+    outcome: "ok" | "failed" | "halted" | "conflicted",
 ): Promise<void> => {
     await events.log.append(RUN.root, RUN.spec, event(ticket, step, "running"))
     if (outcome !== "halted") {
@@ -70,6 +70,8 @@ type Setup = {
     implementing?: StepResult
     /** What the setup service comes to, which is what an implementer is waited on by. */
     settingUp?: StepResult
+    /** What git made of the rebase, which is what puts a ticket in front of a resolver or not. */
+    rebasing?: "ok" | "conflicted"
     /** What the gate comes to, which is what puts a ticket into the gate-red sequence or not. */
     gating?: "ok" | "failed"
     /** Called as each implementer settles, which is the only moment an interrupt is worth aiming at. */
@@ -80,163 +82,94 @@ const harness = ({
     log = [],
     implementing = { outcome: "ok" },
     settingUp = { outcome: "ok" },
+    rebasing = "ok",
     gating = "ok",
     duringImplement,
 }: Setup = {}) => {
     const events = createFakeEventLog(log)
     const { interrupts, interrupt } = createFakeInterrupts()
-    const cut: Extract<Action, { kind: "setup" }>[] = []
-    const implemented: Extract<Action, { kind: "implement" }>[] = []
-    const rebased: Extract<Action, { kind: "rebase" }>[] = []
-    const merged: Extract<Action, { kind: "merge" }>[] = []
-    const gated: Extract<Action, { kind: "gate" }>[] = []
-    const prepared: Extract<Action, { kind: "prepare" }>[] = []
-    const fixed: Extract<Action, { kind: "fix" }>[] = []
-    const reverted: Extract<Action, { kind: "revert" }>[] = []
+    /** Every action the loop handed out, as `<kind>:<ticket>`: which service got what, and nothing else. */
+    const dispatched: string[] = []
 
     const drive = createDriveService({
         events: events.log,
         interrupts,
         now: () => new Date(AT),
         setup: async (_run, action) => {
-            cut.push({ kind: "setup", ...action })
+            dispatched.push(`setup:${action.ticket}`)
             await settle(events, action.ticket, "setup", settingUp.outcome)
             return settingUp
         },
         implement: async (_run, action) => {
-            implemented.push({ kind: "implement", ...action })
+            dispatched.push(`implement:${action.ticket}`)
             await settle(events, action.ticket, "implement", implementing.outcome)
             duringImplement?.(interrupt)
             return implementing
         },
         rebase: async (_run, action) => {
-            rebased.push({ kind: "rebase", ...action })
-            await settle(events, action.ticket, "rebase", "ok")
+            dispatched.push(`rebase:${action.ticket}`)
+            await settle(events, action.ticket, "rebase", rebasing)
             return { outcome: "ok" }
         },
         resolve: async (_run, action) => {
+            dispatched.push(`resolve:${action.ticket}`)
             await settle(events, action.ticket, "resolve", "ok")
             return { outcome: "ok" }
         },
         merge: async (_run, action) => {
-            merged.push({ kind: "merge", ...action })
+            dispatched.push(`merge:${action.ticket}`)
             await settle(events, action.ticket, "merge", "ok")
             return { outcome: "ok" }
         },
         gate: async (_run, action) => {
-            gated.push({ kind: "gate", ...action })
+            dispatched.push(`gate:${action.ticket}`)
             await settle(events, action.ticket, "gate", gating)
             return { outcome: gating }
         },
         fix: async (_run, action) => {
-            fixed.push({ kind: "fix", ...action })
+            dispatched.push(`fix:${action.ticket}`)
             await settle(events, action.ticket, "fix", "failed")
             return { outcome: "failed" }
         },
         revert: async (_run, action) => {
-            reverted.push({ kind: "revert", ...action })
+            dispatched.push(`revert:${action.ticket}`)
             await settle(events, action.ticket, "revert", "failed")
             return { outcome: "failed" }
         },
         prepare: async (_run, action) => {
-            prepared.push({ kind: "prepare", ...action })
+            dispatched.push(`prepare:${action.ticket}`)
             await settle(events, action.ticket, "prepare", "ok")
             return { outcome: "ok" }
         },
     })
 
-    return { drive, events, cut, implemented, rebased, merged, gated, prepared, fixed, reverted, interrupt }
+    return { drive, events, dispatched, interrupt }
 }
 
-describe("createDriveService", () => {
-    it("should give a ticket nothing blocks to the setup service", async () => {
+describe("createDriveService: the service an action reaches", () => {
+    it.each([
+        ["setup", {}, "setup:7"],
+        ["implement", {}, "implement:7"],
+        ["rebase", {}, "rebase:7"],
+        ["merge", {}, "merge:7"],
+        ["gate", {}, "gate:7"],
+        ["resolve", { rebasing: "conflicted" }, "resolve:7"],
+        ["fix", { gating: "failed" }, "fix:7"],
+        ["revert", { gating: "failed" }, "revert:7"],
+        ["prepare", { implementing: { outcome: "failed" } }, "prepare:7"],
+    ] as const)("should give a %s action to the service that performs it", async (_kind, setup, expected) => {
         // given
-        const { drive, cut } = harness()
+        const { drive, dispatched } = harness(setup)
 
         // when
         await drive(RUN, { maxParallel: 2 })
 
         // then
-        expect(cut.map(action => action.ticket)).toContain(7)
+        expect(dispatched).toContain(expected)
     })
+})
 
-    it("should give a ticket its setup got through to the implement service", async () => {
-        // given
-        const { drive, implemented } = harness()
-
-        // when
-        await drive(RUN, { maxParallel: 2 })
-
-        // then
-        expect(implemented.map(action => action.ticket)).toContain(7)
-    })
-
-    it("should give an implemented ticket to the rebase service", async () => {
-        // given
-        const { drive, rebased } = harness()
-
-        // when
-        await drive(RUN, { maxParallel: 2 })
-
-        // then
-        expect(rebased.map(action => action.ticket)).toContain(7)
-    })
-
-    it("should give a rebased ticket to the merge service", async () => {
-        // given
-        const { drive, merged } = harness()
-
-        // when
-        await drive(RUN, { maxParallel: 2 })
-
-        // then
-        expect(merged.map(action => action.ticket)).toContain(7)
-    })
-
-    it("should give a ticket whose gate went red to the fix service", async () => {
-        // given
-        const { drive, fixed } = harness({ gating: "failed" })
-
-        // when
-        await drive(RUN, { maxParallel: 2 })
-
-        // then
-        expect(fixed.map(action => action.ticket)).toEqual([7])
-    })
-
-    it("should give a ticket whose gate is red again after its one fix to the revert service", async () => {
-        // given
-        const { drive, reverted } = harness({ gating: "failed" })
-
-        // when
-        await drive(RUN, { maxParallel: 2 })
-
-        // then
-        expect(reverted.map(action => action.ticket)).toEqual([7])
-    })
-
-    it("should give a merged ticket to the gate service", async () => {
-        // given
-        const { drive, gated } = harness()
-
-        // when
-        await drive(RUN, { maxParallel: 2 })
-
-        // then
-        expect(gated.map(action => action.ticket)).toContain(7)
-    })
-
-    it("should give a ticket a step left broken to the prepare service", async () => {
-        // given
-        const { drive, prepared } = harness({ implementing: { outcome: "failed" } })
-
-        // when
-        await drive(RUN, { maxParallel: 2 })
-
-        // then
-        expect(prepared).toContainEqual({ kind: "prepare", ticket: 7, brokenStep: "implement" })
-    })
-
+describe("createDriveService: what the loop settles itself", () => {
     it("should settle a skip by writing it down rather than by dispatching it", async () => {
         // given: an implementer that never succeeds, so #7 spends its budget and #8 can never land
         const { drive, events } = harness({ implementing: { outcome: "failed" } })
@@ -247,7 +180,9 @@ describe("createDriveService", () => {
         // then
         expect(events.appended).toContainEqual(expect.objectContaining({ ticket: 8, outcome: "skipped" }))
     })
+})
 
+describe("createDriveService: what the run comes to", () => {
     it.each([
         ["halted", { outcome: "halted", reason: "#7 is not in the manifest" }, "halted"],
         ["done", { outcome: "ok" }, "done"],
@@ -287,13 +222,13 @@ describe("createDriveService", () => {
 
     it("should start nothing new once the operator has interrupted", async () => {
         // given
-        const { drive, implemented } = harness({ duringImplement: interrupt => interrupt() })
+        const { drive, dispatched } = harness({ duringImplement: interrupt => interrupt() })
 
         // when
         await drive(RUN, { maxParallel: 1 })
 
         // then
-        expect(implemented).toHaveLength(1)
+        expect(dispatched.filter(action => action.startsWith("implement:"))).toHaveLength(1)
     })
 
     it("should report the progress the log came to", async () => {
