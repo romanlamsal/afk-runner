@@ -50,6 +50,8 @@ const implementing = (ticket: number, attempt = 1): Action => ({ kind: "implemen
 
 const merging = (ticket: number, attempt = 1): Action => ({ kind: "merge", ticket, attempt })
 
+const gating = (ticket: number): Action => ({ kind: "gate", ticket })
+
 const preparing = (ticket: number, brokenStep: BrokenStep): Action => ({ kind: "prepare", ticket, brokenStep })
 
 describe("nextActions: the slate", () => {
@@ -195,7 +197,7 @@ describe("nextActions: the merge track", () => {
         expect(actions).toEqual([merging(10)])
     })
 
-    it("should take a merged ticket back into the merge track, so that its gate still runs", () => {
+    it("should gate a merged ticket, because the gate follows every merge without exception", () => {
         // given — what a run killed between a squash and its gate leaves behind (ADR-0008)
         const tickets = [ticket(10)]
 
@@ -203,7 +205,44 @@ describe("nextActions: the merge track", () => {
         const actions = decide(tickets, [event(10, "implement", "ok"), event(10, "merge", "ok")])
 
         // then
-        expect(actions).toEqual([merging(10)])
+        expect(actions).toEqual([gating(10)])
+    })
+
+    it("should never gate a ticket twice, because the gate is what makes it verified", () => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, [event(10, "merge", "ok"), event(10, "gate", "ok")])
+
+        // then
+        expect(actions).toEqual([{ kind: "finish" }])
+    })
+
+    it.each([
+        ["a gate", gating(11)],
+        ["a merge", merging(11)],
+    ] as const)("should start no second merge-side action while %s is in flight", (_name, flying) => {
+        // given: #10 is waiting for the merge track while #11 already has it
+        const tickets = [ticket(10), ticket(11)]
+        const events = [event(10, "implement", "ok"), event(11, "merge", "ok")]
+
+        // when
+        const actions = decide(tickets, events, { inFlight: [flying] })
+
+        // then
+        expect(actions).toEqual([])
+    })
+
+    it("should keep handing out implementers while a ticket is being gated", () => {
+        // given
+        const tickets = [ticket(10), ticket(11)]
+
+        // when
+        const actions = decide(tickets, [event(11, "merge", "ok")], { inFlight: [gating(11)] })
+
+        // then
+        expect(actions).toEqual([implementing(10)])
     })
 
     it.each([
@@ -387,6 +426,17 @@ describe("nextActions: draining", () => {
 
         // then
         expect(actions).toEqual([])
+    })
+
+    it("should still gate a merge a draining run has already made, because the gate has no exception", () => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, [event(10, "merge", "ok")], { draining: true })
+
+        // then
+        expect(actions).toEqual([gating(10)])
     })
 
     it("should finish once the last in-flight action of a draining run has settled", () => {
@@ -736,6 +786,23 @@ describe("nextActions: recovering the merge track", () => {
 
         // then
         expect(actions).toEqual([merging(10, 2)])
+    })
+
+    it("should gate a ticket the pass was sent to a killed gate for, rather than merge it again", () => {
+        // given
+        const tickets = [ticket(10)]
+        const events = [
+            event(10, "merge", "ok"),
+            event(10, "gate", "running"),
+            event(10, "prepare", "running"),
+            event(10, "prepare", "ok"),
+        ]
+
+        // when
+        const actions = decide(tickets, events)
+
+        // then
+        expect(actions).toEqual([gating(10)])
     })
 
     it("should fail a ticket for good once the merge track attempt the pass bought has failed too", () => {

@@ -90,13 +90,13 @@ export const assembleCli = (): Cli => {
             now,
             tracker,
         }),
-        merge: createMergeService({
-            agent,
+        merge: createMergeService({ agent, events, git, now }),
+        gate: createGateService({
             events,
-            gate: createGateService({ events, now, prove }),
+            fix: createFixService({ agent, events, git, now, prove }),
             git,
             now,
-            fix: createFixService({ agent, events, git, now, prove }),
+            prove,
         }),
         prepare: createPrepareService({ agent, events, git, now }),
         now,

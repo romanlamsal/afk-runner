@@ -39,6 +39,12 @@ export type Action =
      * land it there. At most one of these is ever in flight (ADR-0006).
      */
     | { kind: "merge"; ticket: number; attempt: number }
+    /**
+     * Prove the spec branch with a ticket's merge on it. It follows every merge without exception,
+     * and it is an action of its own so that a run killed between a squash and its gate resumes at
+     * the gate rather than at another trip through the merge track (ADR-0008, ADR-0026).
+     */
+    | { kind: "gate"; ticket: number }
     /** Record that a ticket will not land, because something it is blocked by will not either. */
     | { kind: "skip"; ticket: number }
     /** Nothing is running and nothing more can start. */
@@ -76,7 +82,9 @@ const ticketsOf = (actions: readonly Action[]): ReadonlySet<number> =>
 
 /** Whether an action is one about the spec branch, which is the set seriality is enforced over. */
 const onMergeTrack = (action: Action): boolean =>
-    action.kind === "merge" || (action.kind === "prepare" && MERGE_SIDE.has(action.brokenStep))
+    action.kind === "merge" ||
+    action.kind === "gate" ||
+    (action.kind === "prepare" && MERGE_SIDE.has(action.brokenStep))
 
 /**
  * What to start now.
@@ -96,10 +104,6 @@ export const nextActions = (
 ): readonly Action[] => {
     const busy = ticketsOf(inFlight)
     const idle = (): readonly Action[] => (inFlight.length === 0 ? [{ kind: "finish" }] : [])
-
-    if (draining) {
-        return idle()
-    }
 
     /**
      * What a prepare pass would be sent to repair, or nothing where no pass would help. This is the
@@ -182,44 +186,44 @@ export const nextActions = (
         ticket => !busy.has(ticket.number) && !dead.has(ticket.number),
     )
 
-    // One at a time, and never a doomed ticket: a ticket whose blocker died finishes its
+    // The one thing the merge track would do for this ticket now, or nothing where it has nothing
+    // to do. One at a time, and never a doomed ticket: a ticket whose blocker died finishes its
     // implementer and is skipped, rather than spending the merge track on work that cannot land
     // (ADR-0010).
-    //
-    // A merged ticket is taken back through it as readily as an implemented one. A run killed
-    // between a squash and its gate leaves one, and nothing else would ever dispatch it again — so
-    // without this the gate would have an exception, which it does not have (ADR-0008). The merge
-    // service asks git what is already on the branch rather than doing the work twice.
-    const waiting = (ticket: number): boolean => {
+    const mergeSide = (ticket: number): Action | undefined => {
+        const repair = repairFor(ticket)
+        if (repair !== undefined && MERGE_SIDE.has(repair)) {
+            return { kind: "prepare", ticket, brokenStep: repair }
+        }
+
         const repaired = prepared(events, ticket)
-        return (
-            implemented(events, ticket) ||
-            merged(events, ticket) ||
-            (repaired !== undefined && MERGE_SIDE.has(repaired))
-        )
+        // A ticket that landed and was never proven. A run killed between a squash and its gate
+        // leaves one, and nothing else would ever dispatch it again — so without this the gate
+        // would have an exception, which it does not have (ADR-0008).
+        if (merged(events, ticket) || repaired === "gate") {
+            return { kind: "gate", ticket }
+        }
+        if (implemented(events, ticket) || (repaired !== undefined && MERGE_SIDE.has(repaired))) {
+            return { kind: "merge", ticket, attempt: attempts(events, ticket, "rebase") + 1 }
+        }
+
+        return undefined
     }
 
-    // Seriality covers the prepare pass a broken merge-side step earns as well as the merge itself:
-    // both are about the branch one worktree writes, so one of them is the most that ever runs.
+    // Seriality covers every merge-side action alike — the squash, the gate that follows it, and
+    // the prepare pass a broken merge-side step earns: all of them are about the branch one
+    // worktree writes, so one of them is the most that ever runs.
     const merges: Action[] = inFlight.some(onMergeTrack)
         ? []
-        : actionable
-              .flatMap<Action>(ticket => {
-                  const repair = repairFor(ticket.number)
-                  if (repair !== undefined && MERGE_SIDE.has(repair)) {
-                      return [{ kind: "prepare", ticket: ticket.number, brokenStep: repair }]
-                  }
-                  return waiting(ticket.number)
-                      ? [
-                            {
-                                kind: "merge",
-                                ticket: ticket.number,
-                                attempt: attempts(events, ticket.number, "rebase") + 1,
-                            },
-                        ]
-                      : []
-              })
-              .slice(0, 1)
+        : actionable.flatMap<Action>(ticket => mergeSide(ticket.number) ?? []).slice(0, 1)
+
+    // A drain starts nothing new, and the gate is not new work: it is the proof of a merge this run
+    // has already made, and a drain that left one unproven would put an ungated squash on the spec
+    // branch — which is the one exception the gate does not have (ADR-0008, ADR-0016).
+    if (draining) {
+        const gates = merges.filter(action => action.kind === "gate")
+        return gates.length > 0 ? gates : idle()
+    }
 
     const slots = maxParallel - inFlight.filter(action => !onMergeTrack(action)).length
     const starts: Action[] = actionable

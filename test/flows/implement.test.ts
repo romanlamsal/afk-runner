@@ -6,11 +6,13 @@ import type { AgentInvocation } from "../../src/domain/agent.ts"
 import type { LifecycleEvent } from "../../src/domain/events.ts"
 import type { Git } from "../../src/domain/git.ts"
 import type { Ticket } from "../../src/domain/manifest.ts"
+import type { PreparedRun } from "../../src/domain/run.ts"
 import { mergedTickets } from "../../src/domain/squash.ts"
+import type { StepResult } from "../../src/service/attempt.ts"
 import { createDriveService } from "../../src/service/drive.ts"
 import { createFinishService } from "../../src/service/finish.ts"
 import { createFixService } from "../../src/service/fix.ts"
-import { createGateService, createProveBranch } from "../../src/service/gate.ts"
+import { createGateService, createProveBranch, type RunGate } from "../../src/service/gate.ts"
 import { createImplementService } from "../../src/service/implement.ts"
 import { createMergeService, type MergeTicket } from "../../src/service/merge.ts"
 import { createPrepareService } from "../../src/service/prepare.ts"
@@ -106,7 +108,7 @@ const harness = ({
     const errors: string[] = []
     /** The most implementers that were ever in flight at once, which is what a slot count means. */
     const concurrency = { running: 0, peak: 0 }
-    /** The same for the merge track, where the only correct answer is one (ADR-0006). */
+    /** The same for the merge track, over every action about the spec branch (ADR-0006). */
     const merging = { running: 0, peak: 0 }
 
     const now = (): Date => new Date("2026-09-15T11:18:38.314Z")
@@ -141,9 +143,12 @@ const harness = ({
             return result
         },
         events: events.log,
-        gate: createGateService({ events: events.log, now, prove }),
         git: git.git,
         now,
+    })
+
+    const gateTrack = createGateService({
+        events: events.log,
         // A fix agent that commits a fix on the spec branch and makes the repository green again,
         // unless this scenario says it is one that cannot.
         fix: createFixService({
@@ -160,15 +165,24 @@ const harness = ({
             now,
             prove,
         }),
+        git: git.git,
+        now,
+        prove,
     })
 
-    const merge: MergeTicket = async (run, action) => {
-        merging.running += 1
-        merging.peak = Math.max(merging.peak, merging.running)
-        const result = await mergeTrack(run, action)
-        merging.running -= 1
-        return result
-    }
+    /** Counted over both merge-side services, because seriality is about the branch and not one step. */
+    const serially =
+        <Action>(step: (run: PreparedRun, action: Action) => Promise<StepResult>) =>
+        async (run: PreparedRun, action: Action): Promise<StepResult> => {
+            merging.running += 1
+            merging.peak = Math.max(merging.peak, merging.running)
+            const result = await step(run, action)
+            merging.running -= 1
+            return result
+        }
+
+    const merge: MergeTicket = serially(mergeTrack)
+    const gate: RunGate = serially(gateTrack)
 
     const cli = createCli({
         isInteractive: () => true,
@@ -219,6 +233,7 @@ const harness = ({
                     tracker: tracker.tracker,
                 }),
                 merge,
+                gate,
                 prepare: createPrepareService({ agent: preparer.run, events: events.log, git: git.git, now }),
                 now,
             }),
@@ -795,8 +810,8 @@ describe("a run resumed over a log that is not empty", () => {
         // when
         await run()
 
-        // then — the first is what the killed run left; the second is afk finding it already there
-        expect(settled(events.appended)).toEqual(["#10 merge ok", "#10 merge ok", "#10 gate ok", "pull-request ok"])
+        // then — the killed run's merge is picked back up at the gate, with no second trip through
+        expect(settled(events.appended)).toEqual(["#10 merge ok", "#10 gate ok", "pull-request ok"])
     })
 
     it("should never squash a ticket the spec branch already carries a second time", async () => {

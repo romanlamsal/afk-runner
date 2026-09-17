@@ -77,6 +77,7 @@ const harness = ({ log = [], implementing = { outcome: "ok" }, duringImplement }
     const { interrupts, interrupt } = createFakeInterrupts()
     const implemented: Extract<Action, { kind: "implement" }>[] = []
     const merged: Extract<Action, { kind: "merge" }>[] = []
+    const gated: Extract<Action, { kind: "gate" }>[] = []
     const prepared: Extract<Action, { kind: "prepare" }>[] = []
 
     const drive = createDriveService({
@@ -91,6 +92,11 @@ const harness = ({ log = [], implementing = { outcome: "ok" }, duringImplement }
         },
         merge: async (_run, action) => {
             merged.push({ kind: "merge", ...action })
+            await settle(events, action.ticket, "merge", "ok")
+            return { outcome: "ok" }
+        },
+        gate: async (_run, action) => {
+            gated.push({ kind: "gate", ...action })
             await settle(events, action.ticket, "gate", "ok")
             return { outcome: "ok" }
         },
@@ -101,7 +107,7 @@ const harness = ({ log = [], implementing = { outcome: "ok" }, duringImplement }
         },
     })
 
-    return { drive, events, implemented, merged, prepared, interrupt }
+    return { drive, events, implemented, merged, gated, prepared, interrupt }
 }
 
 describe("createDriveService", () => {
@@ -125,6 +131,17 @@ describe("createDriveService", () => {
 
         // then
         expect(merged.map(action => action.ticket)).toContain(7)
+    })
+
+    it("should give a merged ticket to the gate service", async () => {
+        // given
+        const { drive, gated } = harness()
+
+        // when
+        await drive(RUN, { maxParallel: 2 })
+
+        // then
+        expect(gated.map(action => action.ticket)).toContain(7)
     })
 
     it("should give a ticket a step left broken to the prepare service", async () => {

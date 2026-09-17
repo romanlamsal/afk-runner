@@ -7,8 +7,8 @@ export type FakeGate = {
 }
 
 /**
- * The gate as the merge track sees it: something that is asked after every merge and answers green
- * or red. What the gate itself does is `test/service/gate.test.ts`.
+ * The gate as the driver sees it: an action handed out for a ticket that landed, which answers
+ * green or red. What the gate itself does is `test/service/gate.test.ts`.
  *
  * `red` is the tickets whose gate goes red; every other one goes green.
  */
@@ -16,7 +16,7 @@ export const createFakeGate = (red: readonly number[] = []): FakeGate => {
     const gated: number[] = []
     return {
         gated,
-        gate: async (_run, ticket) => {
+        gate: async (_run, { ticket }) => {
             gated.push(ticket)
             return red.includes(ticket) ? { outcome: "failed" } : { outcome: "ok" }
         },

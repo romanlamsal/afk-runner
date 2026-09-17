@@ -1,11 +1,15 @@
 import type { Clock } from "../domain/clock.ts"
 import type { CommandResult, CommandRunner } from "../domain/commands.ts"
 import type { EventLog, Outcome } from "../domain/events.ts"
+import type { Git } from "../domain/git.ts"
+import { ticketOf } from "../domain/manifest.ts"
+import { ticketWorktree } from "../domain/paths.ts"
 import type { PreparedRun } from "../domain/run.ts"
 import type { StepResult } from "./attempt.ts"
+import type { FixRedGate } from "./fix.ts"
 
 /** The gate: prove the spec branch after a ticket has landed on it. */
-export type RunGate = (run: PreparedRun, ticket: number) => Promise<StepResult>
+export type RunGate = (run: PreparedRun, action: { ticket: number }) => Promise<StepResult>
 
 /**
  * `setup` then `verify` in the gate worktree, and nothing written down: what proving the spec
@@ -26,6 +30,9 @@ export type ProveDeps = {
 
 export type GateDeps = {
     events: EventLog
+    /** What a red gate is worth: one fix attempt, then the revert and the gate again (ADR-0009). */
+    fix: FixRedGate
+    git: Git
     now: Clock
     prove: ProveBranch
 }
@@ -56,26 +63,53 @@ export const createProveBranch =
  * is the one whose merge caused the result — which is what lets a red gate name one merge rather
  * than eight suspects.
  *
- * What a red gate is *worth* is not settled here: it reports red, and the merge track hands that to
- * the fix service, which spends one fix attempt and then takes the merge back off the branch
- * (ADR-0009).
+ * It is an action of its own, given for a ticket whose merge landed and was never proven, so that a
+ * run killed between a squash and its gate resumes at the gate rather than at the merge (ADR-0026).
+ *
+ * What a red gate is worth is still spent from here: the fix service gets the one fix attempt, and
+ * failing that takes the merge back off the branch (ADR-0009).
  */
 export const createGateService =
-    ({ events, now, prove }: GateDeps): RunGate =>
-    async (run, ticket) => {
-        const { root, spec } = run
+    ({ events, fix, git, now, prove }: GateDeps): RunGate =>
+    async (run, { ticket }) => {
+        const { root, spec, manifest } = run
+        const listed = ticketOf(manifest, spec, ticket)
+        if (!listed.ok) {
+            return { outcome: "halted", reason: listed.reason }
+        }
 
         const record = (outcome: Outcome, detail?: string): Promise<void> =>
             events.append(root, spec, { ticket, step: "gate", outcome, at: now().toISOString(), detail })
+
+        /**
+         * What a green entitles the run to tidy away. A verified ticket's worktree has nothing left
+         * to say — its work is on the spec branch — while a failed or a skipped one keeps branch,
+         * worktree and transcripts, because that is what a reader and the prepare agent have to go
+         * on (ADR-0012).
+         *
+         * A removal that fails is deliberately not checked and not recorded. It costs disk and
+         * nothing else: the ticket's work is on the branch either way, so un-verifying it over a
+         * directory would be a lie, and the next `checkoutWorktree` at that path force-removes what
+         * is there anyway.
+         */
+        const green = async (): Promise<StepResult> => {
+            await git.removeWorktree(root, ticketWorktree(spec, ticket))
+            return { outcome: "ok" }
+        }
 
         await record("running")
 
         const proved = await prove(run)
         if (!proved.ok) {
             await record("failed", proved.detail)
-            return { outcome: "failed" }
+            // A red gate is not the end of the ticket by itself: the fix service spends the one fix
+            // attempt on it, and failing that takes the merge back off the branch and gates what is
+            // left, so that the blame is demonstrated rather than asserted (ADR-0009). What comes
+            // back is the ticket's fate either way.
+            const fixed = await fix(run, listed.ticket)
+            return fixed.outcome === "ok" ? green() : fixed
         }
 
         await record("ok")
-        return { outcome: "ok" }
+        return green()
     }

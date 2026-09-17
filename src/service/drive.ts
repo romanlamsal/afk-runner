@@ -4,6 +4,7 @@ import { type EventLog, type Progress, progressOf, skipped } from "../domain/eve
 import type { Interrupts } from "../domain/interrupts.ts"
 import type { PreparedRun } from "../domain/run.ts"
 import type { StepResult } from "./attempt.ts"
+import type { RunGate } from "./gate.ts"
 import type { ImplementTicket } from "./implement.ts"
 import type { MergeTicket } from "./merge.ts"
 import type { PrepareTicket } from "./prepare.ts"
@@ -24,6 +25,8 @@ export type DriveResult = {
 
 export type DriveDeps = {
     events: EventLog
+    /** The gate, which follows every merge and is asked for as an action of its own (ADR-0008). */
+    gate: RunGate
     implement: ImplementTicket
     /** The operator's stop signal, read once per pass — never trapped by a step (ADR-0016). */
     interrupts: Interrupts
@@ -46,7 +49,7 @@ type Settled = { action: Action; result: StepResult }
  * recognisable at all.
  */
 export const createDriveService =
-    ({ events, implement, interrupts, merge, now, prepare }: DriveDeps): DriveRun =>
+    ({ events, gate, implement, interrupts, merge, now, prepare }: DriveDeps): DriveRun =>
     async (run, { maxParallel }) => {
         const { root, spec, manifest } = run
         const inFlight = new Map<Action, Promise<Settled>>()
@@ -91,6 +94,12 @@ export const createDriveService =
                     inFlight.set(
                         action,
                         merge(run, action).then(result => ({ action, result })),
+                    )
+                }
+                if (action.kind === "gate") {
+                    inFlight.set(
+                        action,
+                        gate(run, action).then(result => ({ action, result })),
                     )
                 }
                 if (action.kind === "prepare") {
