@@ -20,6 +20,7 @@ const VIEW: BoardView = {
             ],
             waiting: false,
             conclusion: undefined,
+            beyondRepair: false,
         },
     ],
 }

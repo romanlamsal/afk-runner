@@ -4,13 +4,15 @@ import type { BoardRow, BoardStep, BoardView, SettledOutcome, Track } from "../.
 import type { Conclusion, Step } from "../../src/domain/events.ts"
 
 /**
- * A trail written the short way: the steps of a track, each at the weight it is read at — `live` or
- * `ahead`, or what a settled step came to.
+ * A trail written the short way: the steps of a track, each at the weight it is read at — `live`,
+ * `interrupted` or `ahead`, or what a settled step came to.
  */
-const trail = (steps: Readonly<Record<string, SettledOutcome | "live" | "ahead">>): readonly BoardStep[] =>
+const trail = (
+    steps: Readonly<Record<string, SettledOutcome | "live" | "interrupted" | "ahead">>,
+): readonly BoardStep[] =>
     Object.entries(steps).map(([name, weight]) => {
         const step = name as Step
-        return weight === "live" || weight === "ahead"
+        return weight === "live" || weight === "interrupted" || weight === "ahead"
             ? { step, state: weight }
             : { step, state: "settled", outcome: weight }
     })
@@ -20,7 +22,7 @@ const row = (
     title: string,
     track: Track,
     steps: readonly BoardStep[],
-    rest: { waiting?: boolean; conclusion?: Conclusion } = {},
+    rest: { waiting?: boolean; conclusion?: Conclusion; beyondRepair?: boolean } = {},
 ): BoardRow => ({
     ticket,
     title,
@@ -28,6 +30,7 @@ const row = (
     steps,
     waiting: rest.waiting ?? false,
     conclusion: rest.conclusion,
+    beyondRepair: rest.beyondRepair ?? false,
 })
 
 const IMPLEMENTING = trail({ setup: "ok", implement: "live" })
@@ -94,12 +97,13 @@ describe("boardFrame", () => {
         ["a settled step", "setup\u2713"],
         ["the live step", "<implement>"],
         ["a step still ahead", "(rebase)"],
+        ["a step whose process is gone", "[merge]"],
     ] as const)("should write %s as %s", (_case, written) => {
         // given
         const view: BoardView = {
             rows: [
                 row(7, "A ticket", "implement", IMPLEMENTING),
-                row(8, "Another ticket", "merge", trail({ rebase: "ahead" })),
+                row(8, "Another ticket", "merge", trail({ rebase: "ahead", merge: "interrupted" })),
             ],
         }
 
@@ -170,6 +174,17 @@ describe("boardFrame", () => {
 
         // then
         expect(lines).toContain("  #7  gate\u2713  A ticket")
+    })
+
+    it("should say that a ticket a resume has nothing to try on is beyond repair", () => {
+        // given
+        const dead = row(7, "A ticket", "merge", trail({ rebase: "ok", revert: "interrupted" }), { beyondRepair: true })
+
+        // when
+        const lines = boardFrame({ rows: [dead] }, WIDE)
+
+        // then
+        expect(lines).toContain("  #7  rebase\u2713 [revert] beyond repair  A ticket")
     })
 
     it("should be as tall as the row count plus one heading per track", () => {

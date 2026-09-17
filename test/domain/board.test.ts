@@ -413,3 +413,83 @@ describe("boardOf: what a ticket came to", () => {
         expect(row?.conclusion).toBe(expected)
     })
 })
+
+/**
+ * A resumed run: the same function against a log a previous process left behind, and an action set
+ * that does not hold what that process was doing. There is no mode to assert and nothing to wait
+ * for — the first frame of a resumed run is this, and it is the one thing the log alone cannot say.
+ */
+describe("boardOf: a run picked back up", () => {
+    it.each([
+        ["the driver still holds its action", [{ kind: "implement", ticket: 7, attempt: 1 }] as const, "live"],
+        ["the process that began it is gone", [] as const, "interrupted"],
+    ] as const)("should read a step the log left running as %s where %s", (_case, inFlight, expected) => {
+        // given
+        const events = [event(7, "setup", "ok"), event(7, "implement", "running")]
+
+        // when
+        const weight = weightOf(events, 7, "implement", inFlight)
+
+        // then
+        expect(weight).toBe(expected)
+    })
+
+    it("should never read an interrupted ticket's step as live", () => {
+        // given: a log full of steps a killed run began, and an action set that holds none of them
+        const events = [event(7, "setup", "running"), event(8, "implement", "running")]
+
+        // when
+        const view = boardOf(MANIFEST, events, [])
+
+        // then
+        expect(view.rows.flatMap(row => row.steps).filter(entry => entry.state === "live")).toEqual([])
+    })
+
+    it("should show the step a prepare pass will be sent to", () => {
+        // given: a pass a killed run left behind is still about the squash it was sent to repair
+        const events = [...implemented(7), event(7, "merge", "failed"), event(7, "prepare", "running")]
+
+        // when
+        const weight = weightOf(events, 7, "merge", [])
+
+        // then
+        expect(weight).toBe("interrupted")
+    })
+
+    it("should leave the steps after the repair ahead of it", () => {
+        // given
+        const events = [...implemented(7), event(7, "merge", "failed"), event(7, "prepare", "running")]
+
+        // when
+        const weight = weightOf(events, 7, "gate", [])
+
+        // then
+        expect(weight).toBe("ahead")
+    })
+
+    it("should read a ticket no prepare pass would pick up as beyond repair", () => {
+        // given: a revert is the one step recovery must not undo, so a killed one is the end of it
+        const events = [...implemented(7), event(7, "gate", "failed"), event(7, "revert", "running")]
+
+        // when
+        const row = rowOf(events, 7, [])
+
+        // then
+        expect(row?.beyondRepair).toBe(true)
+    })
+
+    it.each([
+        ["a ticket a prepare pass would pick up", [event(7, "implement", "running")]],
+        ["a ticket nothing has happened to", []],
+        ["a ticket whose step ended", [...implemented(7)]],
+    ] as const)("should not read %s as beyond repair", (_case, events) => {
+        // given
+        const log = events
+
+        // when
+        const row = rowOf(log, 7, [])
+
+        // then
+        expect(row?.beyondRepair).toBe(false)
+    })
+})

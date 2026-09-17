@@ -236,6 +236,13 @@ next, on one line. A prepare pass is no step of a trail — it is read at the st
 repair, which is the step the domain already routes it by.
 _Avoid_: progress bar, timeline, breadcrumb
 
+**Interrupted**:
+A step the log left `running` whose action the driver does not hold: the step's process is gone, and
+it is not happening. Only the live action set tells it from a step that is (ADR-0019), which is what
+a resumed run is full of. The board reads such a ticket at the step a prepare pass will be sent to,
+or as beyond repair where no pass would help.
+_Avoid_: stale, orphaned, hung, zombie
+
 **`.afk/`**:
 The run directory — the event log, worktrees, agent transcripts. Machine-local; nothing in it is
 expected to exist on another machine.

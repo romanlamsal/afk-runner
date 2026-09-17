@@ -1,5 +1,6 @@
-import { type Action, onMergeTrack } from "./decide.ts"
+import { type Action, onMergeTrack, repairFor } from "./decide.ts"
 import {
+    brokenStep,
     type Conclusion,
     cameTo,
     implemented,
@@ -7,6 +8,7 @@ import {
     MERGE_SIDE_STEPS,
     mergeSideStep,
     type Outcome,
+    running,
     type Step,
 } from "./events.ts"
 import type { Manifest } from "./manifest.ts"
@@ -40,10 +42,15 @@ export const TRACK_STEPS: Record<Track, readonly Step[]> = {
 }
 
 /**
- * The three weights a step is carried at, which is what makes a row answer three questions at once:
- * what has happened to this ticket, what is happening to it now, and what is still ahead of it.
+ * The weights a step is carried at, which is what makes a row answer three questions at once: what
+ * has happened to this ticket, what is happening to it now, and what is still ahead of it.
+ *
+ * `interrupted` is the fourth, and it is the one thing the log alone can never say: a step the log
+ * left `running` whose action the driver does not hold is a step whose process is gone, not a step
+ * that is happening (ADR-0019). It is what a resumed run is full of, and telling it from `live` is
+ * the reason the board takes the live action set at all.
  */
-export const STEP_STATES = ["settled", "live", "ahead"] as const
+export const STEP_STATES = ["settled", "live", "interrupted", "ahead"] as const
 
 export type StepState = (typeof STEP_STATES)[number]
 
@@ -61,7 +68,7 @@ export type SettledOutcome = Exclude<Outcome, "running">
  */
 export type BoardStep =
     | { step: Step; state: "settled"; outcome: SettledOutcome }
-    | { step: Step; state: "live" | "ahead" }
+    | { step: Step; state: "live" | "interrupted" | "ahead" }
 
 /** One ticket's line. Every ticket of the spec has exactly one, from the first frame to the last. */
 export type BoardRow = {
@@ -85,6 +92,14 @@ export type BoardRow = {
      * while the process said draft (`layers.md`, question 3).
      */
     conclusion: Conclusion | undefined
+    /**
+     * A ticket a resumed run has nothing left to try on: its step was interrupted and no prepare
+     * pass would be sent to it, so the run has written it off rather than picked it back up.
+     *
+     * The repair itself needs no field of its own — a pass is sent to the step the trail already
+     * marks interrupted, which is where the row's remaining trail begins.
+     */
+    beyondRepair: boolean
 }
 
 /**
@@ -179,21 +194,46 @@ const outcomeAt = (events: readonly LifecycleEvent[], ticket: number, step: Step
 }
 
 /**
- * A row's trail. A step the driver is running now is live; a step the log has already settled has
- * happened, and carries what it came to; everything else on the track is still ahead.
+ * The step a run left behind on a ticket nothing is running: what the log says began, and what a
+ * resume will pick the ticket back up at. Nothing where the ticket is being worked, and nothing
+ * where its last event ended.
+ *
+ * It is read past a prepare pass, like every other reading of what broke: a pass a killed run left
+ * `running` is still about the step it was sent to, and that step is where the resume goes
+ * (ADR-0012).
+ */
+const interruptedStep = (
+    events: readonly LifecycleEvent[],
+    inFlight: readonly Action[],
+    ticket: number,
+): Step | undefined => {
+    const busy = inFlight.some(action => "ticket" in action && action.ticket === ticket)
+    return !busy && running(events, ticket) ? brokenStep(events, ticket) : undefined
+}
+
+/**
+ * A row's trail. A step the driver is running now is live; a step whose process is gone is
+ * interrupted; a step the log has already settled has happened, and carries what it came to;
+ * everything else on the track is still ahead.
  *
  * Live is read from the live action set and never from the log, because a `running` event is only a
- * step that is *happening* while the driver says so (ADR-0019).
+ * step that is *happening* while the driver says so (ADR-0019). The remainder of an interrupted row
+ * begins at the interrupted step, so the operator reads what the resume is about to do before it
+ * does it.
  */
 const trailOf = (
     events: readonly LifecycleEvent[],
     ticket: number,
     track: Track,
     live: Step | undefined,
+    interrupted: Step | undefined,
 ): readonly BoardStep[] =>
     TRACK_STEPS[track].map((step): BoardStep => {
         if (step === live) {
             return { step, state: "live" }
+        }
+        if (step === interrupted) {
+            return { step, state: "interrupted" }
         }
         const outcome = outcomeAt(events, ticket, step)
         return outcome === undefined ? { step, state: "ahead" } : { step, state: "settled", outcome }
@@ -208,14 +248,19 @@ export const boardOf = (
     rows: manifest.tickets.map(ticket => {
         const track = trackOf(events, inFlight, ticket.number)
         const live = liveStep(inFlight, ticket.number)
+        const interrupted = interruptedStep(events, inFlight, ticket.number)
 
         return {
             ticket: ticket.number,
             title: ticket.title,
             track,
-            steps: trailOf(events, ticket.number, track, live),
+            steps: trailOf(events, ticket.number, track, live, interrupted),
             waiting: track === "implement" && implemented(events, ticket.number) && live === undefined,
             conclusion: cameTo(events, ticket.number),
+            // The one rule of recovery there is, asked rather than derived a second time: a pass is
+            // sent to the step that broke, and a ticket no pass would help is one the run has
+            // written off (ADR-0012).
+            beyondRepair: interrupted !== undefined && repairFor(events, ticket.number) === undefined,
         }
     }),
 })
