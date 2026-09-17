@@ -44,7 +44,8 @@ _Avoid_: base commit, fork point, merge base
 
 **afk-ticket trailer**:
 `afk-ticket: <spec>/<n>`, carried by each squash commit on the spec branch. The git-side record of
-which ticket landed.
+which ticket landed, and the only witness in the one window where the log cannot say whether a
+squash landed — a cross-check that guards, never one that dispatches (ADR-0011).
 _Avoid_: marker, tag, annotation
 
 **afk-reverted trailer**:
@@ -115,9 +116,22 @@ _Avoid_: graceful shutdown, soft stop, quiesce
 
 ## State
 
+**Step**:
+The closed vocabulary recovery keys on: `setup`, `implement`, `prepare`, `rebase`, `resolve`,
+`merge`, `gate`, `fix`, `revert`. A phase that can be killed on its own, or that carries a budget of
+its own, is a step of its own (ADR-0022).
+_Avoid_: phase, stage, state
+
+**Setup step**:
+Claiming the ticket, cutting its worktree, copying environment files in and running setup —
+everything an implement attempt does before an agent exists. Named for its last act, it is more than
+the setup command, and it is a step so that being killed part-way through it is visible.
+_Avoid_: bootstrap, provisioning, pre-flight
+
 **Attempt**:
-One invocation of an agent for one step of one ticket, carrying its own session. A ticket's second
-implementer attempt is a different attempt from its first.
+One pass at one step of one ticket, carrying its own session where an agent runs it and none where
+the step runs commands. A ticket's second implementer attempt is a different attempt from its first.
+Nothing an attempt does happens before its start event.
 _Avoid_: try, run, invocation
 
 **Event log**:
@@ -127,8 +141,15 @@ _Avoid_: state file, journal, history
 
 **Lifecycle event**:
 One appended record of a step, its outcome and the attempt's session, for one ticket. Appended when
-a step starts and again when it ends. Never rewritten.
+a step starts — before the step's first act, not before its agent's — and again when it ends. Never
+rewritten.
 _Avoid_: log line, transition, history entry
+
+**Budget**:
+How many attempts a step gets, counted off its start events in the log. Nothing stores a counter, so
+nothing can hold one that disagrees; a budget no step can be counted for is asserted rather than
+derivable, which is what made `fix` a step (ADR-0022).
+_Avoid_: retry limit, attempt counter, quota
 
 **Status**:
 A ticket's last lifecycle event. Derived on read, never stored. A ticket left `running` is one whose
@@ -176,8 +197,9 @@ _Avoid_: reset, clean, wipe, rollback
 ## Tracker
 
 **Claim**:
-Assigning a ticket to the invoking user when its implementer starts — the operation
-`docs/agents/issue-tracker.md` names. afk claims every ticket it starts and never releases one.
+Assigning a ticket to the invoking user — the operation `docs/agents/issue-tracker.md` names. It is
+the setup step's first act, so a ticket that is claimed always has an event. afk claims every ticket
+it starts and never releases one.
 _Avoid_: assign, lock, reserve
 
 ## Agent roles
@@ -192,6 +214,8 @@ _Avoid_: merger, rebaser
 
 **Fix agent**:
 The gate's single attempt to repair a red verify, constrained to fix the cause and never the signal.
+Its one attempt is a budget, counted off the log's `fix` start events rather than asserted by the
+code that calls it.
 _Avoid_: repair agent, doctor, healer
 
 **Prepare agent**:

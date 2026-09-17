@@ -50,7 +50,10 @@ one.
 | `merge` | A squash that may or may not have landed. Leave the branch fit to be rebased and squashed again, and go nowhere near the spec branch: afk checks what landed itself |
 | `gate` | Work that is already on the spec branch, and checks that were killed part-way. Nothing to put right in the ticket's worktree beyond leaving it clean |
 
-Two steps are **not** on this table, and neither is an omission. `prepare` is never the thing that
+`setup` and `fix` are steps as of ADR-0022 and have no row here yet: whether either is repairable,
+and whose budget a repaired one spends, is open.
+
+Two further steps are **not** on this table, and neither is an omission. `prepare` is never the thing that
 broke — a pass that was itself killed is still about whatever it was sent to, so the step underneath
 it is what the next pass is instructed by. `revert` is not repaired at all: a ticket whose merge was
 being taken back off the spec branch was already on its way out, and putting it back is the one

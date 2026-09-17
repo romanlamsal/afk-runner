@@ -18,8 +18,9 @@ run killed mid-write costs the last line and never the file, and a line that doe
 dropped on read rather than failing everything before it. Rewriting a whole document to record one
 event puts the entire history in the crash window, every time.
 
-`step` is closed: `implement → rebase → resolve → merge → gate`, plus `revert` when the gate goes
-red and `prepare` when a step is recovered (ADR-0012). `outcome` is `running | ok | failed | skipped`.
+`step` is closed: `setup → implement → rebase → resolve → merge → gate`, plus `fix` when the gate
+goes red, `revert` when the fix does not save it, and `prepare` when a step is recovered (ADR-0012,
+ADR-0022). `outcome` is `running | ok | failed | skipped`.
 
 **An event is appended when a step starts, and a second when it ends.** The start event carries
 `running` and the attempt's `sessionId` as soon as that id is observed (ADR-0017); the end event
@@ -32,7 +33,9 @@ written at the moment the id is observed — which is before any model work, bec
 the stream carries it, including the first. An attempt whose stream carried no id never started one,
 and still gets its start event, so the pair is invariant. A step killed before its agent was spawned
 leaves no event and reads as untouched, which is correct: there is no session to resume and nothing
-was attempted.
+was attempted. That last reading only holds because **nothing an attempt does happens before its
+start event** — work with a kill of its own to survive is a step with a name of its own, which is
+what `setup` is (ADR-0022).
 
 **`sessionId` belongs to the attempt, not to the ticket.** An implementer's session is not its
 conflict resolver's, and a retried implementer's is not its first attempt's.
@@ -61,6 +64,14 @@ conflict resolver's, and a retried implementer's is not its first attempt's.
   queried by the `afk-ticket` trailer, is the **cross-check for what landed** — a git fact,
   checkable from a fresh clone with no state file. It is a cross-check and not the dispatcher: a
   commit says a ticket landed, never which step failed or why.
+- **In one window the cross-check is load-bearing, and that is not a contradiction.** A run killed
+  between the squash returning and its `merge: ok` being written leaves `merge: running`, and no
+  event can tell "the squash landed, the record did not" from "the squash never ran". Git is the
+  only witness there, so the merge track asks it before rebasing. Reproduced against real git: the
+  ticket's rebase onto a spec branch that already carries its squash **conflicts with its own landed
+  work**, which spends a conflict resolver call on it and squashes the result a second time. The
+  check is a correctness guard, not an optimisation — what it still may not do is say *which*
+  ticket to take next.
 - **No step may measure what happened during an invocation** — whether HEAD moved while an agent
   ran, say — instead of what is on the branch. An idempotent agent that correctly finds nothing left
   to do is the expected case on a resumed run, not a failure.

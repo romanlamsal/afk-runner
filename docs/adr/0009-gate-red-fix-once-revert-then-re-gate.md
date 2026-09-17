@@ -24,7 +24,10 @@ status: accepted
 ## Consequences
 
 - The fix agent gets exactly one attempt. This is a budget, not a retry policy. There is no loop to
-  bound: the recovery is called once, by the merge track, for one red gate.
+  bound: the recovery is called once, by the merge track, for one red gate. **The budget is
+  derivable rather than asserted**: a fix is its own step, so it is counted off the log's `fix`
+  start events like every other budget (ADR-0022). A run killed between a red gate and its revert
+  cannot therefore buy a second one.
 - **The revert undoes the fix attempt along with the merge.** Everything from the squash to the tip
   goes, in one revert commit, so that the tip the gate is then re-run on is the tree that was green
   before the ticket merged. Without that the re-gate would be asking about a tree nothing has ever
@@ -33,9 +36,10 @@ status: accepted
   reported as failed is proven like any other: a session that died after committing a fix that works
   leaves a green branch, and the branch is what afk proves. A failed attempt only changes what the
   log says when the branch turns out to be red anyway.
-- The fix attempt is recorded as a second **gate** attempt against the ticket, and the gate on the
-  reverted tip is recorded as the **revert**'s outcome rather than as a gate. Recording it as a gate
-  would make a reverted ticket's last event read `gate: ok`, which is `verified` (ADR-0011).
+- The fix attempt is recorded as a **fix** — it was a second `gate` attempt until ADR-0022, which
+  is why nothing could count it. The gate on the reverted tip is recorded as the **revert**'s
+  outcome rather than as a gate: recording it as a gate would make a reverted ticket's last event
+  read `gate: ok`, which is `verified` (ADR-0011).
 - The revert commit carries an `afk-reverted` trailer, so that the spec branch's log still answers
   which tickets landed once history contains both the squash and its undoing.
 - A red gate is more expensive than a rebase that would not land (ADR-0005), where nothing was
