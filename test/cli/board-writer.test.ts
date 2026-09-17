@@ -16,11 +16,10 @@ const VIEW: BoardView = {
             track: "implement",
             steps: [
                 { step: "setup", state: "settled", outcome: "ok" },
-                { step: "implement", state: "live" },
+                { step: "implement", state: "running" },
             ],
             waiting: false,
             conclusion: undefined,
-            beyondRepair: false,
             detail: undefined,
         },
     ],

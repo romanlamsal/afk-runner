@@ -6,6 +6,10 @@ import type { Step } from "../domain/events.ts"
  * one is news for. It is the `jq` pipeline an operator writes over `events.jsonl` by hand, built in
  * — one plain line per change, with nothing redrawn and nothing to redraw it on.
  *
+ * A step a previous process left running is said once, on the first view that is news for anything:
+ * the baseline it arrives on is news for nothing, and a repair pass reopening it says it again as it
+ * begins.
+ *
  * It is lossless at step granularity because the driver shows a view on every pass and every settled
  * action ends one: a step that began and a step that ended are two views apart, so neither can be
  * read over by the other.
@@ -23,17 +27,12 @@ const changes = (before: BoardRow, after: BoardRow): readonly Change[] => {
     return after.steps.flatMap((entry): readonly Change[] => {
         const previous = was.get(entry.step)
         switch (entry.state) {
-            case "live":
-                return previous?.state === "live" ? [] : [{ step: entry.step, outcome: "running" }]
+            case "running":
+                return previous?.state === "running" ? [] : [{ step: entry.step, outcome: "running" }]
             case "settled":
                 return previous?.state === "settled" && previous.outcome === entry.outcome
                     ? []
                     : [{ step: entry.step, outcome: entry.outcome }]
-            case "interrupted":
-                // A step whose process is gone is not a change: it only ever appears on the first
-                // view a resumed run shows, which is the baseline and news for nothing, and it stays
-                // on the row until a prepare pass makes it live again — which is said as it begins.
-                return []
             case "ahead":
                 // A step going back to ahead is a track change taking its trail with it, and the
                 // steps it left behind were already said when they settled.

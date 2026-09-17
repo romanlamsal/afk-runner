@@ -40,22 +40,16 @@ const OUTCOMES: Record<SettledOutcome, string> = {
 }
 
 /**
- * How a step is written at each of its four weights: what it came to, brackets, and nothing else.
+ * How a step is written at each of its three weights: what it came to, brackets, and nothing else.
  * What a step is read at has to survive `NO_COLOR`, so colour may repeat this and may never be the
  * only thing saying it.
- *
- * An interrupted step is written differently from a live one because it is a different thing: the
- * process that began it is gone, and the step is where a resume picks the ticket back up rather than
- * something that is happening now.
  */
 const written = (entry: BoardStep): string => {
     switch (entry.state) {
         case "settled":
             return `${entry.step}${OUTCOMES[entry.outcome]}`
-        case "live":
+        case "running":
             return `<${entry.step}>`
-        case "interrupted":
-            return `[${entry.step}]`
         case "ahead":
             return `(${entry.step})`
     }
@@ -71,9 +65,6 @@ const WAITING = "waiting"
  */
 const DEAD = "dead"
 
-/** What a ticket a resume has nothing to try on reads as, beside the step it was interrupted at. */
-const BEYOND_REPAIR = "beyond repair"
-
 /** What a cut line ends in, so that a truncated title reads as a truncated title. */
 const ELLIPSIS = "..."
 
@@ -88,12 +79,7 @@ const fitted = (line: string, width: number): string => {
 
 /** A row's trail, which is what has happened, what is happening and what is next, in that order. */
 const trail = (row: BoardRow): string =>
-    [
-        ...row.steps.map(written),
-        ...(row.waiting ? [WAITING] : []),
-        ...(row.beyondRepair ? [BEYOND_REPAIR] : []),
-        ...(dead(row) ? [DEAD] : []),
-    ].join(" ")
+    [...row.steps.map(written), ...(row.waiting ? [WAITING] : []), ...(dead(row) ? [DEAD] : [])].join(" ")
 
 /**
  * One ticket's line: its number, its trail, and its title. The title comes last because it is the
