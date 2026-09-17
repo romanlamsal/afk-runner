@@ -1,4 +1,4 @@
-import { createTerminalBoard, silentBoard } from "./cli/board-writer.ts"
+import { createLineBoard, createTerminalBoard } from "./cli/board-writer.ts"
 import { type Cli, createCli } from "./cli/cli.ts"
 import { EXIT } from "./cli/exit-codes.ts"
 import { createTerminalOperator } from "./cli/operator.ts"
@@ -47,15 +47,16 @@ export const assembleCli = (): Cli => {
     const environment = createEnvironmentFiles()
     const events = createFileEventLog()
     const git = createGit()
-    // Selection is TTY detection and there is no flag: the board is simply what a run looks like
-    // when there is a terminal to draw it on (ADR-0029).
-    const board =
-        process.stdout.isTTY === true
-            ? createTerminalBoard({
-                  write: chunk => process.stdout.write(chunk),
-                  columns: () => process.stdout.columns ?? 80,
-              })
-            : silentBoard
+    // Selection is TTY detection and there is no flag: the board is simply what a run looks like,
+    // redrawn where there is a terminal to draw it on and a line per change where there is not
+    // (ADR-0029).
+    const drawing = process.stdout.isTTY === true
+    const board = drawing
+        ? createTerminalBoard({
+              write: chunk => process.stdout.write(chunk),
+              columns: () => process.stdout.columns ?? 80,
+          })
+        : createLineBoard({ print })
 
     // Registered once for the whole process, which is the point: no step traps the signal, and the
     // loop reads a flag (ADR-0016). A termination request is the same request, so it drains too.
@@ -71,7 +72,7 @@ export const assembleCli = (): Cli => {
         // The drain notice goes through whoever owns the terminal. On one that is the board, which
         // draws it as a status line instead of letting it land in the middle of a frame; off one
         // the board draws nothing and stderr is still where it belongs (ADR-0029).
-        notifyDraining: process.stdout.isTTY === true ? board.notice : printError,
+        notifyDraining: drawing ? board.notice : printError,
         notifyKilled: printError,
     })
     const now = (): Date => new Date()
@@ -124,6 +125,7 @@ export const assembleCli = (): Cli => {
             finish: createFinishService({ agent, events, git, now, tracker }),
             print,
             printError,
+            boardDrawn: drawing,
         }),
     })
 }

@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest"
-import { silentBoard } from "../../src/cli/board-writer.ts"
 import { createCli } from "../../src/cli/cli.ts"
 import { EXIT } from "../../src/cli/exit-codes.ts"
 import { createRun } from "../../src/cli/run.ts"
@@ -23,6 +22,7 @@ import { createRevertService, type RevertTicket } from "../../src/service/revert
 import { createSetupService, type SetupTicket } from "../../src/service/setup.ts"
 import { createStartService } from "../../src/service/start.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
+import { createFakeBoard } from "../fakes/board.ts"
 import { createFakeCommands } from "../fakes/commands.ts"
 import { createFakeEnvironment } from "../fakes/environment.ts"
 import { createFakeEventLog } from "../fakes/event-log.ts"
@@ -237,7 +237,7 @@ const harness = ({
                 records: records.records,
             }),
             drive: createDriveService({
-                board: silentBoard,
+                board: createFakeBoard().board,
                 events: events.log,
                 interrupts: interrupts.interrupts,
                 implement: createImplementService({
@@ -286,6 +286,7 @@ const harness = ({
                 tracker: tracker.tracker,
             }),
             print: line => printed.push(line),
+            boardDrawn: false,
             printError: line => errors.push(line),
         }),
     })

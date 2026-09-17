@@ -100,6 +100,13 @@ export type BoardRow = {
      * marks interrupted, which is where the row's remaining trail begins.
      */
     beyondRepair: boolean
+    /**
+     * Why the ticket's last settled step came to what it did, where the event carried a reason at
+     * all. It is free text and nothing branches on it (ADR-0011): it is here because off a terminal
+     * a row is one line and that line is all the operator gets, so a step that failed has to be
+     * able to say why on it.
+     */
+    detail: string | undefined
 }
 
 /**
@@ -194,6 +201,7 @@ const outcomeAt = (events: readonly LifecycleEvent[], ticket: number, step: Step
 }
 
 /**
+/**
  * The step a run left behind on a ticket nothing is running: what the log says began, and what a
  * resume will pick the ticket back up at. Nothing where the ticket is being worked, and nothing
  * where its last event ended.
@@ -210,6 +218,14 @@ const interruptedStep = (
     const busy = inFlight.some(action => "ticket" in action && action.ticket === ticket)
     return !busy && running(events, ticket) ? brokenStep(events, ticket) : undefined
 }
+
+/**
+ * The reason the ticket's last settled event gave, where it gave one. The last settled event rather
+ * than the last event that carried a detail: a reason belongs to the step it was written about, so
+ * a step that ended saying nothing says nothing rather than inheriting an older step's words.
+ */
+const detailOf = (events: readonly LifecycleEvent[], ticket: number): string | undefined =>
+    events.findLast(event => event.ticket === ticket && event.outcome !== "running")?.detail
 
 /**
  * A row's trail. A step the driver is running now is live; a step whose process is gone is
@@ -261,6 +277,7 @@ export const boardOf = (
             // sent to the step that broke, and a ticket no pass would help is one the run has
             // written off (ADR-0012).
             beyondRepair: interrupted !== undefined && repairFor(events, ticket.number) === undefined,
+            detail: detailOf(events, ticket.number),
         }
     }),
 })

@@ -1,5 +1,6 @@
 import type { Board, BoardView } from "../domain/board.ts"
 import { boardFrame } from "./board-frame.ts"
+import { boardLines } from "./board-lines.ts"
 
 /**
  * The writer: the impure half of the board, and the only thing that owns the cursor. It redraws the
@@ -52,8 +53,28 @@ export const createTerminalBoard = ({ write, columns }: TerminalBoardDeps): Boar
 }
 
 /**
- * No terminal to draw on. A run off one prints exactly what it printed before the board existed,
- * which is what keeps piped output and CI logs readable — the drain notice included, which off a
- * terminal keeps going to stderr rather than coming through here.
+ * No terminal to draw on: the second adapter of the one port. It keeps the view it was last shown
+ * and prints a line for every row the next one changed, which is what makes piped output and a CI
+ * log readable — nothing is redrawn, and nothing has to be.
+ *
+ * The drain notice is not one of its lines. Off a terminal there is no frame for it to tear, so it
+ * keeps stderr, which is where a thing said about the run rather than about a ticket belongs
+ * (ADR-0029).
  */
-export const silentBoard: Board = { show: () => undefined, notice: () => undefined }
+export const createLineBoard = ({ print }: { print: (line: string) => void }): Board => {
+    let shown: BoardView | undefined
+
+    return {
+        show: view => {
+            try {
+                for (const line of boardLines(shown, view)) {
+                    print(line)
+                }
+            } catch {
+                // A pipe that closed is not a run that failed (ADR-0029).
+            }
+            shown = view
+        },
+        notice: () => undefined,
+    }
+}

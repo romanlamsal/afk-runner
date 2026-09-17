@@ -70,6 +70,7 @@ const harness = (reply: { structuredOutput: unknown } = { structuredOutput: MANI
             finish: createStubFinish(),
             print: line => printed.push(line),
             printError: line => errors.push(line),
+            boardDrawn: false,
         }),
     })
     return { cli, agent, events, git, manifests, operator, printed, errors }

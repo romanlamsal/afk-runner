@@ -63,6 +63,7 @@ const harness = ({ trunk, answer }: { trunk?: TrunkState; answer?: Commands } = 
             }),
             print: line => printed.push(line),
             printError: line => errors.push(line),
+            boardDrawn: false,
         }),
     })
     return { cli, git, manifests, operator, records, printed, errors }

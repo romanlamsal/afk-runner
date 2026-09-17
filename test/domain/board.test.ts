@@ -493,3 +493,44 @@ describe("boardOf: a run picked back up", () => {
         expect(row?.beyondRepair).toBe(false)
     })
 })
+
+describe("boardOf: why a step came to what it did", () => {
+    /** An event that ended with something to say about how it ended. */
+    const explained = (step: Step, outcome: Outcome, detail: string): LifecycleEvent => ({
+        ...event(7, step, outcome),
+        detail,
+    })
+
+    it("should carry the reason the last settled step gave", () => {
+        // given
+        const events = [event(7, "implement", "running"), explained("implement", "failed", "the budget ran out")]
+
+        // when
+        const row = rowOf(events, 7)
+
+        // then
+        expect(row?.detail).toBe("the budget ran out")
+    })
+
+    it("should carry no reason where the last settled step gave none", () => {
+        // given
+        const events = [explained("setup", "failed", "the setup command exited 1"), ...implemented(7)]
+
+        // when
+        const row = rowOf(events, 7)
+
+        // then
+        expect(row?.detail).toBeUndefined()
+    })
+
+    it("should carry the settled step's reason rather than a running step's", () => {
+        // given
+        const events = [explained("implement", "failed", "the budget ran out"), event(7, "prepare", "running")]
+
+        // when
+        const row = rowOf(events, 7)
+
+        // then
+        expect(row?.detail).toBe("the budget ran out")
+    })
+})

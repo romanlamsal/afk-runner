@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { createTerminalBoard } from "../../src/cli/board-writer.ts"
+import { createLineBoard, createTerminalBoard } from "../../src/cli/board-writer.ts"
 import type { BoardView } from "../../src/domain/board.ts"
 
 /**
@@ -21,6 +21,7 @@ const VIEW: BoardView = {
             waiting: false,
             conclusion: undefined,
             beyondRepair: false,
+            detail: undefined,
         },
     ],
 }
@@ -67,5 +68,50 @@ describe("createTerminalBoard", () => {
 
         // then
         expect(written).toEqual([])
+    })
+})
+
+/**
+ * The line board keeps one thing of its own — the view it was last shown — and everything else
+ * about it is `boardLines`, which is asserted as the mapping it is beside this.
+ */
+describe("createLineBoard", () => {
+    const harness = () => {
+        const printed: string[] = []
+        return { printed, board: createLineBoard({ print: line => printed.push(line) }) }
+    }
+
+    const IMPLEMENTED: BoardView = {
+        rows: VIEW.rows.map(row => ({
+            ...row,
+            steps: [
+                { step: "setup", state: "settled", outcome: "ok" },
+                { step: "implement", state: "settled", outcome: "ok" },
+            ],
+        })),
+    }
+
+    it("should print what the view it was last shown made news of", () => {
+        // given
+        const { printed, board } = harness()
+        board.show(VIEW)
+
+        // when
+        board.show(IMPLEMENTED)
+
+        // then
+        expect(printed).toEqual(["#7 implement ok"])
+    })
+
+    it("should print nothing for a notice, which off a terminal keeps stderr", () => {
+        // given
+        const { printed, board } = harness()
+        board.show(VIEW)
+
+        // when
+        board.notice(DRAINING)
+
+        // then
+        expect(printed).toEqual([])
     })
 })

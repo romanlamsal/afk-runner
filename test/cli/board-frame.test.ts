@@ -31,6 +31,8 @@ const row = (
     waiting: rest.waiting ?? false,
     conclusion: rest.conclusion,
     beyondRepair: rest.beyondRepair ?? false,
+    // Why a step came to what it did is the line adapter's to say: a frame has a glyph for it.
+    detail: undefined,
 })
 
 const IMPLEMENTING = trail({ setup: "ok", implement: "live" })
