@@ -138,6 +138,51 @@ const onMergeTrack = (action: Action): boolean =>
     (action.kind === "prepare" && MERGE_SIDE.has(action.brokenStep))
 
 /**
+ * What a prepare pass would be sent to repair on a ticket, or nothing where no pass would help.
+ * This is the whole of recovery, and it is the same answer mid-run as on the first tick of a
+ * resumed run: the log says a step broke, and the step is what a pass keys on (ADR-0012).
+ *
+ * A function of the log and a ticket and nothing else, so that anything reading the run — the
+ * decision function, and the board that says what a resume is about to do — asks the one rule
+ * rather than each deriving its own.
+ *
+ * A ticket the driver is running is never asked about — a `running` event is only a step whose
+ * process is gone once the live action set says so (ADR-0019).
+ */
+export const repairFor = (events: readonly LifecycleEvent[], ticket: number): BrokenStep | undefined => {
+    const last = statusOf(events, ticket)
+    const broke = brokenStep(events, ticket)
+    if (last === undefined || broke === undefined) {
+        return undefined
+    }
+
+    // A step nothing ended: a killed run, not a ticket that failed. The attempt was never
+    // answered, so the budget — which exists to stop a *failure* repeating — does not apply.
+    if (last.outcome === "running") {
+        return repairableStep(broke) ? broke : undefined
+    }
+    // A conflicted rebase is not a step that broke. It is a state of the machine with a move
+    // out of it — the resolve — and the same move whether the run that recorded it is still
+    // alive or was killed on the spot (ADR-0025, ADR-0026).
+    if (last.outcome !== "failed") {
+        return undefined
+    }
+
+    // Every failed implementer gets the same treatment: classifying them into ones worth a pass
+    // and ones that are not is a closed enum of failure reasons in disguise (ADR-0011).
+    if (last.step === "implement") {
+        return attempts(events, ticket, "implement") < ATTEMPT_BUDGET ? "implement" : undefined
+    }
+    // A resolve afk could not use ends its rebase, so the two are one budget: what is being
+    // spent is the ticket's second trip through the merge track.
+    if (last.step === "rebase" || last.step === "resolve") {
+        return attempts(events, ticket, "rebase") < ATTEMPT_BUDGET ? last.step : undefined
+    }
+
+    return undefined
+}
+
+/**
  * What to start now.
  *
  * A ticket is on the slate once every blocker of its is **verified** — merged but not gated does not
@@ -155,47 +200,6 @@ export const nextActions = (
 ): readonly Action[] => {
     const busy = ticketsOf(inFlight)
     const idle = (): readonly Action[] => (inFlight.length === 0 ? [{ kind: "finish" }] : [])
-
-    /**
-     * What a prepare pass would be sent to repair, or nothing where no pass would help. This is the
-     * whole of recovery, and it is the same answer mid-run as on the first tick of a resumed run:
-     * the log says a step broke, and the step is what a pass keys on (ADR-0012).
-     *
-     * A ticket the driver is running is never asked about — a `running` event is only a step whose
-     * process is gone once the live action set says so (ADR-0019).
-     */
-    const repairFor = (ticket: number): BrokenStep | undefined => {
-        const last = statusOf(events, ticket)
-        const broke = brokenStep(events, ticket)
-        if (last === undefined || broke === undefined) {
-            return undefined
-        }
-
-        // A step nothing ended: a killed run, not a ticket that failed. The attempt was never
-        // answered, so the budget — which exists to stop a *failure* repeating — does not apply.
-        if (last.outcome === "running") {
-            return repairableStep(broke) ? broke : undefined
-        }
-        // A conflicted rebase is not a step that broke. It is a state of the machine with a move
-        // out of it — the resolve — and the same move whether the run that recorded it is still
-        // alive or was killed on the spot (ADR-0025, ADR-0026).
-        if (last.outcome !== "failed") {
-            return undefined
-        }
-
-        // Every failed implementer gets the same treatment: classifying them into ones worth a pass
-        // and ones that are not is a closed enum of failure reasons in disguise (ADR-0011).
-        if (last.step === "implement") {
-            return attempts(events, ticket, "implement") < ATTEMPT_BUDGET ? "implement" : undefined
-        }
-        // A resolve afk could not use ends its rebase, so the two are one budget: what is being
-        // spent is the ticket's second trip through the merge track.
-        if (last.step === "rebase" || last.step === "resolve") {
-            return attempts(events, ticket, "rebase") < ATTEMPT_BUDGET ? last.step : undefined
-        }
-
-        return undefined
-    }
 
     /**
      * A setup to cut again: one that failed, or one a killed run left `running`, while its own
@@ -234,7 +238,7 @@ export const nextActions = (
      * sequence would take it any further.
      */
     const beyondRepair = (ticket: number): boolean =>
-        repairFor(ticket) === undefined &&
+        repairFor(events, ticket) === undefined &&
         !recutting(ticket) &&
         afterRedGate(ticket) === undefined &&
         !busy.has(ticket) &&
@@ -280,7 +284,7 @@ export const nextActions = (
     // implementer and is skipped, rather than spending the merge track on work that cannot land
     // (ADR-0010).
     const mergeSide = (ticket: number): Action | undefined => {
-        const repair = repairFor(ticket)
+        const repair = repairFor(events, ticket)
         if (repair !== undefined && MERGE_SIDE.has(repair)) {
             return { kind: "prepare", ticket, brokenStep: repair }
         }
@@ -336,7 +340,7 @@ export const nextActions = (
     const slots = maxParallel - inFlight.filter(action => !onMergeTrack(action)).length
     const starts: Action[] = actionable
         .flatMap<Action>(ticket => {
-            const repair = repairFor(ticket.number)
+            const repair = repairFor(events, ticket.number)
             if (repair === "implement") {
                 return [{ kind: "prepare", ticket: ticket.number, brokenStep: repair }]
             }
