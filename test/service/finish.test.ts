@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest"
+import type { AgentUsage } from "../../src/domain/agent.ts"
 import type { Progress } from "../../src/domain/events.ts"
 import { PROFILES } from "../../src/domain/profiles.ts"
 import type { PreparedRun } from "../../src/domain/run.ts"
 import { createFinishService } from "../../src/service/finish.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
+import { createFakeEventLog } from "../fakes/event-log.ts"
 import { createFakeGit, type FakeRepository } from "../fakes/git.ts"
 import { createFakeTracker, type FakeTrackerSetup } from "../fakes/tracker.ts"
 import { manifestOf, ticket } from "../fixtures/manifest.ts"
@@ -32,11 +34,14 @@ const harness = ({
     tracker: setup = {},
     wrote = WROTE,
     writerFails = false,
+    usage,
 }: {
     repository?: FakeRepository
     tracker?: FakeTrackerSetup
     wrote?: unknown
     writerFails?: boolean
+    /** What the writer's stream reported it consumed. */
+    usage?: AgentUsage
 } = {}) => {
     const git = createFakeGit(repository)
     const tracker = createFakeTracker(setup)
@@ -44,16 +49,26 @@ const harness = ({
         outcome: writerFails ? "failed" : "ok",
         structuredOutput: wrote,
         detail: writerFails ? "the writer's session died" : "",
+        usage,
     })
+
+    const events = createFakeEventLog()
 
     const finish = createFinishService({
         agent: agent.run,
+        events: events.log,
         git: git.git,
-        now: () => new Date(),
+        now: () => new Date("2026-09-15T11:18:38.314Z"),
         tracker: tracker.tracker,
     })
 
-    return { agent, git, tracker, finish: (progress: Partial<Progress>) => finish(RUN, { ...nothing, ...progress }) }
+    return {
+        agent,
+        events,
+        git,
+        tracker,
+        finish: (progress: Partial<Progress>) => finish(RUN, { ...nothing, ...progress }),
+    }
 }
 
 describe("the finish service: a run that verified something", () => {
@@ -262,5 +277,76 @@ describe("the finish service: the pull request writer's profile", () => {
 
         // then
         expect(agent.invocations.at(0)?.profile).toBe(PROFILES.pullRequestWriter)
+    })
+})
+
+/**
+ * The `pull-request` step. It is about the run rather than about one ticket, so its events carry no
+ * ticket (ADR-0028) — and it gets a start and an end like every other step, which is what makes the
+ * writer's consumption a reading rather than an argument (ADR-0011, ADR-0027).
+ */
+describe("the finish service: the pull-request step", () => {
+    it("should write one start event and one end event", async () => {
+        // given
+        const { finish, events } = harness()
+
+        // when
+        await finish({ verified: [5, 6] })
+
+        // then
+        expect(events.appended.map(event => `${event.step} ${event.outcome}`)).toEqual([
+            "pull-request running",
+            "pull-request ok",
+        ])
+    })
+
+    it("should name no ticket, the step being about the run", async () => {
+        // given
+        const { finish, events } = harness()
+
+        // when
+        await finish({ verified: [5, 6] })
+
+        // then
+        expect(events.appended.every(event => event.ticket === undefined)).toBe(true)
+    })
+
+    it("should record what the writer consumed on the end event", async () => {
+        // given
+        const usage = {
+            inputTokens: 1600,
+            outputTokens: 29700,
+            cacheReadInputTokens: 1600,
+            cacheCreationInputTokens: 86,
+        }
+        const { finish, events } = harness({ usage })
+
+        // when
+        await finish({ verified: [5, 6] })
+
+        // then
+        expect(events.appended.at(-1)?.usage).toEqual(usage)
+    })
+
+    it("should record the writer's failure while the run carries on regardless", async () => {
+        // given
+        const { finish, events } = harness({ writerFails: true })
+
+        // when
+        await finish({ verified: [5, 6] })
+
+        // then
+        expect(events.appended.at(-1)?.outcome).toBe("failed")
+    })
+
+    it("should write nothing where it opens nothing, no writer having run", async () => {
+        // given
+        const { finish, events } = harness()
+
+        // when
+        await finish({ verified: [] })
+
+        // then
+        expect(events.appended).toEqual([])
     })
 })

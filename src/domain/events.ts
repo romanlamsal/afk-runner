@@ -13,8 +13,11 @@ import { usageSchema } from "./agent.ts"
 /**
  * Closed by decision. The step is what recovery keys on, which is why adding to this is a deliberate
  * act rather than a convenience (ADR-0011).
+ *
+ * `pull-request` is the one step that is about the **run** rather than about one ticket's machine,
+ * the way `finish` is already that action (ADR-0026). Its events carry no ticket (ADR-0028).
  */
-export const STEPS = ["implement", "prepare", "rebase", "resolve", "merge", "gate", "revert"] as const
+export const STEPS = ["implement", "prepare", "rebase", "resolve", "merge", "gate", "revert", "pull-request"] as const
 
 export type Step = (typeof STEPS)[number]
 
@@ -35,8 +38,12 @@ export const OUTCOMES = ["running", "ok", "failed", "skipped"] as const
 export type Outcome = (typeof OUTCOMES)[number]
 
 const eventSchema = z.object({
-    /** The ticket this happened to. */
-    ticket: z.int().positive(),
+    /**
+     * The ticket this happened to, and absent on a run-level step. Every derivation here matches it
+     * against a ticket number, so a ticketless event is invisible to all of them — which is the
+     * whole reason it may be absent rather than a sentinel (ADR-0028).
+     */
+    ticket: z.int().positive().optional(),
     step: z.enum(STEPS),
     outcome: z.enum(OUTCOMES),
     /** When it was appended, as an ISO instant. Never branched on. */

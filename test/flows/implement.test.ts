@@ -222,7 +222,13 @@ const harness = ({
                 prepare: createPrepareService({ agent: preparer.run, events: events.log, git: git.git, now }),
                 now,
             }),
-            finish: createFinishService({ agent: writer.run, git: git.git, now, tracker: tracker.tracker }),
+            finish: createFinishService({
+                agent: writer.run,
+                events: events.log,
+                git: git.git,
+                now,
+                tracker: tracker.tracker,
+            }),
             print: line => printed.push(line),
             printError: line => errors.push(line),
         }),
@@ -247,10 +253,15 @@ const harness = ({
 }
 
 /** The log as a scenario reads it: what happened to which ticket, in order, ends only. */
+/** Every end event the log carries, run-level ones included — those name no ticket (ADR-0028). */
 const settled = (appended: readonly LifecycleEvent[]): string[] =>
     appended
         .filter(event => event.outcome !== "running")
-        .map(event => `#${event.ticket} ${event.step} ${event.outcome}`)
+        .map(event =>
+            event.ticket === undefined
+                ? `${event.step} ${event.outcome}`
+                : `#${event.ticket} ${event.step} ${event.outcome}`,
+        )
 
 describe("a run that works its slate", () => {
     it("should implement every ticket nothing blocks", async () => {
@@ -270,6 +281,7 @@ describe("a run that works its slate", () => {
             "#11 rebase ok",
             "#11 merge ok",
             "#11 gate ok",
+            "pull-request ok",
         ])
     })
 
@@ -468,6 +480,7 @@ describe("a run whose gate goes red", () => {
             "#12 rebase ok",
             "#12 merge ok",
             "#12 gate ok",
+            "pull-request ok",
         ])
     })
 
@@ -781,7 +794,7 @@ describe("a run resumed over a log that is not empty", () => {
         await run()
 
         // then — the first is what the killed run left; the second is afk finding it already there
-        expect(settled(events.appended)).toEqual(["#10 merge ok", "#10 merge ok", "#10 gate ok"])
+        expect(settled(events.appended)).toEqual(["#10 merge ok", "#10 merge ok", "#10 gate ok", "pull-request ok"])
     })
 
     it("should never squash a ticket the spec branch already carries a second time", async () => {
@@ -831,6 +844,7 @@ describe("a run that recovers a wrecked ticket", () => {
             "#10 rebase ok",
             "#10 merge ok",
             "#10 gate ok",
+            "pull-request ok",
         ])
     })
 
@@ -882,6 +896,7 @@ describe("a run that recovers a wrecked ticket", () => {
             "#10 rebase ok",
             "#10 merge ok",
             "#10 gate ok",
+            "pull-request ok",
         ])
     })
 

@@ -109,7 +109,7 @@ export const assembleCli = (): Cli => {
             fresh: createFreshService({ cwd, git, records, tracker }),
             start,
             drive,
-            finish: createFinishService({ agent, git, now, tracker }),
+            finish: createFinishService({ agent, events, git, now, tracker }),
             print,
             printError,
         }),

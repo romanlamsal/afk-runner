@@ -7,6 +7,7 @@ import {
     prepared,
     progressOf,
     readEvent,
+    repairableStep,
     running,
     type Step,
     sessionOf,
@@ -382,5 +383,63 @@ describe("an event's usage", () => {
 
         // then
         expect(read?.usage).toBeUndefined()
+    })
+})
+
+/**
+ * The one step about the run rather than about one ticket's machine. Its events carry no ticket, and
+ * what makes that safe is that every derivation here matches the ticket against a number, so a
+ * ticketless event is invisible to all of them (ADR-0028).
+ */
+describe("a run-level event", () => {
+    const opened = {
+        step: "pull-request",
+        outcome: "ok",
+        at: "2026-09-15T11:18:38.314Z",
+        usage: { inputTokens: 1, outputTokens: 2, cacheReadInputTokens: 3, cacheCreationInputTokens: 4 },
+    }
+
+    it("should be read without a ticket", () => {
+        // given
+        const raw = opened
+
+        // when
+        const read = readEvent(raw)
+
+        // then
+        expect(read?.ticket).toBeUndefined()
+    })
+
+    it("should not become any ticket's status", () => {
+        // given
+        const events = [event(10, "gate", "ok"), readEvent(opened)].flatMap(one => (one === undefined ? [] : [one]))
+
+        // when
+        const status = statusOf(events, 10)
+
+        // then
+        expect(status?.step).toBe("gate")
+    })
+
+    it("should leave a ticket verified that the gate proved before it", () => {
+        // given
+        const events = [event(10, "gate", "ok"), readEvent(opened)].flatMap(one => (one === undefined ? [] : [one]))
+
+        // when
+        const proved = verified(events, 10)
+
+        // then
+        expect(proved).toBe(true)
+    })
+
+    it("should never be something a prepare pass is sent to repair", () => {
+        // given
+        const step = "pull-request" as const
+
+        // when
+        const repairable = repairableStep(step)
+
+        // then
+        expect(repairable).toBe(false)
     })
 })
