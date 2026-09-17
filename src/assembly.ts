@@ -21,6 +21,7 @@ import { createImplementService } from "./service/implement.ts"
 import { createMergeService } from "./service/merge.ts"
 import { createPlanService } from "./service/plan.ts"
 import { createPrepareService } from "./service/prepare.ts"
+import { createSetupService } from "./service/setup.ts"
 import { createStartService } from "./service/start.ts"
 
 /**
@@ -81,15 +82,8 @@ export const assembleCli = (): Cli => {
     const drive = createDriveService({
         events,
         interrupts,
-        implement: createImplementService({
-            agent,
-            commands,
-            environment,
-            events,
-            git,
-            now,
-            tracker,
-        }),
+        implement: createImplementService({ agent, events, git, now }),
+        setup: createSetupService({ commands, environment, events, git, now, tracker }),
         merge: createMergeService({ agent, events, git, now }),
         gate: createGateService({
             events,

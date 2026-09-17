@@ -10,6 +10,7 @@ import {
     running,
     type Step,
     settled,
+    setUp,
     statusOf,
     unattempted,
     verified,
@@ -26,6 +27,14 @@ import { slateOrder } from "./schedule.ts"
  */
 
 export type Action =
+    /**
+     * Everything an implement attempt does before an agent exists: claim the ticket, cut it a
+     * worktree, copy the environment in and run the repository's own setup command. A step of its
+     * own because it can be killed on its own and carries a budget of its own (ADR-0022), and one
+     * that is never repaired — a second of these throws the worktree away and cuts it again
+     * (ADR-0024).
+     */
+    | { kind: "setup"; ticket: number }
     /** Give a ticket to an implementer. `attempt` is counted from the log, never stored. */
     | { kind: "implement"; ticket: number; attempt: number }
     /**
@@ -147,9 +156,22 @@ export const nextActions = (
         return undefined
     }
 
-    /** A ticket nothing more will happen to: no step of its is live, and no pass would help. */
+    /**
+     * A setup to cut again: one that failed, or one a killed run left `running`, while its own
+     * budget still has an attempt in it. The recut is counted like any attempt, so a killed setup
+     * that is cut again and killed again fails the ticket (ADR-0024).
+     */
+    const recutting = (ticket: number): boolean => {
+        const last = statusOf(events, ticket)
+        return last?.step === "setup" && last.outcome !== "ok" && attempts(events, ticket, "setup") < ATTEMPT_BUDGET
+    }
+
+    /** A ticket nothing more will happen to: no step of its is live, and no pass or recut would help. */
     const beyondRepair = (ticket: number): boolean =>
-        repairFor(ticket) === undefined && !busy.has(ticket) && (settled(events, ticket) || running(events, ticket))
+        repairFor(ticket) === undefined &&
+        !recutting(ticket) &&
+        !busy.has(ticket) &&
+        (settled(events, ticket) || running(events, ticket))
 
     /**
      * The tickets nothing can land any more: the ones beyond repair, and everything blocked by one
@@ -232,17 +254,23 @@ export const nextActions = (
             if (repair === "implement") {
                 return [{ kind: "prepare", ticket: ticket.number, brokenStep: repair }]
             }
-            // The one more attempt the prepare pass bought, and a first attempt for a ticket the
-            // log has never mentioned. Both are an implementer with a slot of its own.
+            // A warm worktree gets the implementer it was cut for. The one more attempt the prepare
+            // pass bought gets one too, and it works in the worktree it already has.
             const retrying = prepared(events, ticket.number) === "implement"
-            return retrying || (unattempted(events, ticket.number) && ready(ticket))
-                ? [
-                      {
-                          kind: "implement",
-                          ticket: ticket.number,
-                          attempt: attempts(events, ticket.number, "implement") + 1,
-                      },
-                  ]
+            if (retrying || setUp(events, ticket.number)) {
+                return [
+                    {
+                        kind: "implement",
+                        ticket: ticket.number,
+                        attempt: attempts(events, ticket.number, "implement") + 1,
+                    },
+                ]
+            }
+            // A first attempt for a ticket the log has never mentioned, and the recut a broken setup
+            // earns. Both are a setup, and both take a slot of their own: what they spend is the
+            // machine, and the pool is what bounds how much of it runs at once.
+            return recutting(ticket.number) || (unattempted(events, ticket.number) && ready(ticket))
+                ? [{ kind: "setup", ticket: ticket.number }]
                 : []
         })
         .slice(0, Math.max(slots, 0))

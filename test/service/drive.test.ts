@@ -68,13 +68,21 @@ type Setup = {
     log?: readonly LifecycleEvent[]
     /** What the implement service comes to. It settles its own step, the way the real one does. */
     implementing?: StepResult
+    /** What the setup service comes to, which is what an implementer is waited on by. */
+    settingUp?: StepResult
     /** Called as each implementer settles, which is the only moment an interrupt is worth aiming at. */
     duringImplement?: (interrupt: () => void) => void
 }
 
-const harness = ({ log = [], implementing = { outcome: "ok" }, duringImplement }: Setup = {}) => {
+const harness = ({
+    log = [],
+    implementing = { outcome: "ok" },
+    settingUp = { outcome: "ok" },
+    duringImplement,
+}: Setup = {}) => {
     const events = createFakeEventLog(log)
     const { interrupts, interrupt } = createFakeInterrupts()
+    const cut: Extract<Action, { kind: "setup" }>[] = []
     const implemented: Extract<Action, { kind: "implement" }>[] = []
     const merged: Extract<Action, { kind: "merge" }>[] = []
     const gated: Extract<Action, { kind: "gate" }>[] = []
@@ -84,6 +92,11 @@ const harness = ({ log = [], implementing = { outcome: "ok" }, duringImplement }
         events: events.log,
         interrupts,
         now: () => new Date(AT),
+        setup: async (_run, action) => {
+            cut.push({ kind: "setup", ...action })
+            await settle(events, action.ticket, "setup", settingUp.outcome)
+            return settingUp
+        },
         implement: async (_run, action) => {
             implemented.push({ kind: "implement", ...action })
             await settle(events, action.ticket, "implement", implementing.outcome)
@@ -107,11 +120,22 @@ const harness = ({ log = [], implementing = { outcome: "ok" }, duringImplement }
         },
     })
 
-    return { drive, events, implemented, merged, gated, prepared, interrupt }
+    return { drive, events, cut, implemented, merged, gated, prepared, interrupt }
 }
 
 describe("createDriveService", () => {
-    it("should give a ticket nothing blocks to the implement service", async () => {
+    it("should give a ticket nothing blocks to the setup service", async () => {
+        // given
+        const { drive, cut } = harness()
+
+        // when
+        await drive(RUN, { maxParallel: 2 })
+
+        // then
+        expect(cut.map(action => action.ticket)).toContain(7)
+    })
+
+    it("should give a ticket its setup got through to the implement service", async () => {
         // given
         const { drive, implemented } = harness()
 
@@ -167,7 +191,7 @@ describe("createDriveService", () => {
     })
 
     it.each([
-        ["halted", { outcome: "halted", reason: "the tracker refused the claim" }, "halted"],
+        ["halted", { outcome: "halted", reason: "#7 is not in the manifest" }, "halted"],
         ["done", { outcome: "ok" }, "done"],
     ] as const)("should come to %s when a step settled as %o", async (_case, implementing, expected) => {
         // given
@@ -182,7 +206,7 @@ describe("createDriveService", () => {
 
     it("should carry the halting step's reason out as the run's whole explanation", async () => {
         // given
-        const reason = "the tracker refused the claim"
+        const reason = "#7 is not in the manifest"
         const { drive } = harness({ implementing: { outcome: "halted", reason } })
 
         // when

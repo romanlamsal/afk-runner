@@ -8,6 +8,7 @@ import type { RunGate } from "./gate.ts"
 import type { ImplementTicket } from "./implement.ts"
 import type { MergeTicket } from "./merge.ts"
 import type { PrepareTicket } from "./prepare.ts"
+import type { SetupTicket } from "./setup.ts"
 
 /** The driving port of a run: work the slate until nothing is left to start and nothing is running. */
 export type DriveRun = (run: PreparedRun, options: { maxParallel: number }) => Promise<DriveResult>
@@ -33,6 +34,8 @@ export type DriveDeps = {
     merge: MergeTicket
     /** The pass a ticket a step left broken gets, mid-run and on a resumed run alike (ADR-0012). */
     prepare: PrepareTicket
+    /** What makes a ticket ready for an implementer, and what a broken one is cut again by. */
+    setup: SetupTicket
     now: Clock
 }
 
@@ -49,7 +52,7 @@ type Settled = { action: Action; result: StepResult }
  * recognisable at all.
  */
 export const createDriveService =
-    ({ events, gate, implement, interrupts, merge, now, prepare }: DriveDeps): DriveRun =>
+    ({ events, gate, implement, interrupts, merge, now, prepare, setup }: DriveDeps): DriveRun =>
     async (run, { maxParallel }) => {
         const { root, spec, manifest } = run
         const inFlight = new Map<Action, Promise<Settled>>()
@@ -84,6 +87,12 @@ export const createDriveService =
             // merge is ever handed out is the decision function's rule, not a lock held here
             // (ADR-0006).
             for (const action of actions) {
+                if (action.kind === "setup") {
+                    inFlight.set(
+                        action,
+                        setup(run, action).then(result => ({ action, result })),
+                    )
+                }
                 if (action.kind === "implement") {
                     inFlight.set(
                         action,

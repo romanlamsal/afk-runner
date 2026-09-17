@@ -14,10 +14,25 @@ import { usageSchema } from "./agent.ts"
  * Closed by decision. The step is what recovery keys on, which is why adding to this is a deliberate
  * act rather than a convenience (ADR-0011).
  *
+ * `setup` is everything an implement attempt does before an agent exists: the claim, the worktree,
+ * the environment files and the repository's own setup command. It is a step of its own because it
+ * can be killed on its own and because it carries a budget of its own, which is the whole test a
+ * member of this enum has to pass (ADR-0022).
+ *
  * `pull-request` is the one step that is about the **run** rather than about one ticket's machine,
  * the way `finish` is already that action (ADR-0026). Its events carry no ticket (ADR-0028).
  */
-export const STEPS = ["implement", "prepare", "rebase", "resolve", "merge", "gate", "revert", "pull-request"] as const
+export const STEPS = [
+    "setup",
+    "implement",
+    "prepare",
+    "rebase",
+    "resolve",
+    "merge",
+    "gate",
+    "revert",
+    "pull-request",
+] as const
 
 export type Step = (typeof STEPS)[number]
 
@@ -26,6 +41,10 @@ export type Step = (typeof STEPS)[number]
  * never one of them — a pass is what was sent to the thing that broke, never the thing itself — and
  * neither is `revert`: a ticket being taken back off the spec branch was already on its way out, and
  * putting it back is the one thing recovery must not do (ADR-0009, ADR-0012).
+ *
+ * `setup` is not one either, and that is a decision rather than an omission: a half-made worktree is
+ * thrown away and cut again, which is faster and more certain than anything an agent would do to it
+ * (ADR-0024).
  */
 export const BROKEN_STEPS = ["implement", "rebase", "resolve", "merge", "gate"] as const
 
@@ -61,9 +80,12 @@ const eventSchema = z.object({
     /**
      * The attempt's session, read out of the stream rather than generated: an id here is a session
      * that exists (ADR-0017). It belongs to the attempt, not to the ticket.
+     *
+     * Absent on a `setup` event, and that is not a hole: setup runs the repository's own commands
+     * rather than an agent, and an attempt that never had a session never had one to record.
      */
     sessionId: z.string().optional(),
-    /** The commit a ticket's worktree was cut from, carried by an implementer's start event. */
+    /** The commit a ticket's worktree was cut from, carried by the setup that cut it. */
     baseSha: z.string().optional(),
     /** Where the attempt's transcript is, relative to the repository root. */
     transcriptPath: z.string().optional(),
@@ -136,6 +158,24 @@ export const implemented = (events: readonly LifecycleEvent[], ticket: number): 
     const last = statusOf(events, ticket)
     return last?.step === "implement" && last.outcome === "ok"
 }
+
+/**
+ * A ticket whose worktree is cut, whose environment is in it and whose dependencies are installed,
+ * and that no implementer has had yet. It is what an implement action is handed, and a run killed
+ * here keeps that warm worktree rather than paying for it twice (ADR-0022).
+ */
+export const setUp = (events: readonly LifecycleEvent[], ticket: number): boolean => {
+    const last = statusOf(events, ticket)
+    return last?.step === "setup" && last.outcome === "ok"
+}
+
+/**
+ * The commit a ticket's worktree was cut from, as the setup that cut it recorded it. The implementer
+ * is judged against it — what it committed has to sit on top of it — so it is read back from the log
+ * rather than asked of git again: the spec branch has moved on since, and the worktree has not.
+ */
+export const cutFrom = (events: readonly LifecycleEvent[], ticket: number): string | undefined =>
+    events.findLast(event => event.ticket === ticket && event.step === "setup" && event.baseSha !== undefined)?.baseSha
 
 /**
  * A ticket squashed onto the spec branch whose gate has not yet run. It is what a run killed between

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
     attempts,
     brokenStep,
+    cutFrom,
     type LifecycleEvent,
     type Outcome,
     prepared,
@@ -12,6 +13,7 @@ import {
     type Step,
     sessionOf,
     settled,
+    setUp,
     skipped,
     statusOf,
     unattempted,
@@ -236,6 +238,79 @@ describe("skipped", () => {
 
         // then
         expect(done).toBe(true)
+    })
+})
+
+/**
+ * ADR-0022: setup is a step of its own, and ADR-0024 keeps it out of the steps a prepare pass is
+ * sent to — a half-made worktree is thrown away and cut again rather than handed to an agent.
+ */
+describe("setup as a step", () => {
+    it("should never be something a prepare pass is sent to repair", () => {
+        // given
+        const step = "setup" as const
+
+        // when
+        const repairable = repairableStep(step)
+
+        // then
+        expect(repairable).toBe(false)
+    })
+
+    it.each([
+        ["its setup got through", [event(10, "setup", "ok")], true],
+        ["its setup failed", [event(10, "setup", "failed")], false],
+        ["a killed run left its setup running", [event(10, "setup", "running")], false],
+        ["an implementer has been through it since", [event(10, "setup", "ok"), event(10, "implement", "ok")], false],
+        ["nothing has happened to it", [], false],
+    ] as const)("should call a ticket set up, or not, when %s", (_name, events, expected) => {
+        // given — the warm worktree an implementer is handed, and nothing else
+
+        // when
+        const warm = setUp(events, 10)
+
+        // then
+        expect(warm).toBe(expected)
+    })
+})
+
+describe("cutFrom", () => {
+    const base = (ticket: number, baseSha: string): LifecycleEvent => ({
+        ...event(ticket, "setup", "ok"),
+        baseSha,
+    })
+
+    it("should be the commit the setup that cut the worktree recorded", () => {
+        // given
+        const events = [base(10, "spec-tip"), event(10, "implement", "running")]
+
+        // when
+        const cut = cutFrom(events, 10)
+
+        // then
+        expect(cut).toBe("spec-tip")
+    })
+
+    it("should be the last one, so that a recut ticket is judged against the worktree it has", () => {
+        // given
+        const events = [base(10, "an-older-tip"), event(10, "setup", "failed"), base(10, "the-tip-it-has")]
+
+        // when
+        const cut = cutFrom(events, 10)
+
+        // then
+        expect(cut).toBe("the-tip-it-has")
+    })
+
+    it("should be nothing for a ticket no setup has been through", () => {
+        // given
+        const events = [base(11, "spec-tip")]
+
+        // when
+        const cut = cutFrom(events, 10)
+
+        // then
+        expect(cut).toBeUndefined()
     })
 })
 

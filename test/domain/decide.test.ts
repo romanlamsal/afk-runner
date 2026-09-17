@@ -20,6 +20,12 @@ const event = (ticket: number, step: Step, outcome: Outcome): LifecycleEvent => 
     at: "2026-09-15T11:18:38.314Z",
 })
 
+/** A ticket whose setup got through: the worktree is cut and an implementer is what it wants next. */
+const cut = (number: number): readonly LifecycleEvent[] => [
+    event(number, "setup", "running"),
+    event(number, "setup", "ok"),
+]
+
 /** A ticket the gate has passed: the only thing that puts a blocker behind its dependents. */
 const verified = (number: number): readonly LifecycleEvent[] => [
     event(number, "implement", "ok"),
@@ -46,6 +52,8 @@ const decide = (
 ): readonly Action[] =>
     nextActions(manifestOf(tickets), events, { inFlight: [], maxParallel: 3, draining: false, ...parameters })
 
+const settingUp = (ticket: number): Action => ({ kind: "setup", ticket })
+
 const implementing = (ticket: number, attempt = 1): Action => ({ kind: "implement", ticket, attempt })
 
 const merging = (ticket: number, attempt = 1): Action => ({ kind: "merge", ticket, attempt })
@@ -63,7 +71,7 @@ describe("nextActions: the slate", () => {
         const actions = decide(tickets)
 
         // then
-        expect(actions).toEqual([implementing(10)])
+        expect(actions).toEqual([settingUp(10)])
     })
 
     it.each([
@@ -90,7 +98,7 @@ describe("nextActions: the slate", () => {
         const actions = decide(tickets, verified(11))
 
         // then
-        expect(actions).toEqual([implementing(12)])
+        expect(actions).toEqual([settingUp(12)])
     })
 
     it("should not wait for a blocker the manifest does not list, because it is not this run's work", () => {
@@ -101,7 +109,7 @@ describe("nextActions: the slate", () => {
         const actions = decide(tickets)
 
         // then
-        expect(actions).toEqual([implementing(12)])
+        expect(actions).toEqual([settingUp(12)])
     })
 
     it("should hand out the most-blocking ticket first when there is one slot", () => {
@@ -112,7 +120,7 @@ describe("nextActions: the slate", () => {
         const actions = decide(tickets, [], { maxParallel: 1 })
 
         // then
-        expect(actions).toEqual([implementing(11)])
+        expect(actions).toEqual([settingUp(11)])
     })
 
     it("should never hand out more tickets than there are slots", () => {
@@ -134,7 +142,7 @@ describe("nextActions: the slate", () => {
         const actions = decide(tickets, [], { maxParallel: 2, inFlight: [implementing(10)] })
 
         // then
-        expect(actions).toEqual([implementing(11)])
+        expect(actions).toEqual([settingUp(11)])
     })
 
     it("should never hand out a ticket that is already in flight", () => {
@@ -166,7 +174,7 @@ describe("nextActions: attempts", () => {
         const tickets = [ticket(10)]
 
         // when
-        const actions = decide(tickets)
+        const actions = decide(tickets, cut(10))
 
         // then
         expect(actions).toEqual([implementing(10, 1)])
@@ -239,7 +247,7 @@ describe("nextActions: the merge track", () => {
         const tickets = [ticket(10), ticket(11)]
 
         // when
-        const actions = decide(tickets, [event(11, "merge", "ok")], { inFlight: [gating(11)] })
+        const actions = decide(tickets, [...cut(10), event(11, "merge", "ok")], { inFlight: [gating(11)] })
 
         // then
         expect(actions).toEqual([implementing(10)])
@@ -293,7 +301,7 @@ describe("nextActions: the merge track", () => {
         const actions = decide(tickets, [event(10, "implement", "ok")], { inFlight: [merging(10)] })
 
         // then
-        expect(actions).toEqual([implementing(11)])
+        expect(actions).toEqual([settingUp(11)])
     })
 
     it("should skip rather than merge a ticket whose blocker died while it was being implemented", () => {
@@ -858,6 +866,155 @@ describe("nextActions: recovering the merge track", () => {
         const actions = decide(tickets, events, { inFlight: [preparing(11, "rebase")] })
 
         // then
-        expect(actions).toEqual([implementing(10)])
+        expect(actions).toEqual([settingUp(10)])
+    })
+})
+
+/**
+ * ADR-0022 and ADR-0024: setup is a step of its own and an action of its own, it is never repaired,
+ * and it carries a budget of its own — the attempt and one more, counted off its own start events.
+ */
+describe("nextActions: setup", () => {
+    /** A setup that got somewhere and stopped, and one a killed run left with no end event at all. */
+    const broke = (number: number, outcome: "failed" | "running"): readonly LifecycleEvent[] => [
+        event(number, "setup", "running"),
+        ...(outcome === "failed" ? [event(number, "setup", "failed")] : []),
+    ]
+
+    /** A ticket that has spent both its setups: the first broke, the recut broke too. */
+    const spent = (number: number): readonly LifecycleEvent[] => [
+        ...broke(number, "failed"),
+        ...broke(number, "failed"),
+    ]
+
+    it("should set a ticket up before it is implemented, so that its claim is inside a recorded step", () => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets)
+
+        // then
+        expect(actions).toEqual([settingUp(10)])
+    })
+
+    it("should give a ticket whose setup got through an implementer rather than another setup", () => {
+        // given — ADR-0022: a run killed at `setup: ok` keeps its warm worktree
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, cut(10))
+
+        // then
+        expect(actions).toEqual([implementing(10, 1)])
+    })
+
+    it.each([
+        ["failed", "failed"],
+        ["a killed run left running", "running"],
+    ] as const)("should cut a setup that %s again, within its own budget", (_name, outcome) => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, broke(10, outcome))
+
+        // then
+        expect(actions).toEqual([settingUp(10)])
+    })
+
+    it.each([
+        ["failed", "failed"],
+        ["a killed run left running", "running"],
+    ] as const)("should never send a prepare pass to a setup that %s", (_name, outcome) => {
+        // given — ADR-0024: a half-made worktree is thrown away, never handed to an agent
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, broke(10, outcome))
+
+        // then
+        expect(actions.some(action => action.kind === "prepare")).toBe(false)
+    })
+
+    it("should count a killed setup against the budget, because the recut is the repair", () => {
+        // given — one setup that failed and one a second kill left running: both attempts are spent
+        const tickets = [ticket(10)]
+        const events = [...broke(10, "failed"), ...broke(10, "running")]
+
+        // when
+        const actions = decide(tickets, events)
+
+        // then
+        expect(actions).toEqual([{ kind: "finish" }])
+    })
+
+    it("should fail a ticket for good once its setup budget is spent", () => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, spent(10))
+
+        // then
+        expect(actions).toEqual([{ kind: "finish" }])
+    })
+
+    it("should skip the dependents of a ticket that spent its setup budget, transitively", () => {
+        // given
+        const tickets = [ticket(11), ticket(12, [11]), ticket(13, [12])]
+
+        // when
+        const actions = decide(tickets, spent(11))
+
+        // then
+        expect(actions).toEqual([
+            { kind: "skip", ticket: 12 },
+            { kind: "skip", ticket: 13 },
+        ])
+    })
+
+    it("should spend an implementer slot on a setup, because the ticket is being worked", () => {
+        // given
+        const tickets = [ticket(10), ticket(11)]
+
+        // when
+        const actions = decide(tickets, [], { maxParallel: 1 })
+
+        // then
+        expect(actions).toHaveLength(1)
+    })
+
+    it("should leave a setup the driver says is running alone", () => {
+        // given — ADR-0019: a `running` event is a killed step only once the live action set says so
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, broke(10, "running"), { inFlight: [settingUp(10)] })
+
+        // then
+        expect(actions).toEqual([])
+    })
+
+    it("should start no setup once the run is draining", () => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, [], { draining: true })
+
+        // then
+        expect(actions).toEqual([{ kind: "finish" }])
+    })
+
+    it("should hold a ticket's setup back until its every blocker is verified, as it holds its implementer", () => {
+        // given
+        const tickets = [ticket(11), ticket(12, [11])]
+
+        // when
+        const actions = decide(tickets, [event(11, "implement", "ok")])
+
+        // then
+        expect(actions.some(action => action.kind === "setup" && action.ticket === 12)).toBe(false)
     })
 })

@@ -56,10 +56,12 @@ than continuing unsupervised. With no TTY, pass `--plan-only` or `--implement-on
    then `setup` and then `verify`, pre-filled and editable in place. Empty input keeps the proposal.
 3. **Cut the spec branch.** `afk/<spec>/spec`, from your *local* trunk, into the gate worktree —
    the one long-lived worktree that holds it and its only writer.
-4. **Implement.** A rolling pool of slots draws from the slate: the tickets whose every blocker is
-   verified, most-dependents-first. Each gets its own worktree on `afk/<spec>/t<n>`, with `setup`
-   run in it and the repository's ignored environment files copied in, and its implementer runs
-   `verify` on its own work before reporting back.
+4. **Set up, then implement.** A rolling pool of slots draws from the slate: the tickets whose every
+   blocker is verified, most-dependents-first. Setting one up claims it, cuts it its own worktree on
+   `afk/<spec>/t<n>`, copies the repository's ignored environment files in and runs `setup` there —
+   a step of its own, so a run killed during it is visible and costs the ticket an attempt. A setup
+   that broke is never repaired: the worktree is thrown away and cut again, and a ticket gets two
+   before it fails. Its implementer then runs `verify` on its own work before reporting back.
 5. **Merge, serially.** One ticket at a time: rebase onto the spec branch's tip, resolve conflicts
    in the ticket's own worktree when there are any, squash into the spec branch.
 6. **Gate.** `setup` then `verify` on the spec branch, after every merge — so a red result names
@@ -81,12 +83,13 @@ up.
 
 Exactly two writes, both through `gh`:
 
-- **the claim** — the ticket is assigned to you when its implementer starts, so a colleague can see
-  it is taken;
+- **the claim** — the ticket is assigned to you when its setup starts, so a colleague can see it is
+  taken;
 - **the spec PR** — opened at the end, with one `Closes #<n>` per verified ticket appended by the
   script rather than by an agent.
 
-A failed claim halts the run: it is a collision guard, not bookkeeping. A claim is never released,
+A failed claim halts the run: it is a collision guard, not bookkeeping. A ticket that is set up
+twice is claimed twice, which changes nothing on the tracker. A claim is never released,
 `--force-fresh` included — an attempted-and-failed ticket should be findable afterwards. No progress
 comments, no labels, no notes on ticket issues. `--force-fresh` closing the pull request it opened
 is the undoing of one of the two writes, not a third.
