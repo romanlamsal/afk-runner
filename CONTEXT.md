@@ -214,6 +214,14 @@ _Avoid_: cancelled, dropped, blocked
 A ticket that was attempted, could not land, and that a later resume may repair.
 _Avoid_: errored, broken, stuck
 
+**Board**:
+What a run shows while it runs: every ticket of the spec at once, each on the track it is currently
+on. Derived from the event log **and** the driver's live action set, never from the log alone,
+because whether a `running` event is a step that is *happening* is a question the log cannot answer
+(ADR-0019). Nothing about it is written down: it is observed rather than recorded, which is why afk
+has no watcher of its own (ADR-0029).
+_Avoid_: dashboard, monitor, progress view, TUI
+
 **`.afk/`**:
 The run directory — the event log, worktrees, agent transcripts. Machine-local; nothing in it is
 expected to exist on another machine.
