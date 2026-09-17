@@ -123,6 +123,10 @@ _Avoid_: graceful shutdown, soft stop, quiesce
 
 ## State
 
+A ticket's life is a state machine. The statuses below are its states; the steps are the moves
+between them. A status is not stored and is not a word of its own in the log — it is a reading of
+the last lifecycle event, which is a step and an outcome together.
+
 **Step**:
 The closed vocabulary recovery keys on: `setup`, `implement`, `prepare`, `rebase`, `resolve`,
 `merge`, `gate`, `fix`, `revert`. A phase that can be killed on its own, or that carries a budget of
@@ -164,6 +168,11 @@ _Avoid_: retry limit, attempt counter, quota
 A ticket's last lifecycle event. Derived on read, never stored. A ticket left `running` is one whose
 step began and never reported back.
 _Avoid_: state, phase, stage
+
+**Implemented**:
+A ticket whose implementer reported back and whose work has gone no further. What the merge track
+draws from, exactly as the slate draws from verified blockers.
+_Avoid_: done, finished, complete, ready
 
 **Verified**:
 A ticket whose gate went green — the only status the slate accepts as a satisfied blocker.
