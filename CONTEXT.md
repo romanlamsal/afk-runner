@@ -129,13 +129,10 @@ between them. A status is not stored and is not a word of its own in the log —
 the last lifecycle event, which is a step and an outcome together.
 
 **Step**:
-The closed vocabulary recovery keys on: `setup`, `implement`, `prepare`, `rebase`, `resolve`,
-`merge`, `gate`, `fix`, `revert`, `pull-request`. A phase that can be killed on its own, or that
-carries a budget of its own, is a step of its own (ADR-0022). Each step is also an action the
-decision function can give: the action set is the step set, one for one (ADR-0026).
-
-All but the last are moves in one ticket's machine. `pull-request` is about the **run** — the way
-`finish` and `skip` are already run-level actions — and its events name no ticket (ADR-0028).
+The named thing recovery keys on: one move a ticket makes, or one thing a run does. A phase that can
+be killed on its own, or that carries a budget of its own, is a step of its own (ADR-0022). Most are
+also actions the decision function can give (ADR-0026); the run-level ones name no ticket
+(ADR-0028).
 _Avoid_: phase, stage, state
 
 **Setup step**:
@@ -150,6 +147,11 @@ One pass at one step of one ticket, carrying its own session where an agent runs
 the step runs commands. A ticket's second implementer attempt is a different attempt from its first.
 Nothing an attempt does happens before its start event.
 _Avoid_: try, run, invocation
+
+**Started**:
+A spec whose log names a ticket, and so a spec a run has begun for. A spec that has only been
+planned is not started, its log notwithstanding (ADR-0028).
+_Avoid_: in progress, live, under way, open
 
 **Event log**:
 `events.jsonl` in the run directory — the append-only record of every lifecycle event, one per line.
@@ -212,15 +214,44 @@ _Avoid_: cancelled, dropped, blocked
 A ticket that was attempted, could not land, and that a later resume may repair.
 _Avoid_: errored, broken, stuck
 
+**Conclusion**:
+What a ticket came to: verified, unverified, failed or skipped. One classification, decided in the
+domain and nowhere else, because the run's summary, its exit code and the pull request's draft flag
+all read it and a second route would let them disagree. A ticket never attempted or mid-step has
+come to none.
+_Avoid_: result, final status, verdict
+
+**Board**:
+What a run shows while it runs: every ticket of the spec at once, each on the track it is currently
+on. Derived from the event log **and** the driver's live action set, never from the log alone,
+because whether a `running` event is a step that is *happening* is a question the log cannot answer
+(ADR-0019). Nothing about it is written down: it is observed rather than recorded, which is why afk
+has no watcher of its own (ADR-0029).
+_Avoid_: dashboard, monitor, progress view, TUI
+
+**Trail**:
+A row's steps, across the track that row is on: the ones the log has been through, the one the
+driver is running now, and the ones still ahead. What has happened, what is happening and what is
+next, on one line. A prepare pass is no step of a trail — it is read at the step it was sent to
+repair, which is the step the domain already routes it by.
+_Avoid_: progress bar, timeline, breadcrumb
+
+**Interrupted**:
+A step the log left `running` whose action the driver does not hold: the step's process is gone, and
+it is not happening. Only the live action set tells it from a step that is (ADR-0019), which is what
+a resumed run is full of. The board reads such a ticket at the step a prepare pass will be sent to,
+or as beyond repair where no pass would help.
+_Avoid_: stale, orphaned, hung, zombie
+
 **`.afk/`**:
 The run directory — the event log, worktrees, agent transcripts. Machine-local; nothing in it is
 expected to exist on another machine.
 _Avoid_: cache, workspace, scratch
 
 **Starting over**:
-What `--force-fresh` does: the run's worktrees, this spec's branches local and remote, its pull
-request and its run directory, taken away in one command with no prompt — the flag is the consent.
-It takes nothing back off the tracker: a claim is never released (ADR-0013).
+Taking a spec back to nothing: its worktrees, its branches local and remote, its pull request and
+its run directory, all away in one act and without a prompt. It takes nothing back off the tracker —
+a claim is never released (ADR-0013).
 _Avoid_: reset, clean, wipe, rollback
 
 ## Tracker
@@ -258,16 +289,14 @@ The agent that writes the spec PR's title and summary.
 _Avoid_: summariser, scribe
 
 **Agent profile**:
-What one role is invoked with: the model and effort of the agent afk starts, and the model of every
-agent that one spawns. One per role, and the only thing that distinguishes two invocations besides
-the prompt and the schema. It is why afk does not run `--bare`: the preamble was never the cost, and
-the fan-out is (ADR-0027).
+What one role is invoked with: the model and effort of the agent afk starts, and the model of the
+agents that one spawns. One per role, and the only thing distinguishing two invocations besides the
+prompt and the schema (ADR-0027).
 _Avoid_: tier, agent config, model settings
 
 **Fan-out**:
 The agents a role's skills spawn inside its own invocation. afk starts one agent per attempt and
-never these, so the only thing that reaches them is the profile's `subagentModel` — which is where
-most of a run's consumption goes.
+never any of these, so a fan-out is reached only through the profile the attempt was given.
 _Avoid_: subagents, sub-tasks, children
 
 ## Code

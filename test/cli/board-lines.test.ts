@@ -1,0 +1,184 @@
+import { describe, expect, it } from "vitest"
+import { boardLines } from "../../src/cli/board-lines.ts"
+import type { BoardRow, BoardStep, BoardView, SettledOutcome, Track } from "../../src/domain/board.ts"
+import type { Step } from "../../src/domain/events.ts"
+
+/**
+ * The board off a terminal, asserted as what it is: a mapping over two consecutive views. No
+ * terminal, no cursor and no fakes — the inputs are two views and the output is the lines the second
+ * one is news for.
+ */
+
+const trail = (
+    steps: Readonly<Record<string, SettledOutcome | "live" | "interrupted" | "ahead">>,
+): readonly BoardStep[] =>
+    Object.entries(steps).map(([name, weight]) => {
+        const step = name as Step
+        return weight === "live" || weight === "interrupted" || weight === "ahead"
+            ? { step, state: weight }
+            : { step, state: "settled", outcome: weight }
+    })
+
+const row = (steps: readonly BoardStep[], rest: { track?: Track; detail?: string } = {}): BoardRow => ({
+    ticket: 7,
+    title: "Implement the slate",
+    track: rest.track ?? "implement",
+    steps,
+    waiting: false,
+    conclusion: undefined,
+    beyondRepair: false,
+    detail: rest.detail,
+})
+
+const view = (...rows: readonly BoardRow[]): BoardView => ({ rows })
+
+const UNTOUCHED = row(trail({ setup: "ahead", implement: "ahead" }))
+
+const SETTING_UP = row(trail({ setup: "live", implement: "ahead" }))
+
+describe("boardLines", () => {
+    it("should say nothing for the first view it is given", () => {
+        // given
+        const first = view(SETTING_UP)
+
+        // when
+        const lines = boardLines(undefined, first)
+
+        // then
+        expect(lines).toEqual([])
+    })
+
+    it("should say nothing for a row that did not change", () => {
+        // given
+        const before = view(SETTING_UP)
+
+        // when
+        const lines = boardLines(before, view(SETTING_UP))
+
+        // then
+        expect(lines).toEqual([])
+    })
+
+    it("should name the ticket and the step of a step that began", () => {
+        // given
+        const before = view(UNTOUCHED)
+
+        // when
+        const lines = boardLines(before, view(SETTING_UP))
+
+        // then
+        expect(lines).toEqual(["#7 setup running"])
+    })
+
+    it.each([
+        ["a step that went green", "ok"],
+        ["a step that broke", "failed"],
+        ["a step that will not happen", "skipped"],
+        ["a step git stopped part-way", "conflicted"],
+    ] as const)("should name the ticket, the step and the outcome of %s", (_case, outcome) => {
+        // given
+        const before = view(SETTING_UP)
+
+        // when
+        const lines = boardLines(before, view(row(trail({ setup: outcome, implement: "ahead" }))))
+
+        // then
+        expect(lines).toEqual([`#7 setup ${outcome}`])
+    })
+
+    it("should say why a step failed, where the row carries a reason", () => {
+        // given
+        const before = view(SETTING_UP)
+        const broken = row(trail({ setup: "failed", implement: "ahead" }), { detail: "the setup command exited 1" })
+
+        // when
+        const lines = boardLines(before, view(broken))
+
+        // then
+        expect(lines).toEqual(["#7 setup failed: the setup command exited 1"])
+    })
+
+    it("should leave a reason off a step that simply worked", () => {
+        // given
+        const before = view(SETTING_UP)
+        const done = row(trail({ setup: "ok", implement: "ahead" }), { detail: "resolved by taking both sides" })
+
+        // when
+        const lines = boardLines(before, view(done))
+
+        // then
+        expect(lines).toEqual(["#7 setup ok"])
+    })
+
+    it("should lose neither transition where one view settles a step and starts the next", () => {
+        // given
+        const before = view(SETTING_UP)
+        const implementing = row(trail({ setup: "ok", implement: "live" }))
+
+        // when
+        const lines = boardLines(before, view(implementing))
+
+        // then
+        expect(lines).toEqual(["#7 setup ok", "#7 implement running"])
+    })
+
+    it("should say nothing for the trail a ticket left behind when it moved track", () => {
+        // given
+        const before = view(row(trail({ setup: "ok", implement: "ok" })))
+        const merging = row(trail({ rebase: "live", resolve: "ahead", merge: "ahead", gate: "ahead" }), {
+            track: "merge",
+        })
+
+        // when
+        const lines = boardLines(before, view(merging))
+
+        // then
+        expect(lines).toEqual(["#7 rebase running"])
+    })
+
+    it("should say a step that was attempted again and broke again", () => {
+        // given
+        const before = view(row(trail({ setup: "ok", implement: "live" })))
+        const broken = row(trail({ setup: "ok", implement: "failed" }), { detail: "the second attempt too" })
+
+        // when
+        const lines = boardLines(before, view(broken))
+
+        // then
+        expect(lines).toEqual(["#7 implement failed: the second attempt too"])
+    })
+
+    it("should say nothing for a step a resumed run found interrupted", () => {
+        // given: the baseline of a resume already said nothing, and the row has not moved since
+        const before = view(row(trail({ setup: "ok", implement: "interrupted" })))
+
+        // when
+        const lines = boardLines(before, view(row(trail({ setup: "ok", implement: "interrupted" }))))
+
+        // then
+        expect(lines).toEqual([])
+    })
+
+    it("should say the repair of an interrupted step as it begins", () => {
+        // given
+        const before = view(row(trail({ setup: "ok", implement: "interrupted" })))
+
+        // when
+        const lines = boardLines(before, view(row(trail({ setup: "ok", implement: "live" }))))
+
+        // then
+        expect(lines).toEqual(["#7 implement running"])
+    })
+
+    it("should say a line per row that changed, and only for those", () => {
+        // given
+        const other = (steps: readonly BoardStep[]): BoardRow => ({ ...row(steps), ticket: 8 })
+        const before = view(SETTING_UP, other(trail({ setup: "ahead", implement: "ahead" })))
+
+        // when
+        const lines = boardLines(before, view(SETTING_UP, other(trail({ setup: "live", implement: "ahead" }))))
+
+        // then
+        expect(lines).toEqual(["#8 setup running"])
+    })
+})

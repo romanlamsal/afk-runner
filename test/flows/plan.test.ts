@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest"
 import { createCli } from "../../src/cli/cli.ts"
 import { EXIT } from "../../src/cli/exit-codes.ts"
 import { createRun } from "../../src/cli/run.ts"
+import { started } from "../../src/domain/events.ts"
 import type { Manifest } from "../../src/domain/manifest.ts"
 import { createPlanService } from "../../src/service/plan.ts"
 import { createStartService } from "../../src/service/start.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
 import { createStubDrive } from "../fakes/drive.ts"
 import { createFakeEnvironment } from "../fakes/environment.ts"
+import { createFakeEventLog } from "../fakes/event-log.ts"
 import { createStubFinish } from "../fakes/finish.ts"
 import { createStubFresh } from "../fakes/fresh.ts"
 import { createFakeGit } from "../fakes/git.ts"
@@ -40,15 +42,18 @@ const harness = (reply: { structuredOutput: unknown } = { structuredOutput: MANI
     const git = createFakeGit()
     const operator = createFakeOperator()
     const records = createFakeRunRecords()
+    const events = createFakeEventLog()
     const printed: string[] = []
     const errors: string[] = []
     const start = createStartService({
+        events: events.log,
         cwd: "/repo",
         environment: environment.copy,
         git: git.git,
         manifests: manifests.store,
         operator: operator.operator,
         plan: createPlanService({
+            events: events.log,
             agent: agent.run,
             manifests: manifests.store,
             now: () => new Date("2026-09-15T11:18:38.314Z"),
@@ -65,9 +70,10 @@ const harness = (reply: { structuredOutput: unknown } = { structuredOutput: MANI
             finish: createStubFinish(),
             print: line => printed.push(line),
             printError: line => errors.push(line),
+            boardDrawn: false,
         }),
     })
-    return { cli, agent, git, manifests, operator, printed, errors }
+    return { cli, agent, events, git, manifests, operator, printed, errors }
 }
 
 describe("afk <spec> --plan-only", () => {
@@ -135,5 +141,35 @@ describe("afk <spec> --plan-only", () => {
 
         // then
         expect(manifests.written).toEqual([])
+    })
+})
+
+/**
+ * The pairing the README documents for a run with no terminal, and the reason `plan` needed a
+ * predicate rather than a file check: planning appends to the log, so "the log exists" would have
+ * made the second half refuse the first half's work (ADR-0028).
+ */
+describe("afk <spec> --plan-only, then --implement-only", () => {
+    it("should take the plan it just wrote, rather than refusing over a run", async () => {
+        // given — the stubbed driver works no slate, so the run ends without a pull request
+        const { cli, errors } = harness()
+        await cli(["4", "--plan-only"])
+
+        // when
+        await cli(["4", "--implement-only"])
+
+        // then
+        expect(errors).toEqual(["afk: this run was not taken as far as a pull request"])
+    })
+
+    it("should leave a log that is not yet a run", async () => {
+        // given
+        const { cli, events } = harness()
+
+        // when
+        await cli(["4", "--plan-only"])
+
+        // then
+        expect(started(events.appended)).toBe(false)
     })
 })

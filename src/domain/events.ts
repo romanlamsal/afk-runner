@@ -19,10 +19,12 @@ import { usageSchema } from "./agent.ts"
  * can be killed on its own and because it carries a budget of its own, which is the whole test a
  * member of this enum has to pass (ADR-0022).
  *
- * `pull-request` is the one step that is about the **run** rather than about one ticket's machine,
- * the way `finish` is already that action (ADR-0026). Its events carry no ticket (ADR-0028).
+ * `plan` and `pull-request` are the steps about the **run** rather than about one ticket's machine,
+ * the way `finish` and `skip` are already those actions (ADR-0026). Their events carry no ticket
+ * (ADR-0028).
  */
 export const STEPS = [
+    "plan",
     "setup",
     "implement",
     "prepare",
@@ -52,6 +54,18 @@ export const BROKEN_STEPS = ["implement", "rebase", "resolve", "merge", "gate"] 
 export type BrokenStep = (typeof BROKEN_STEPS)[number]
 
 export const repairableStep = (step: Step): step is BrokenStep => BROKEN_STEPS.some(broken => broken === step)
+
+/**
+ * The steps the merge track owns. What makes them one thing is the spec branch: an action about any
+ * of them is an action about the branch one worktree writes, so at most one is ever in flight
+ * (ADR-0006).
+ *
+ * A property of the steps themselves rather than of the decision that hands them out, which is why
+ * it sits here: the schedule enforces seriality over it, and the board groups its rows by it.
+ */
+export const MERGE_SIDE_STEPS = ["rebase", "resolve", "merge", "gate", "fix", "revert"] as const
+
+export const mergeSideStep = (step: Step): boolean => MERGE_SIDE_STEPS.some(side => side === step)
 
 /**
  * Closed, and it grows only by a deliberate act. The test a member must pass: an outcome names
@@ -137,6 +151,16 @@ export type EventLog = {
     read: (root: string, spec: number) => Promise<readonly LifecycleEvent[]>
     append: (root: string, spec: number, event: LifecycleEvent) => Promise<void>
 }
+
+/**
+ * Whether a run has begun for this spec, which is what forbids a mode from starting over one
+ * (ADR-0014).
+ *
+ * The log naming a ticket, rather than the log file being there: `plan` appends a run-level event
+ * before any ticket is touched, so file existence would make `--plan-only` followed by
+ * `--implement-only` refuse itself (ADR-0028).
+ */
+export const started = (events: readonly LifecycleEvent[]): boolean => events.some(event => event.ticket !== undefined)
 
 /** A ticket's status is its last event, and there is nothing else to it (ADR-0011). */
 export const statusOf = (events: readonly LifecycleEvent[], ticket: number): LifecycleEvent | undefined =>
@@ -302,6 +326,33 @@ export const reverted = (ticket: number, at: Date, detail: string): LifecycleEve
     detail,
 })
 
+/**
+ * The four things a ticket can come to, and the whole of what a run says about one. A ticket the log
+ * has not brought to any of them — never attempted, or mid-step — has come to none, which is why
+ * `cameTo` may answer nothing.
+ */
+export const CONCLUSIONS = ["verified", "unverified", "failed", "skipped"] as const
+
+export type Conclusion = (typeof CONCLUSIONS)[number]
+
+/**
+ * What a ticket came to, decided here and nowhere else. It is not display-only: the exit code and
+ * the pull request's draft flag are read from it, so a second route to the same judgement would let
+ * what the operator is shown disagree with what the process returns (`layers.md`, question 3).
+ */
+export const cameTo = (events: readonly LifecycleEvent[], ticket: number): Conclusion | undefined => {
+    switch (statusOf(events, ticket)?.outcome) {
+        case "ok":
+            return verified(events, ticket) ? "verified" : "unverified"
+        case "failed":
+            return "failed"
+        case "skipped":
+            return "skipped"
+        default:
+            return undefined
+    }
+}
+
 export type Progress = {
     /** Tickets whose gate went green. Nothing else proves a ticket landed sound (ADR-0008). */
     verified: readonly number[]
@@ -311,16 +362,18 @@ export type Progress = {
     skipped: readonly number[]
 }
 
-/** What the log says a run came to, read for the operator rather than for a decision. */
+/**
+ * What the log says a run came to, read for the operator rather than for a decision: the same
+ * classification as `cameTo`, one bucket per answer.
+ */
 export const progressOf = (tickets: readonly number[], events: readonly LifecycleEvent[]): Progress => {
-    const withOutcome = (outcome: Outcome): readonly number[] =>
-        tickets.filter(ticket => statusOf(events, ticket)?.outcome === outcome)
+    const whichCameTo = (conclusion: Conclusion): readonly number[] =>
+        tickets.filter(ticket => cameTo(events, ticket) === conclusion)
 
-    const wentWell = withOutcome("ok")
     return {
-        verified: wentWell.filter(ticket => verified(events, ticket)),
-        unverified: wentWell.filter(ticket => !verified(events, ticket)),
-        failed: withOutcome("failed"),
-        skipped: withOutcome("skipped"),
+        verified: whichCameTo("verified"),
+        unverified: whichCameTo("unverified"),
+        failed: whichCameTo("failed"),
+        skipped: whichCameTo("skipped"),
     }
 }

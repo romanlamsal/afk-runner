@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
     attempts,
     brokenStep,
+    cameTo,
     cutFrom,
     type LifecycleEvent,
     type Outcome,
@@ -15,6 +16,7 @@ import {
     settled,
     setUp,
     skipped,
+    started,
     statusOf,
     unattempted,
     verified,
@@ -130,6 +132,28 @@ describe("settled", () => {
 
         // then
         expect(done).toBe(expected)
+    })
+})
+
+describe("cameTo", () => {
+    it.each([
+        ["a gate that went green", [event(10, "gate", "ok")], "verified"],
+        ["an implementer that reported back", [event(10, "implement", "ok")], "unverified"],
+        ["a squash the gate has not run over", [event(10, "merge", "ok")], "unverified"],
+        ["a step that failed", [event(10, "implement", "failed")], "failed"],
+        ["a revert", [event(10, "revert", "failed")], "failed"],
+        ["a ticket a blocker took down", [event(10, "implement", "skipped")], "skipped"],
+        ["a step that began and never ended", [event(10, "implement", "running")], undefined],
+        ["a rebase git stopped part-way", [event(10, "rebase", "conflicted")], undefined],
+        ["a ticket the log never mentioned", [], undefined],
+    ] as const)("should say %s came to %s", (_name, events, expected) => {
+        // given — the events from the table
+
+        // when
+        const conclusion = cameTo(events, 10)
+
+        // then
+        expect(conclusion).toBe(expected)
     })
 })
 
@@ -548,5 +572,36 @@ describe("a conflicted rebase", () => {
 
         // then
         expect(holds).toBe(false)
+    })
+})
+
+/**
+ * What makes a run an existing one. Not that the log file is there — planning writes a run-level
+ * event before any ticket is touched, and `--plan-only` then `--implement-only` must not refuse
+ * itself (ADR-0028).
+ */
+describe("started", () => {
+    const plan = { step: "plan" as const, outcome: "ok" as const, at: "2026-09-15T11:18:38.314Z" }
+    const opened = { step: "pull-request" as const, outcome: "ok" as const, at: "2026-09-15T11:18:38.314Z" }
+
+    it.each([
+        ["not be started for an empty log", [], false],
+        ["not be started for a log holding only a plan", [plan], false],
+        ["not be started for a log holding only run-level steps", [plan, opened], false],
+        ["be started once the log names a ticket", [plan, event(10, "implement", "running")], true],
+        [
+            "be started for a skip, a ticket nothing attempted being a run all the same",
+            [plan, skipped(10, new Date())],
+            true,
+        ],
+    ] as const)("should %s", (_name, events, expected) => {
+        // given
+        const log: readonly LifecycleEvent[] = events
+
+        // when
+        const began = started(log)
+
+        // then
+        expect(began).toBe(expected)
     })
 })

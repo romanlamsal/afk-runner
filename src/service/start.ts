@@ -1,5 +1,6 @@
 import { specBranch } from "../domain/branches.ts"
 import type { CopyEnvironmentFiles } from "../domain/environment.ts"
+import { type EventLog, started } from "../domain/events.ts"
 import type { Git } from "../domain/git.ts"
 import type { Manifest, ManifestStore } from "../domain/manifest.ts"
 import type { Mode } from "../domain/mode.ts"
@@ -30,6 +31,8 @@ export type StartDeps = {
     git: Git
     manifests: ManifestStore
     operator: Operator
+    /** Read to tell a spec with a run from one with only a manifest (ADR-0028). */
+    events: EventLog
     /** The plan service's driving port: a bare invocation plans before it prepares. */
     plan: PlanSpec
     records: RunRecordStore
@@ -63,7 +66,7 @@ const confirmOrReport = async (
  * run forbids, what being behind means. What is left here is the order the ports are called in.
  */
 export const createStartService =
-    ({ cwd, environment, git, manifests, operator, plan, records }: StartDeps): StartRun =>
+    ({ cwd, environment, events, git, manifests, operator, plan, records }: StartDeps): StartRun =>
     async ({ spec, mode, consented }) => {
         const root = await git.topLevel(cwd)
         if (root === undefined) {
@@ -75,7 +78,7 @@ export const createStartService =
             spec,
             mode,
             consented,
-            records: { manifest: stored !== undefined, events: await records.hasEventLog(root, spec) },
+            records: { manifest: stored !== undefined, started: started(await events.read(root, spec)) },
         })
         if (refusal !== undefined) {
             return refused(refusal)

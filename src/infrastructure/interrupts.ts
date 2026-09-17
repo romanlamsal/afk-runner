@@ -10,8 +10,16 @@ export type SignalInterruptDeps = {
     listen: (handler: () => void) => void
     /** Leaving, now, with nothing unwound. The real one exits `130`. */
     kill: () => void
-    /** Where the operator is told what their interrupt did. */
-    notify: (line: string) => void
+    /**
+     * Where the operator is told the run is draining. The board owns the terminal while a run is
+     * going, so on one this routes into it; off one it is stderr, as it has always been.
+     */
+    notifyDraining: (line: string) => void
+    /**
+     * Where the operator is told the run is being killed. Always the process's own stream: nothing
+     * redraws after this, so there is no frame left to tear.
+     */
+    notifyKilled: (line: string) => void
 }
 
 const DRAINING =
@@ -24,13 +32,20 @@ const KILLING = "afk: killed. Nothing was unwound; the next start picks the run 
  * written when a step *starts*, so a kill at any point leaves a state the next start can dispatch
  * on, and nothing downstream may assume a run exited cleanly.
  */
-export const createSignalInterrupts = ({ listen, kill, notify }: SignalInterruptDeps): Interrupts => {
+export const createSignalInterrupts = ({
+    listen,
+    kill,
+    notifyDraining,
+    notifyKilled,
+}: SignalInterruptDeps): Interrupts => {
     let interrupts = 0
 
     listen(() => {
         interrupts += 1
-        notify(interrupts === 1 ? DRAINING : KILLING)
-        if (interrupts > 1) {
+        if (interrupts === 1) {
+            notifyDraining(DRAINING)
+        } else {
+            notifyKilled(KILLING)
             kill()
         }
     })

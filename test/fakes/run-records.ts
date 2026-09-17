@@ -1,4 +1,5 @@
 import type { RunRecordStore } from "../../src/domain/records.ts"
+import type { FakeEventLog } from "./event-log.ts"
 
 export type FakeRunRecords = {
     records: RunRecordStore
@@ -9,17 +10,19 @@ export type FakeRunRecords = {
 }
 
 export const createFakeRunRecords = ({
-    events = false,
     unremovable,
+    log,
 }: {
-    events?: boolean
     unremovable?: string | undefined
+    /**
+     * The event log this run directory holds, emptied when the directory goes. The log really does
+     * live in there, so a test whose log still named a ticket afterwards would make starting over
+     * untestable — the two fakes agree by construction rather than by each caller remembering.
+     */
+    log?: FakeEventLog
 } = {}): FakeRunRecords => {
     const created: { root: string; spec: number }[] = []
     const removed: { root: string; spec: number }[] = []
-    // The event log lives in the run directory, so removing the directory takes it with it. A fake
-    // that kept answering "there is a run" afterwards would make starting over untestable.
-    let hasEvents = events
     return {
         created,
         removed,
@@ -32,10 +35,9 @@ export const createFakeRunRecords = ({
                     return { ok: false, reason: unremovable }
                 }
                 removed.push({ root, spec })
-                hasEvents = false
+                log?.appended.splice(0)
                 return { ok: true }
             },
-            hasEventLog: async () => hasEvents,
         },
     }
 }

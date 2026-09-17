@@ -22,6 +22,7 @@ import { createRevertService, type RevertTicket } from "../../src/service/revert
 import { createSetupService, type SetupTicket } from "../../src/service/setup.ts"
 import { createStartService } from "../../src/service/start.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
+import { createFakeBoard } from "../fakes/board.ts"
 import { createFakeCommands } from "../fakes/commands.ts"
 import { createFakeEnvironment } from "../fakes/environment.ts"
 import { createFakeEventLog } from "../fakes/event-log.ts"
@@ -71,6 +72,11 @@ type Setup = {
     worktrees?: Record<string, string>
     tracker?: FakeTrackerSetup
     maxParallel?: number
+    /**
+     * `--resume`: consent to continuing a run that has one. A log holding a ticket event is a run,
+     * and `--implement-only` refuses one without this (ADR-0014, ADR-0028).
+     */
+    resume?: boolean
 }
 
 const harness = ({
@@ -89,6 +95,7 @@ const harness = ({
     worktrees = {},
     tracker: trackerSetup = {},
     maxParallel = 3,
+    resume = false,
 }: Setup) => {
     const manifest = manifestOf(tickets)
     const git = createFakeGit({
@@ -220,6 +227,7 @@ const harness = ({
         run: createRun({
             fresh: createStubFresh(),
             start: createStartService({
+                events: events.log,
                 cwd: "/repo",
                 environment: environment.copy,
                 git: git.git,
@@ -229,6 +237,7 @@ const harness = ({
                 records: records.records,
             }),
             drive: createDriveService({
+                board: createFakeBoard().board,
                 events: events.log,
                 interrupts: interrupts.interrupts,
                 implement: createImplementService({
@@ -277,6 +286,7 @@ const harness = ({
                 tracker: tracker.tracker,
             }),
             print: line => printed.push(line),
+            boardDrawn: false,
             printError: line => errors.push(line),
         }),
     })
@@ -295,21 +305,24 @@ const harness = ({
         printed,
         errors,
         tracker,
-        run: (): Promise<number> => cli(["4", "--implement-only", `--max-parallel=${maxParallel}`]),
+        run: (): Promise<number> =>
+            cli(["4", "--implement-only", `--max-parallel=${maxParallel}`, ...(resume ? ["--resume"] : [])]),
     }
 }
 
 /**
  * What a setup that went through leaves behind: the log says the worktree was cut and what from,
- * git has the ticket's branch at that commit, and the worktree is registered.
+ * git has the ticket's branch at that commit, and the worktree is registered. A log holding a ticket
+ * event is a run, so every scenario built on it is a continuation and consents to one (ADR-0028).
  */
-const warm = (...tickets: readonly number[]): Pick<Setup, "log" | "branches" | "worktrees"> => ({
+const warm = (...tickets: readonly number[]): Pick<Setup, "log" | "branches" | "worktrees" | "resume"> => ({
     log: tickets.flatMap(number => [
         { ticket: number, step: "setup", outcome: "running", at: "2026-09-15T09:00:00.000Z" } as const,
         { ticket: number, step: "setup", outcome: "ok", at: "2026-09-15T09:30:00.000Z", baseSha: "spec-tip" } as const,
     ]),
     branches: Object.fromEntries(tickets.map(number => [`afk/4/t${number}`, ["spec-tip"]])),
     worktrees: Object.fromEntries(tickets.map(number => [`.afk/4/t${number}`, `afk/4/t${number}`])),
+    resume: true,
 })
 
 /** The log as a scenario reads it: what happened to which ticket, in order, ends only. */
@@ -889,7 +902,7 @@ describe("a run whose tracker refuses a claim", () => {
 describe("a run resumed over a log that is not empty", () => {
     it("should never re-implement a ticket the log says is done", async () => {
         // given
-        const { run, agent, events } = harness({ tickets: [ticket(10), ticket(11)] })
+        const { run, agent, events } = harness({ tickets: [ticket(10), ticket(11)], resume: true })
         events.appended.push({ ticket: 10, step: "implement", outcome: "ok", at: "2026-09-15T10:00:00.000Z" })
 
         // when
@@ -901,7 +914,7 @@ describe("a run resumed over a log that is not empty", () => {
 
     it("should gate a ticket a killed run merged but never gated", async () => {
         // given — the squash is on the spec branch, and the log stops at the merge
-        const { run, events, git } = harness({ tickets: [ticket(10)] })
+        const { run, events, git } = harness({ tickets: [ticket(10)], resume: true })
         git.commit("afk/4/spec", "squash-afk/4/t10", "Ticket 10 (#10)\n\nafk-ticket: 4/10")
         events.appended.push({ ticket: 10, step: "merge", outcome: "ok", at: "2026-09-15T10:00:00.000Z" })
 
@@ -914,7 +927,7 @@ describe("a run resumed over a log that is not empty", () => {
 
     it("should never squash a ticket the spec branch already carries a second time", async () => {
         // given
-        const { run, git, events } = harness({ tickets: [ticket(10)] })
+        const { run, git, events } = harness({ tickets: [ticket(10)], resume: true })
         git.commit("afk/4/spec", "squash-afk/4/t10", "Ticket 10 (#10)\n\nafk-ticket: 4/10")
         events.appended.push({ ticket: 10, step: "merge", outcome: "ok", at: "2026-09-15T10:00:00.000Z" })
 
@@ -927,7 +940,7 @@ describe("a run resumed over a log that is not empty", () => {
 
     it("should give a ticket a killed run left mid-step one implementer, not a second one beside it", async () => {
         // given — a `running` event with no process behind it, which is what a killed run leaves
-        const { run, agent, events } = harness({ tickets: [ticket(10)] })
+        const { run, agent, events } = harness({ tickets: [ticket(10)], resume: true })
         events.appended.push(
             { ticket: 10, step: "setup", outcome: "ok", at: "2026-09-15T09:30:00.000Z", baseSha: "spec-tip" },
             { ticket: 10, step: "implement", outcome: "running", at: "2026-09-15T10:00:00.000Z" },
@@ -947,10 +960,11 @@ describe("a run resumed over a log that is not empty", () => {
  */
 describe("a run that recuts a killed setup", () => {
     /** What a run killed part-way through a setup leaves: a step that began, and a half-made worktree. */
-    const halfMade: Pick<Setup, "log" | "branches" | "worktrees"> = {
+    const halfMade: Pick<Setup, "log" | "branches" | "worktrees" | "resume"> = {
         log: [{ ticket: 10, step: "setup", outcome: "running", at: "2026-09-15T09:00:00.000Z" }],
         branches: { "afk/4/t10": ["spec-tip"] },
         worktrees: { ".afk/4/t10": "afk/4/t10" },
+        resume: true,
     }
 
     it("should cut the worktree again and take the ticket the rest of the way", async () => {
@@ -1042,7 +1056,7 @@ describe("a run resumed over a fix a killed run left part-way", () => {
     }
 
     /** A repository the ticket's merge broke, so that the reverted tip is what goes green again. */
-    const blamed = { tickets: [ticket(10)], failing: "npm run check", red: "the merge" } as const
+    const blamed = { tickets: [ticket(10)], failing: "npm run check", red: "the merge", resume: true } as const
 
     it("should gate what the killed fix left behind, and carry on to the revert", async () => {
         // given
@@ -1092,7 +1106,7 @@ describe("a run resumed over a fix a killed run left part-way", () => {
 
 describe("a run that recovers a wrecked ticket", () => {
     /** What a killed run leaves behind: a step that began, a worktree, and no process. */
-    const killed = (ticket: number, sessionId?: string): Pick<Setup, "log" | "branches" | "worktrees"> => {
+    const killed = (ticket: number, sessionId?: string): Pick<Setup, "log" | "branches" | "worktrees" | "resume"> => {
         const { log = [], ...rest } = warm(ticket)
         return {
             ...rest,

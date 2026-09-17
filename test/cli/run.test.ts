@@ -49,7 +49,8 @@ const harness = (
         driven = WORKED,
         finished = OPENED,
         cleared = CLEARED,
-    }: { driven?: DriveResult; finished?: FinishResult; cleared?: FreshResult } = {},
+        boardDrawn = false,
+    }: { driven?: DriveResult; finished?: FinishResult; cleared?: FreshResult; boardDrawn?: boolean } = {},
 ) => {
     const printed: string[] = []
     const errors: string[] = []
@@ -72,12 +73,15 @@ const harness = (
         },
         print: line => printed.push(line),
         printError: line => errors.push(line),
+        boardDrawn,
     })
     return { run, printed, errors, started, ended, freshened }
 }
 
-const worked = (prepared: PreparedRun = PREPARED, options: { driven?: DriveResult; finished?: FinishResult } = {}) =>
-    harness({ outcome: "prepared", run: prepared }, options)
+const worked = (
+    prepared: PreparedRun = PREPARED,
+    options: { driven?: DriveResult; finished?: FinishResult; boardDrawn?: boolean } = {},
+) => harness({ outcome: "prepared", run: prepared }, options)
 
 describe("createRun", () => {
     it("should start the spec it was invoked for, in the mode it was invoked in", async () => {
@@ -406,5 +410,29 @@ describe("createRun: --force-fresh", () => {
 
         // then
         expect(errors).toContain("afk: a worktree is locked")
+    })
+})
+
+describe("createRun: the summary of what the slate came to", () => {
+    it("should print it where nothing drew the run while it ran", async () => {
+        // given
+        const { run, printed } = worked(PREPARED, { boardDrawn: false })
+
+        // when
+        await run(invocation("plan-and-implement"))
+
+        // then
+        expect(printed).toContain("verified:     #5")
+    })
+
+    it("should print nothing of it where a board already said it per ticket", async () => {
+        // given
+        const { run, printed } = worked(PREPARED, { boardDrawn: true })
+
+        // when
+        await run(invocation("plan-and-implement"))
+
+        // then
+        expect(printed.some(line => line.startsWith("verified:"))).toBe(false)
     })
 })

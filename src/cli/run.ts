@@ -17,6 +17,12 @@ export type RunDeps = {
     finish: FinishRun
     print: (line: string) => void
     printError: (line: string) => void
+    /**
+     * Whether the run's tickets were drawn one by one while it ran. Where they were, the bucket
+     * summary is the same news a second time — the last frame already says per ticket what it says
+     * per bucket — so it is left to the runs that had no board to draw on (ADR-0029).
+     */
+    boardDrawn: boolean
 }
 
 /**
@@ -32,7 +38,7 @@ export type RunDeps = {
  * failure mode this whole rewrite exists to remove.
  */
 export const createRun =
-    ({ fresh, start, drive, finish, print, printError }: RunDeps) =>
+    ({ fresh, start, drive, finish, print, printError, boardDrawn }: RunDeps) =>
     async (invocation: Invocation): Promise<ExitCode> => {
         // Before anything is read, because what starting over throws away is what starting would
         // otherwise refuse over. A run that cannot be thrown away whole is not started on top of.
@@ -81,8 +87,10 @@ export const createRun =
                 if (driven.outcome === "interrupted") {
                     print("afk: the run was interrupted, so it stopped at what was already in flight")
                 }
-                for (const line of progressOutput(driven.progress)) {
-                    print(line)
+                if (!boardDrawn) {
+                    for (const line of progressOutput(driven.progress)) {
+                        print(line)
+                    }
                 }
 
                 // A halted run opens nothing. It stopped itself because something is wrong with the

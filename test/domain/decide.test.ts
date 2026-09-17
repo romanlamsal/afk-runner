@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type Action, nextActions, type RunParameters } from "../../src/domain/decide.ts"
+import { type Action, nextActions, type RunParameters, repairFor } from "../../src/domain/decide.ts"
 import { type BrokenStep, type LifecycleEvent, type Outcome, STEPS, type Step } from "../../src/domain/events.ts"
 import type { Ticket } from "../../src/domain/manifest.ts"
 import { manifestOf, ticket } from "../fixtures/manifest.ts"
@@ -92,10 +92,11 @@ const fixed = (number: number, outcome: Outcome = "ok"): readonly LifecycleEvent
 ]
 
 /**
- * ADR-0026: the action set is the step set. `pull-request` is the one step that is about the **run**
- * rather than about one ticket's machine, and `finish` is the action that performs it (ADR-0028).
+ * ADR-0026: the action set is the step set. `plan` and `pull-request` are the steps about the **run**
+ * rather than about one ticket's machine, and `finish` is the action that performs the latter
+ * (ADR-0028).
  */
-const TICKET_STEPS = STEPS.filter(step => step !== "pull-request")
+const TICKET_STEPS = STEPS.filter(step => step !== "plan" && step !== "pull-request")
 
 /** The state each step of the machine is taken out of, as a log. */
 const AT: Record<(typeof TICKET_STEPS)[number], readonly LifecycleEvent[]> = {
@@ -1327,5 +1328,62 @@ describe("nextActions: setup", () => {
 
         // then
         expect(actions.some(action => action.kind === "setup" && action.ticket === 12)).toBe(false)
+    })
+})
+
+describe("repairFor", () => {
+    it.each([
+        ["a ticket the log has never mentioned", [], undefined],
+        ["a step that went green", cut(10), undefined],
+        ["an implementer a killed run left running", [event(10, "implement", "running")], "implement"],
+        ["a merge a killed run left running", [event(10, "merge", "running")], "merge"],
+        ["a setup a killed run left running", [event(10, "setup", "running")], undefined],
+        ["a revert a killed run left running", [...red(10), event(10, "revert", "running")], undefined],
+        [
+            "a prepare a killed run left running, which is about what it was sent to",
+            [event(10, "implement", "running"), event(10, "implement", "failed"), event(10, "prepare", "running")],
+            "implement",
+        ],
+        ["a conflicted rebase, which is a move rather than a break", collided(10), undefined],
+        [
+            "a failed implementer with an attempt left",
+            [event(10, "implement", "running"), event(10, "implement", "failed")],
+            "implement",
+        ],
+        ["a failed implementer that spent its budget", failed(10), undefined],
+        [
+            "a failed rebase with a trip left",
+            [event(10, "implement", "ok"), event(10, "rebase", "running"), event(10, "rebase", "failed")],
+            "rebase",
+        ],
+        [
+            "a failed resolve, which spends the rebase's budget",
+            [...collided(10), event(10, "resolve", "running"), event(10, "resolve", "failed")],
+            "resolve",
+        ],
+        [
+            "a failed rebase that spent the ticket's trips through the merge track",
+            [
+                event(10, "implement", "ok"),
+                event(10, "rebase", "running"),
+                event(10, "rebase", "failed"),
+                event(10, "prepare", "running"),
+                event(10, "prepare", "ok"),
+                event(10, "rebase", "running"),
+                event(10, "rebase", "failed"),
+            ],
+            undefined,
+        ],
+        ["a failed setup, which is recut rather than repaired", [event(10, "setup", "failed")], undefined],
+        ["a failed gate, which the gate-red sequence owns", red(10), undefined],
+    ] as const)("should read the repair a prepare pass would give %s", (_name, events, expected) => {
+        // given
+        const log = events
+
+        // when
+        const repair = repairFor(log, 10)
+
+        // then
+        expect(repair).toBe(expected)
     })
 })

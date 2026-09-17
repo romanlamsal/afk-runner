@@ -60,42 +60,17 @@ describe("createFileRunRecordStore", () => {
         expect(await sh(root, "diff", "--cached", "--name-only")).toBe("")
     })
 
-    it("should report no event log for a spec that has not run", async () => {
-        // given
-        const root = await repository()
-        await records.create(root, 4)
-
-        // when
-        const has = await records.hasEventLog(root, 4)
-
-        // then
-        expect(has).toBe(false)
-    })
-
-    it("should report the event log a run left behind", async () => {
-        // given
-        const root = await repository()
-        await records.create(root, 4)
-        await writeFile(join(root, ".afk/4/events.jsonl"), '{"step":"implement"}\n', "utf8")
-
-        // when
-        const has = await records.hasEventLog(root, 4)
-
-        // then
-        expect(has).toBe(true)
-    })
-
     it("should take the run directory away whole, transcripts and event log with it", async () => {
-        // given
+        // given — a log holding only a plan goes with it, being a record of the run (ADR-0028)
         const root = await repository()
         await records.create(root, 4)
-        await writeFile(join(root, ".afk/4/events.jsonl"), '{"step":"implement"}\n', "utf8")
+        await writeFile(join(root, ".afk/4/events.jsonl"), '{"step":"plan","outcome":"ok"}\n', "utf8")
 
         // when
         await records.remove(root, 4)
 
         // then
-        expect(await records.hasEventLog(root, 4)).toBe(false)
+        await expect(readFile(join(root, ".afk/4/events.jsonl"), "utf8")).rejects.toThrow()
     })
 
     it("should leave another spec's run directory where it is", async () => {
