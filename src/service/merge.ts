@@ -171,6 +171,12 @@ export const createMergeService =
             return land()
         }
 
+        // A rebase git stopped part-way, written down as what git distinguished rather than as a
+        // failure (ADR-0025). Nothing routes on it yet — the resolver is called from inside this
+        // action, below — but a run killed here leaves a log that says a conflict is what it was
+        // killed at, and the reader of the log can see which tickets needed a resolver.
+        await record("rebase", "conflicted")
+
         const transcript = transcriptPath(spec, `t${ticket}-resolve-${attempt}`, now())
 
         const attempted = await attemptWithAgent(

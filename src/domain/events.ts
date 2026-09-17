@@ -33,7 +33,17 @@ export type BrokenStep = (typeof BROKEN_STEPS)[number]
 
 export const repairableStep = (step: Step): step is BrokenStep => BROKEN_STEPS.some(broken => broken === step)
 
-export const OUTCOMES = ["running", "ok", "failed", "skipped"] as const
+/**
+ * Closed, and it grows only by a deliberate act. The test a member must pass: an outcome names
+ * **what the tool distinguished**, never **what afk ascribed** (ADR-0025).
+ *
+ * `conflicted` passes it — git stops a rebase part-way and says so, and the git port has carried
+ * the distinction since before the log did. Only a rebase produces it: a squash cannot conflict,
+ * because the ticket was rebased onto that tip and the merge track is serial (ADR-0006), and a
+ * revert that conflicts halts the run rather than becoming a state (ADR-0009). A failure's *reason*
+ * is still free text in `detail`, which nothing branches on (ADR-0011).
+ */
+export const OUTCOMES = ["running", "ok", "failed", "skipped", "conflicted"] as const
 
 export type Outcome = (typeof OUTCOMES)[number]
 

@@ -118,7 +118,11 @@ export const nextActions = (
 
         // A step nothing ended: a killed run, not a ticket that failed. The attempt was never
         // answered, so the budget — which exists to stop a *failure* repeating — does not apply.
-        if (last.outcome === "running") {
+        //
+        // A conflicted rebase is one of those: git stopped it part-way and the run that was going
+        // to hand it to a resolver is gone, so the pass is instructed by the rebase exactly as it
+        // was when the same kill left a `rebase: running` behind (ADR-0025).
+        if (last.outcome === "running" || last.outcome === "conflicted") {
             return repairableStep(broke) ? broke : undefined
         }
         if (last.outcome !== "failed") {

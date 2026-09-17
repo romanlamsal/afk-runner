@@ -443,3 +443,35 @@ describe("a run-level event", () => {
         expect(repairable).toBe(false)
     })
 })
+
+/**
+ * The one outcome that is neither an end nor a step still going: git stopped the rebase part-way
+ * and said so, which is a fact about the tool rather than about how afk feels about it (ADR-0025).
+ */
+describe("a conflicted rebase", () => {
+    it("should be a line the log reads back", () => {
+        // given
+        const raw = { ticket: 10, step: "rebase", outcome: "conflicted", at: "2026-09-15T11:18:38.314Z" }
+
+        // when
+        const read = readEvent(raw)
+
+        // then
+        expect(read).toEqual(raw)
+    })
+
+    it.each([
+        ["settled", settled],
+        ["running", running],
+        ["verified", verified],
+    ] as const)("should leave the ticket not %s", (_name, derivation) => {
+        // given
+        const events = [event(10, "implement", "ok"), event(10, "rebase", "running"), event(10, "rebase", "conflicted")]
+
+        // when
+        const holds = derivation(events, 10)
+
+        // then
+        expect(holds).toBe(false)
+    })
+})

@@ -641,9 +641,11 @@ describe("a run's merge track", () => {
         // then — one prepare pass and one more trip through the merge track, then it is over
         expect(settled(events.appended)).toEqual([
             "#11 implement ok",
+            "#11 rebase conflicted",
             "#11 resolve failed",
             "#11 rebase failed",
             "#11 prepare ok",
+            "#11 rebase conflicted",
             "#11 resolve failed",
             "#11 rebase failed",
             "#12 implement skipped",

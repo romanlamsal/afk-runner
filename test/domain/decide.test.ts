@@ -486,6 +486,42 @@ describe("nextActions: a step whose process is gone", () => {
         expect(actions).toEqual([])
     })
 
+    it("should prepare a ticket a killed run left at a conflicted rebase, instructed by the rebase", () => {
+        // given — git stopped the rebase part-way and the run that was going to resolve it is gone
+        const tickets = [ticket(10)]
+        const events = [event(10, "implement", "ok"), event(10, "rebase", "running"), event(10, "rebase", "conflicted")]
+
+        // when
+        const actions = decide(tickets, events)
+
+        // then
+        expect(actions).toEqual([preparing(10, "rebase")])
+    })
+
+    it("should leave a conflicted rebase alone while the merge action that will resolve it is live", () => {
+        // given — the same log, and the live action set that tells a stopped run from a running one
+        const tickets = [ticket(10)]
+        const events = [event(10, "implement", "ok"), event(10, "rebase", "running"), event(10, "rebase", "conflicted")]
+
+        // when
+        const actions = decide(tickets, events, { inFlight: [merging(10)] })
+
+        // then
+        expect(actions).toEqual([])
+    })
+
+    it("should doom nothing over a conflicted rebase, because a conflict is no ticket's end", () => {
+        // given — a killed run's ticket stopped at a conflict, and a dependent of it
+        const tickets = [ticket(10), ticket(11, [10])]
+        const events = [event(10, "implement", "ok"), event(10, "rebase", "running"), event(10, "rebase", "conflicted")]
+
+        // when
+        const actions = decide(tickets, events)
+
+        // then
+        expect(actions).not.toContainEqual({ kind: "skip", ticket: 11 })
+    })
+
     it("should send a prepare pass a killed run left running to the step underneath it", () => {
         // given
         const tickets = [ticket(10)]

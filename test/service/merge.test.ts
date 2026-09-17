@@ -156,6 +156,18 @@ describe("the merge service: a ticket that rebases cleanly", () => {
 describe("the merge service: a ticket that conflicts", () => {
     const colliding: FakeRepository = { ...REPOSITORY, colliding: ["afk/4/t7"] }
 
+    it("should record the conflict git stopped the rebase at, before any resolver is called", async () => {
+        // given — ADR-0025: the log carries what git distinguished, so the reader sees which
+        // tickets needed a resolver
+        const { merge, events } = harness({ repository: colliding })
+
+        // when
+        await merge()
+
+        // then
+        expect(steps(events.appended)[1]).toBe("rebase conflicted")
+    })
+
     it("should run the conflict resolver in the ticket's own worktree, which is where the branch is", async () => {
         // given
         const { merge, agent } = harness({ repository: colliding })
@@ -250,6 +262,7 @@ describe("the merge service: a ticket that conflicts", () => {
         // then
         expect(steps(events.appended)).toEqual([
             "rebase running",
+            "rebase conflicted",
             "resolve running",
             "resolve ok",
             "rebase ok",
@@ -487,6 +500,17 @@ describe("the merge service: a rebase that cannot land", () => {
         expect(git.rebases).toEqual([])
     })
 
+    it("should record a rebase git refused to start as failed rather than as conflicted", async () => {
+        // given — a ticket with no worktree to rebase in, which git will not start a rebase in
+        const { merge, events } = harness({ repository: { ...REPOSITORY, checkouts: { ".afk/4/gate": "afk/4/spec" } } })
+
+        // when
+        await merge()
+
+        // then
+        expect(steps(events.appended)).toEqual(["rebase running", "rebase failed"])
+    })
+
     it("should fail the ticket when the resolver exits non-zero", async () => {
         // given
         const { merge, events } = harness({
@@ -499,7 +523,13 @@ describe("the merge service: a rebase that cannot land", () => {
         await merge()
 
         // then
-        expect(steps(events.appended)).toEqual(["rebase running", "resolve running", "resolve failed", "rebase failed"])
+        expect(steps(events.appended)).toEqual([
+            "rebase running",
+            "rebase conflicted",
+            "resolve running",
+            "resolve failed",
+            "rebase failed",
+        ])
     })
 
     it("should abort the rebase the failed resolver left behind, because the resolver never does", async () => {
