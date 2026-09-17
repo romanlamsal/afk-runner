@@ -8,18 +8,21 @@ import { createSignalInterrupts } from "../../src/infrastructure/interrupts.ts"
  */
 const harness = () => {
     const handlers: Array<() => void> = []
-    const notified: string[] = []
+    const draining: string[] = []
+    const killed: string[] = []
     let kills = 0
     const interrupts = createSignalInterrupts({
         listen: handler => handlers.push(handler),
         kill: () => {
             kills += 1
         },
-        notify: line => notified.push(line),
+        notifyDraining: line => draining.push(line),
+        notifyKilled: line => killed.push(line),
     })
     return {
         interrupts,
-        notified,
+        draining,
+        killed,
         interrupt: (): void => {
             for (const handler of handlers) {
                 handler()
@@ -54,13 +57,38 @@ describe("createSignalInterrupts", () => {
 
     it("should tell the operator that a second interrupt is what kills the run", () => {
         // given
-        const { interrupt, notified } = harness()
+        const { interrupt, draining } = harness()
 
         // when
         interrupt()
 
         // then
-        expect(notified.at(0)).toMatch(/again/)
+        expect(draining.at(0)).toMatch(/again/)
+    })
+
+    // The two notices leave by different doors, because the board owns the terminal while the run
+    // is going and owns nothing at all the moment after the kill (ADR-0029).
+    it("should say nothing about a kill on the first interrupt", () => {
+        // given
+        const { interrupt, killed } = harness()
+
+        // when
+        interrupt()
+
+        // then
+        expect(killed).toEqual([])
+    })
+
+    it("should tell the operator the run is gone through the kill's own route", () => {
+        // given
+        const { interrupt, killed } = harness()
+        interrupt()
+
+        // when
+        interrupt()
+
+        // then
+        expect(killed.at(0)).toMatch(/killed/)
     })
 
     // The first interrupt is the drain, and every one after it is the operator saying they meant

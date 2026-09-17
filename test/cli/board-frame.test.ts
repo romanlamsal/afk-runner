@@ -143,3 +143,43 @@ describe("boardFrame", () => {
         expect(lines).toContain("  #7  setup <implement>  A ti...")
     })
 })
+
+describe("boardFrame: the run's status line", () => {
+    it("should put a notice under both blocks, where no row ever moves for it", () => {
+        // given
+        const view: BoardView = { rows: [row(7, "Implement the slate", "implement", IMPLEMENTING)] }
+
+        // when
+        const lines = boardFrame(view, WIDE, "afk: interrupted")
+
+        // then
+        expect(lines).toEqual([
+            "implement track",
+            "  #7  setup <implement>  Implement the slate",
+            "merge track",
+            "afk: interrupted",
+        ])
+    })
+
+    it("should leave the frame as it was where the run has said nothing", () => {
+        // given
+        const view = VIEW
+
+        // when
+        const lines = boardFrame(view, WIDE)
+
+        // then
+        expect(lines).toHaveLength(VIEW.rows.length + 2)
+    })
+
+    it("should truncate a notice too long for the terminal rather than wrap it", () => {
+        // given
+        const view = VIEW
+
+        // when
+        const lines = boardFrame(view, 20, "afk: interrupted — starting nothing new")
+
+        // then
+        expect(lines.at(-1)).toBe("afk: interrupted ...")
+    })
+})

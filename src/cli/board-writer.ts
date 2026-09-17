@@ -1,4 +1,4 @@
-import type { Board } from "../domain/board.ts"
+import type { Board, BoardView } from "../domain/board.ts"
 import { boardFrame } from "./board-frame.ts"
 
 /**
@@ -22,16 +22,30 @@ const CLEAR_LINE = "[2K"
 
 export const createTerminalBoard = ({ write, columns }: TerminalBoardDeps): Board => {
     let drawn = 0
+    /** The last view, kept so that a notice can be drawn without waiting for the run to move on. */
+    let shown: BoardView | undefined
+    let notice: string | undefined
+
+    const draw = (view: BoardView): void => {
+        try {
+            const lines = boardFrame(view, columns(), notice)
+            const rewound = `${UP}${CLEAR_LINE}`.repeat(drawn)
+            write(`${rewound}${lines.map(line => `${line}\n`).join("")}`)
+            drawn = lines.length
+            shown = view
+        } catch {
+            // A terminal that went away is not a run that failed (ADR-0029).
+        }
+    }
 
     return {
-        show: view => {
-            try {
-                const lines = boardFrame(view, columns())
-                const rewound = `${UP}${CLEAR_LINE}`.repeat(drawn)
-                write(`${rewound}${lines.map(line => `${line}\n`).join("")}`)
-                drawn = lines.length
-            } catch {
-                // A terminal that went away is not a run that failed (ADR-0029).
+        show: draw,
+        notice: line => {
+            notice = line
+            // Redrawn on the spot rather than left for the next pass: a step can run for minutes,
+            // and an operator who sees nothing for their interrupt sends the one that kills.
+            if (shown !== undefined) {
+                draw(shown)
             }
         },
     }
@@ -39,6 +53,7 @@ export const createTerminalBoard = ({ write, columns }: TerminalBoardDeps): Boar
 
 /**
  * No terminal to draw on. A run off one prints exactly what it printed before the board existed,
- * which is what keeps piped output and CI logs readable.
+ * which is what keeps piped output and CI logs readable — the drain notice included, which off a
+ * terminal keeps going to stderr rather than coming through here.
  */
-export const silentBoard: Board = { show: () => undefined }
+export const silentBoard: Board = { show: () => undefined, notice: () => undefined }

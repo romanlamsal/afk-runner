@@ -8,6 +8,10 @@ import { type BoardRow, type BoardView, type StepState, TRACKS, type Track } fro
  * The height is the row count plus one header per track, whatever the view says, so the block never
  * grows or shrinks while somebody is reading it. That is also why a title is truncated rather than
  * wrapped: a wrapped line would break the one property the layout rests on.
+ *
+ * A run status line — the drain notice, and so far nothing else — sits under the blocks, where it
+ * is the one thing that is about the run rather than about a ticket. It is the frame's last line
+ * from the moment there is one, so the rows above it never move.
  */
 
 const HEADINGS: Record<Track, string> = {
@@ -51,11 +55,15 @@ const trail = (row: BoardRow): string =>
 const rowLine = (row: BoardRow, label: number, steps: number, width: number): string =>
     fitted(`  ${`#${row.ticket}`.padEnd(label)}  ${trail(row).padEnd(steps)}  ${row.title}`, width)
 
-export const boardFrame = (view: BoardView, width: number): string[] => {
+/**
+ * @param notice What the run has to say about itself, if anything. It is not part of the view
+ * because it is not derived from the run's state: it arrives from whoever had something to say.
+ */
+export const boardFrame = (view: BoardView, width: number, notice?: string): string[] => {
     // One label column for the whole frame, so that the rows line up across both blocks.
     const label = Math.max(0, ...view.rows.map(row => `#${row.ticket}`.length))
 
-    return TRACKS.flatMap(track => {
+    const blocks = TRACKS.flatMap(track => {
         const rows = view.rows.filter(row => row.track === track)
         // A trail column per block, because the two tracks are different lengths and a column wide
         // enough for the merge track would push every implement title off a narrow terminal.
@@ -63,4 +71,6 @@ export const boardFrame = (view: BoardView, width: number): string[] => {
 
         return [fitted(HEADINGS[track], width), ...rows.map(row => rowLine(row, label, steps, width))]
     })
+
+    return notice === undefined ? blocks : [...blocks, fitted(notice, width)]
 }

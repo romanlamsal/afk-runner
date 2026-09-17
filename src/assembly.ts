@@ -47,6 +47,16 @@ export const assembleCli = (): Cli => {
     const environment = createEnvironmentFiles()
     const events = createFileEventLog()
     const git = createGit()
+    // Selection is TTY detection and there is no flag: the board is simply what a run looks like
+    // when there is a terminal to draw it on (ADR-0029).
+    const board =
+        process.stdout.isTTY === true
+            ? createTerminalBoard({
+                  write: chunk => process.stdout.write(chunk),
+                  columns: () => process.stdout.columns ?? 80,
+              })
+            : silentBoard
+
     // Registered once for the whole process, which is the point: no step traps the signal, and the
     // loop reads a flag (ADR-0016). A termination request is the same request, so it drains too.
     const interrupts = createSignalInterrupts({
@@ -58,7 +68,11 @@ export const assembleCli = (): Cli => {
             killEveryChild()
             process.exit(EXIT.interrupted)
         },
-        notify: printError,
+        // The drain notice goes through whoever owns the terminal. On one that is the board, which
+        // draws it as a status line instead of letting it land in the middle of a frame; off one
+        // the board draws nothing and stderr is still where it belongs (ADR-0029).
+        notifyDraining: process.stdout.isTTY === true ? board.notice : printError,
+        notifyKilled: printError,
     })
     const now = (): Date => new Date()
     // Both writes a whole run makes to GitHub go through it: the claim, and the spec pull request
@@ -83,16 +97,6 @@ export const assembleCli = (): Cli => {
     // Asked twice, for different reasons: by the gate, about a ticket, and by the revert, about the
     // branch that ticket was taken back off (ADR-0009).
     const prove = createProveBranch({ commands })
-
-    // Selection is TTY detection and there is no flag: the board is simply what a run looks like
-    // when there is a terminal to draw it on (ADR-0029).
-    const board =
-        process.stdout.isTTY === true
-            ? createTerminalBoard({
-                  write: chunk => process.stdout.write(chunk),
-                  columns: () => process.stdout.columns ?? 80,
-              })
-            : silentBoard
 
     const drive = createDriveService({
         board,

@@ -73,11 +73,23 @@ export type BoardView = {
  * Where a view is shown. A driven port: the domain says what it needs, never how — a terminal
  * redraws a block, and off one there is nothing to draw on.
  *
- * `show` is synchronous, returns void and never throws. A terminal write must not be able to fail a
- * run, so an adapter that cannot write swallows it rather than raising through the driver's loop.
+ * Both calls are synchronous, return void and never throw. A terminal write must not be able to
+ * fail a run, so an adapter that cannot write swallows it rather than raising through the driver's
+ * loop.
  */
 export type Board = {
     show: (view: BoardView) => void
+    /**
+     * A line about the run itself rather than about a ticket — the drain notice, and so far nothing
+     * else. The board owns the terminal for the drive's duration, so whatever has something to say
+     * to the operator while a run is going says it through here: two writers to one terminal is not
+     * a design choice (ADR-0029).
+     *
+     * It arrives out of the loop's turn — a signal handler is the caller — so an adapter that draws
+     * shows it at once rather than waiting for the next frame. Off a terminal there is no frame to
+     * tear and the notice keeps its own stream.
+     */
+    notice: (line: string) => void
 }
 
 /**

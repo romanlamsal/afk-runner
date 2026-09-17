@@ -258,6 +258,23 @@ describe("createDriveService: what the board is shown", () => {
         expect(board.shown[0]?.rows.map(row => row.ticket)).toEqual([7, 8])
     })
 
+    it("should keep drawing the board while the run drains", async () => {
+        // given: the frame count at the moment the operator interrupted, mid-implementer
+        let atInterrupt = 0
+        const run = harness({
+            duringImplement: interrupt => {
+                interrupt()
+                atInterrupt = run.board.shown.length
+            },
+        })
+
+        // when
+        await run.drive(RUN, { maxParallel: 1 })
+
+        // then
+        expect(run.board.shown.length).toBeGreaterThan(atInterrupt)
+    })
+
     it("should show what the run came to as its last frame", async () => {
         // given: a run that gets both tickets through, so both end on the merge track
         const { drive, board } = harness()
