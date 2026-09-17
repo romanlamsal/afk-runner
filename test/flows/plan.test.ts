@@ -8,6 +8,7 @@ import { createStartService } from "../../src/service/start.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
 import { createStubDrive } from "../fakes/drive.ts"
 import { createFakeEnvironment } from "../fakes/environment.ts"
+import { createFakeEventLog } from "../fakes/event-log.ts"
 import { createStubFinish } from "../fakes/finish.ts"
 import { createStubFresh } from "../fakes/fresh.ts"
 import { createFakeGit } from "../fakes/git.ts"
@@ -40,15 +41,18 @@ const harness = (reply: { structuredOutput: unknown } = { structuredOutput: MANI
     const git = createFakeGit()
     const operator = createFakeOperator()
     const records = createFakeRunRecords()
+    const events = createFakeEventLog()
     const printed: string[] = []
     const errors: string[] = []
     const start = createStartService({
+        events: events.log,
         cwd: "/repo",
         environment: environment.copy,
         git: git.git,
         manifests: manifests.store,
         operator: operator.operator,
         plan: createPlanService({
+            events: events.log,
             agent: agent.run,
             manifests: manifests.store,
             now: () => new Date("2026-09-15T11:18:38.314Z"),

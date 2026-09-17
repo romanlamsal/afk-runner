@@ -129,13 +129,14 @@ between them. A status is not stored and is not a word of its own in the log —
 the last lifecycle event, which is a step and an outcome together.
 
 **Step**:
-The closed vocabulary recovery keys on: `setup`, `implement`, `prepare`, `rebase`, `resolve`,
-`merge`, `gate`, `fix`, `revert`, `pull-request`. A phase that can be killed on its own, or that
-carries a budget of its own, is a step of its own (ADR-0022). Each step is also an action the
+The closed vocabulary recovery keys on: `plan`, `setup`, `implement`, `prepare`, `rebase`,
+`resolve`, `merge`, `gate`, `fix`, `revert`, `pull-request`. A phase that can be killed on its own,
+or that carries a budget of its own, is a step of its own (ADR-0022). Each step is also an action the
 decision function can give: the action set is the step set, one for one (ADR-0026).
 
-All but the last are moves in one ticket's machine. `pull-request` is about the **run** — the way
-`finish` and `skip` are already run-level actions — and its events name no ticket (ADR-0028).
+`plan` and `pull-request` are about the **run** — the way `finish` and `skip` are already run-level
+actions — and their events name no ticket. Everything between them is a move in one ticket's
+machine (ADR-0028).
 _Avoid_: phase, stage, state
 
 **Setup step**:
@@ -150,6 +151,12 @@ One pass at one step of one ticket, carrying its own session where an agent runs
 the step runs commands. A ticket's second implementer attempt is a different attempt from its first.
 Nothing an attempt does happens before its start event.
 _Avoid_: try, run, invocation
+
+**Started**:
+A spec that has a run: its log says a ticket was attempted. Not that the log *exists* — planning
+appends to it before any ticket is touched — which is what keeps `--plan-only` followed by
+`--implement-only` from refusing itself (ADR-0028).
+_Avoid_: has a run, in progress, existing run
 
 **Event log**:
 `events.jsonl` in the run directory — the append-only record of every lifecycle event, one per line.

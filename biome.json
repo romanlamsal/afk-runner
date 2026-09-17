@@ -5,6 +5,7 @@
     "ignoreUnknown": false,
     "includes": [
       "**",
+      "!**/.afk/**/*",
       "!**/.claude/**/*",
       "!**/node_modules/**/*",
       "!**/build/**/*",

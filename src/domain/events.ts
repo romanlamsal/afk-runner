@@ -19,10 +19,12 @@ import { usageSchema } from "./agent.ts"
  * can be killed on its own and because it carries a budget of its own, which is the whole test a
  * member of this enum has to pass (ADR-0022).
  *
- * `pull-request` is the one step that is about the **run** rather than about one ticket's machine,
- * the way `finish` is already that action (ADR-0026). Its events carry no ticket (ADR-0028).
+ * `plan` and `pull-request` are the steps about the **run** rather than about one ticket's machine,
+ * the way `finish` and `skip` are already those actions (ADR-0026). Their events carry no ticket
+ * (ADR-0028).
  */
 export const STEPS = [
+    "plan",
     "setup",
     "implement",
     "prepare",
@@ -137,6 +139,15 @@ export type EventLog = {
     read: (root: string, spec: number) => Promise<readonly LifecycleEvent[]>
     append: (root: string, spec: number, event: LifecycleEvent) => Promise<void>
 }
+
+/**
+ * Whether this spec has a run, which is what forbids a mode from starting over one (ADR-0014).
+ *
+ * A ticket having been attempted, rather than the log file being there: `plan` writes a run-level
+ * event before any ticket is touched, so file existence would make `--plan-only` followed by
+ * `--implement-only` refuse itself (ADR-0028).
+ */
+export const started = (events: readonly LifecycleEvent[]): boolean => events.some(event => event.ticket !== undefined)
 
 /** A ticket's status is its last event, and there is nothing else to it (ADR-0011). */
 export const statusOf = (events: readonly LifecycleEvent[], ticket: number): LifecycleEvent | undefined =>

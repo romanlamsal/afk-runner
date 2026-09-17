@@ -92,10 +92,11 @@ const fixed = (number: number, outcome: Outcome = "ok"): readonly LifecycleEvent
 ]
 
 /**
- * ADR-0026: the action set is the step set. `pull-request` is the one step that is about the **run**
- * rather than about one ticket's machine, and `finish` is the action that performs it (ADR-0028).
+ * ADR-0026: the action set is the step set. `plan` and `pull-request` are the steps about the **run**
+ * rather than about one ticket's machine, and `finish` is the action that performs the latter
+ * (ADR-0028).
  */
-const TICKET_STEPS = STEPS.filter(step => step !== "pull-request")
+const TICKET_STEPS = STEPS.filter(step => step !== "plan" && step !== "pull-request")
 
 /** The state each step of the machine is taken out of, as a log. */
 const AT: Record<(typeof TICKET_STEPS)[number], readonly LifecycleEvent[]> = {

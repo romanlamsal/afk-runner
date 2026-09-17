@@ -45,19 +45,42 @@ opens the pull request anyway, prose or none — the log records attempts, not v
   sentinel is a value every reader must know to exclude, where an absent field excludes itself.
 - **A second file for run-level records.** Rejected. Two logs for one run is two orderings of one
   sequence, and the append-only single file is what makes a torn write cost one line (ADR-0011).
-- **Add `plan` in the same move.** Deferred, not refused. Planning happens before a run exists —
-  `--plan-only` writes a manifest and exits — so a `plan` event would live in a log that describes a
-  run that may never start. It is a real gap and the planner's consumption is still unaccounted for;
-  it wants its own decision about what a log means before a run.
+- **Add `plan` in the same move.** Deferred at first, then taken — see *`plan` follows, and takes a
+  predicate with it* below. Planning happens before a run exists, so the question was what a log
+  means before a run; the answer turned out to be a one-line predicate rather than a new rule.
 
 ## Consequences
 
-- **The event log is no longer purely per-ticket.** A reader listing the whole log sees one entry
-  that names no ticket, and any formatter that prints `#${event.ticket}` must say so — the flow
-  tests' did, and now renders run-level events without the prefix.
-- Five of the six agent roles now record what they consumed. The planner is the sixth and is not
-  covered; ADR-0027's table is dialled from an incomplete picture until it is.
+- **The event log is no longer purely per-ticket.** A reader listing the whole log sees entries that
+  name no ticket, and any formatter that prints `#${event.ticket}` must say so — the flow tests' did,
+  and now renders run-level events without the prefix.
+- All six agent roles now record what they consumed, so ADR-0027's table is dialled from the whole
+  picture rather than part of it.
 - `--resume` can tell a wedged writer from one that never started, which it could not before.
 - The `pull-request` step has no budget and no retry. Nothing reads its attempts, because the run
   ends either way; if that ever changes, a budget is counted off its start events like any other
   step's (ADR-0022).
+
+## `plan` follows, and takes a predicate with it
+
+`plan` joined `STEPS` straight after, on the same terms: a run-level step whose events name no
+ticket. What made it worth its own look was one line in `run-records.ts`, where `hasEventLog` asked
+whether `events.jsonl` was on disk, and `refusalToStart` read that as **this spec has a run**.
+
+Planning appends before any ticket is touched, so a `plan` event creates the file — and
+`--plan-only` followed by `--implement-only`, the pairing the README documents for a run with no
+TTY, would have started refusing itself with *"spec #N has a run already"*.
+
+**A run is a ticket having been attempted.** `started(events)` is that predicate — any event naming
+a ticket — and it replaces the file-existence check. `Records.events` became `Records.started`,
+because the field no longer means what its old name said. The store stopped answering the question
+at all: the domain reads the log and applies its own rule, which is where the rule belonged.
+
+That file-existence check was already a proxy rather than the fact, and `plan` is only what made it
+stop being a good one. A fake had been hiding it too: `createFakeRunRecords` carried its own
+`hasEvents` flag beside the event-log fake, so tests could seed a log full of ticket events while
+the store insisted there was no run — a state the real system cannot be in. Seven flow tests were
+resting on it, and now pass `--resume`, which is what the CLI always required of them.
+
+`--force-fresh` deletes a log holding only a plan, along with the rest of the run directory. A plan
+event is a record of the run, not of the manifest, and the manifest survives on its own (ADR-0014).

@@ -15,6 +15,7 @@ import {
     settled,
     setUp,
     skipped,
+    started,
     statusOf,
     unattempted,
     verified,
@@ -548,5 +549,48 @@ describe("a conflicted rebase", () => {
 
         // then
         expect(holds).toBe(false)
+    })
+})
+
+/**
+ * What makes a run an existing one. Not that the log file is there — planning writes a run-level
+ * event before any ticket is touched, and `--plan-only` then `--implement-only` must not refuse
+ * itself (ADR-0028).
+ */
+describe("started", () => {
+    it("should be false for a log that holds only a plan", () => {
+        // given
+        const events = [{ step: "plan" as const, outcome: "ok" as const, at: "2026-09-15T11:18:38.314Z" }]
+
+        // when
+        const began = started(events)
+
+        // then
+        expect(began).toBe(false)
+    })
+
+    it("should be true once a ticket has been attempted", () => {
+        // given
+        const events = [
+            { step: "plan" as const, outcome: "ok" as const, at: "2026-09-15T11:18:38.314Z" },
+            event(10, "implement", "running"),
+        ]
+
+        // when
+        const began = started(events)
+
+        // then
+        expect(began).toBe(true)
+    })
+
+    it("should be false for an empty log", () => {
+        // given
+        const events: LifecycleEvent[] = []
+
+        // when
+        const began = started(events)
+
+        // then
+        expect(began).toBe(false)
     })
 })

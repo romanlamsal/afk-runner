@@ -4,8 +4,11 @@ import type { Mode } from "./mode.ts"
 export type Records = {
     /** Whether this spec has a manifest. */
     manifest: boolean
-    /** Whether this spec has an event log, which is what makes a run an existing one. */
-    events: boolean
+    /**
+     * Whether a run has started, which is a ticket having been attempted rather than the event log
+     * being on disk — planning writes an event before any ticket is touched (ADR-0028).
+     */
+    started: boolean
 }
 
 /** What taking a run's records away came to. Nothing afk asks for goes unchecked (ADR-0005). */
@@ -28,7 +31,6 @@ export type RunRecordStore = {
      * reports rather than throws.
      */
     remove: (root: string, spec: number) => Promise<RemovalResult>
-    hasEventLog: (root: string, spec: number) => Promise<boolean>
 }
 
 /**
@@ -58,13 +60,13 @@ export const refusalToStart = ({
         if (!records.manifest) {
             return `spec #${spec} has no manifest to implement: plan it first, or drop --implement-only`
         }
-        if (records.events && !consented) {
+        if (records.started && !consented) {
             return `spec #${spec} has a run already: pass --resume to continue it, or --force-fresh to start over`
         }
         return undefined
     }
 
-    if (records.events) {
+    if (records.started) {
         return (
             `spec #${spec} has a run already: pass --implement-only --resume to continue it, ` +
             "or --force-fresh to start over"

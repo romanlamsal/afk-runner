@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { Mode } from "../../src/domain/mode.ts"
 import { type Records, refusalToStart } from "../../src/domain/records.ts"
 
-const records = (overrides: Partial<Records> = {}): Records => ({ manifest: false, events: false, ...overrides })
+const records = (overrides: Partial<Records> = {}): Records => ({ manifest: false, started: false, ...overrides })
 
 const refusal = (mode: Mode, present: Partial<Records> = {}, consented = false): string | undefined =>
     refusalToStart({ spec: 4, mode, records: records(present), consented })
@@ -38,7 +38,7 @@ describe("refusalToStart", () => {
 
     it("should refuse a bare invocation when a run already exists, naming the consent it needs", () => {
         // given
-        const underWay = { manifest: true, events: true }
+        const underWay = { manifest: true, started: true }
 
         // when
         const refused = refusal("plan-and-implement", underWay)
@@ -49,7 +49,7 @@ describe("refusalToStart", () => {
 
     it("should let --plan-only replace a manifest a run is already using", () => {
         // given
-        const underWay = { manifest: true, events: true }
+        const underWay = { manifest: true, started: true }
 
         // when
         const refused = refusal("plan-only", underWay)
@@ -71,7 +71,7 @@ describe("refusalToStart", () => {
 
     it("should refuse --implement-only against an existing run without consent", () => {
         // given
-        const underWay = { manifest: true, events: true }
+        const underWay = { manifest: true, started: true }
 
         // when
         const refused = refusal("implement-only", underWay)
@@ -82,7 +82,7 @@ describe("refusalToStart", () => {
 
     it("should let --implement-only continue an existing run once consent was given", () => {
         // given
-        const underWay = { manifest: true, events: true }
+        const underWay = { manifest: true, started: true }
 
         // when
         const refused = refusal("implement-only", underWay, true)

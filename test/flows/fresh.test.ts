@@ -9,6 +9,7 @@ import { createStartService } from "../../src/service/start.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
 import { createStubDrive } from "../fakes/drive.ts"
 import { createFakeEnvironment } from "../fakes/environment.ts"
+import { createFakeEventLog } from "../fakes/event-log.ts"
 import { createStubFinish } from "../fakes/finish.ts"
 import { createFakeGit, type FakeRepository } from "../fakes/git.ts"
 import { createFakeManifestStore } from "../fakes/manifest-store.ts"
@@ -45,7 +46,11 @@ const harness = () => {
     const git = createFakeGit(WRECKED)
     const manifests = createFakeManifestStore()
     const operator = createFakeOperator()
-    const records = createFakeRunRecords({ events: true })
+    // A run exists because a ticket was attempted, not because the log file is there (ADR-0028).
+    const events = createFakeEventLog([
+        { ticket: 10, step: "implement", outcome: "running", at: "2026-09-15T11:18:38.314Z" },
+    ])
+    const records = createFakeRunRecords({ onRemove: () => events.appended.splice(0) })
     const tracker = createFakeTracker({ openFor: ["afk/4/spec"] })
     const printed: string[] = []
     const errors: string[] = []
@@ -61,12 +66,18 @@ const harness = () => {
                 tracker: tracker.tracker,
             }),
             start: createStartService({
+                events: events.log,
                 cwd: "/repo",
                 environment: environment.copy,
                 git: git.git,
                 manifests: manifests.store,
                 operator: operator.operator,
-                plan: createPlanService({ agent: agent.run, manifests: manifests.store, now: () => new Date() }),
+                plan: createPlanService({
+                    agent: agent.run,
+                    events: events.log,
+                    manifests: manifests.store,
+                    now: () => new Date(),
+                }),
                 records: records.records,
             }),
             drive: createStubDrive(),

@@ -71,10 +71,11 @@ export const assembleCli = (): Cli => {
     const start = createStartService({
         cwd,
         environment,
+        events,
         git,
         manifests,
         operator: createTerminalOperator({ input: process.stdin, output: process.stdout, print }),
-        plan: createPlanService({ agent, manifests, now }),
+        plan: createPlanService({ agent, events, manifests, now }),
         records,
     })
 

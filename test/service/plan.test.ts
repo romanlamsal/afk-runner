@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest"
 import type { AgentResult } from "../../src/domain/agent.ts"
+import { started } from "../../src/domain/events.ts"
 import { type Manifest, manifestJsonSchema } from "../../src/domain/manifest.ts"
 import { PROFILES } from "../../src/domain/profiles.ts"
 import { createPlanService, type PlanSpec } from "../../src/service/plan.ts"
 import { createFakeAgent, type FakeAgent } from "../fakes/agent.ts"
+import { createFakeEventLog } from "../fakes/event-log.ts"
 import { createFakeManifestStore, type FakeManifestStore } from "../fakes/manifest-store.ts"
 
 const MANIFEST: Manifest = {
@@ -20,15 +22,22 @@ const AT = new Date("2026-09-15T11:18:38.314Z")
 
 const ROOT = "/repo"
 
-type Harness = { plan: PlanSpec; agent: FakeAgent; manifests: FakeManifestStore }
+type Harness = {
+    plan: PlanSpec
+    agent: FakeAgent
+    manifests: FakeManifestStore
+    events: ReturnType<typeof createFakeEventLog>
+}
 
 const harness = (reply: Partial<AgentResult> = { structuredOutput: MANIFEST }): Harness => {
     const agent = createFakeAgent(reply)
     const manifests = createFakeManifestStore()
+    const events = createFakeEventLog()
     return {
         agent,
         manifests,
-        plan: createPlanService({ agent: agent.run, manifests: manifests.store, now: () => AT }),
+        events,
+        plan: createPlanService({ agent: agent.run, events: events.log, manifests: manifests.store, now: () => AT }),
     }
 }
 
@@ -141,5 +150,82 @@ describe("createPlanService", () => {
 
         // then
         expect(agent.invocations.at(0)?.profile).toBe(PROFILES.planner)
+    })
+})
+
+/**
+ * The `plan` step. A run-level one, so its events name no ticket — and a log holding only these is
+ * not yet a run, which is what keeps `--plan-only` then `--implement-only` from refusing itself
+ * (ADR-0028).
+ */
+describe("createPlanService: the plan step", () => {
+    it("should write one start event and one end event", async () => {
+        // given
+        const { plan, events } = harness()
+
+        // when
+        await plan(ROOT, 4)
+
+        // then
+        expect(events.appended.map(event => `${event.step} ${event.outcome}`)).toEqual(["plan running", "plan ok"])
+    })
+
+    it("should name no ticket, the step being about the run", async () => {
+        // given
+        const { plan, events } = harness()
+
+        // when
+        await plan(ROOT, 4)
+
+        // then
+        expect(events.appended.every(event => event.ticket === undefined)).toBe(true)
+    })
+
+    it("should leave a log that is not yet a run", async () => {
+        // given
+        const { plan, events } = harness()
+
+        // when
+        await plan(ROOT, 4)
+
+        // then
+        expect(started(events.appended)).toBe(false)
+    })
+
+    it("should record what the planner consumed on the end event", async () => {
+        // given
+        const usage = { inputTokens: 434, outputTokens: 33, cacheReadInputTokens: 1500, cacheCreationInputTokens: 121 }
+        const { plan, events } = harness({ structuredOutput: MANIFEST, usage })
+
+        // when
+        await plan(ROOT, 4)
+
+        // then
+        expect(events.appended.at(-1)?.usage).toEqual(usage)
+    })
+
+    it("should record the planner's failure, and why", async () => {
+        // given
+        const { plan, events } = harness({ outcome: "failed", detail: "the session died" })
+
+        // when
+        await plan(ROOT, 4)
+
+        // then
+        expect(events.appended.at(-1)).toMatchObject({
+            outcome: "failed",
+            detail: "the planner failed: the session died",
+        })
+    })
+
+    it("should record a failure for output no manifest could be read out of", async () => {
+        // given
+        const { plan, events } = harness({ structuredOutput: { nonsense: true } })
+
+        // when
+        await plan(ROOT, 4)
+
+        // then
+        expect(events.appended.at(-1)?.outcome).toBe("failed")
     })
 })

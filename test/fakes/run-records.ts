@@ -9,17 +9,18 @@ export type FakeRunRecords = {
 }
 
 export const createFakeRunRecords = ({
-    events = false,
     unremovable,
+    onRemove,
 }: {
-    events?: boolean
     unremovable?: string | undefined
+    /**
+     * Called when the run directory goes. The event log lives in that directory, so a test whose
+     * log kept saying "there is a run" afterwards would make starting over untestable.
+     */
+    onRemove?: () => void
 } = {}): FakeRunRecords => {
     const created: { root: string; spec: number }[] = []
     const removed: { root: string; spec: number }[] = []
-    // The event log lives in the run directory, so removing the directory takes it with it. A fake
-    // that kept answering "there is a run" afterwards would make starting over untestable.
-    let hasEvents = events
     return {
         created,
         removed,
@@ -32,10 +33,9 @@ export const createFakeRunRecords = ({
                     return { ok: false, reason: unremovable }
                 }
                 removed.push({ root, spec })
-                hasEvents = false
+                onRemove?.()
                 return { ok: true }
             },
-            hasEventLog: async () => hasEvents,
         },
     }
 }

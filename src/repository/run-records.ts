@@ -1,6 +1,6 @@
-import { access, mkdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { eventLogPath, runDirectory, runIgnorePath } from "../domain/paths.ts"
+import { runDirectory, runIgnorePath } from "../domain/paths.ts"
 import type { RunRecordStore } from "../domain/records.ts"
 
 /**
@@ -9,12 +9,6 @@ import type { RunRecordStore } from "../domain/records.ts"
  * transcript, a worktree, a copied `.env` — can be staged by accident (ADR-0013).
  */
 const IGNORE_EVERYTHING = ["# afk's run directory is machine-local, and ignores itself.", "*", ""].join("\n")
-
-const exists = (path: string): Promise<boolean> =>
-    access(path).then(
-        () => true,
-        () => false,
-    )
 
 /** The run directory on disk. One spec's manifest, event log, worktrees and transcripts live in it. */
 export const createFileRunRecordStore = (): RunRecordStore => ({
@@ -37,5 +31,4 @@ export const createFileRunRecordStore = (): RunRecordStore => ({
             return { ok: false, reason: error instanceof Error ? error.message : String(error) }
         }
     },
-    hasEventLog: (root, spec) => exists(join(root, eventLogPath(spec))),
 })

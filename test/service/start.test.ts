@@ -5,6 +5,7 @@ import type { Mode } from "../../src/domain/mode.ts"
 import type { Commands } from "../../src/domain/operator.ts"
 import { createStartService, type StartResult } from "../../src/service/start.ts"
 import { createFakeEnvironment } from "../fakes/environment.ts"
+import { createFakeEventLog } from "../fakes/event-log.ts"
 import { createFakeGit, type FakeGit } from "../fakes/git.ts"
 import { createFakeManifestStore, type FakeManifestStore } from "../fakes/manifest-store.ts"
 import { createFakeOperator, type FakeOperator } from "../fakes/operator.ts"
@@ -24,7 +25,8 @@ type Setup = {
     repository?: Parameters<typeof createFakeGit>[0]
     /** The manifest already on disk. */
     stored?: Manifest
-    events?: boolean
+    /** Whether a ticket has been attempted, which is what makes a run an existing one (ADR-0028). */
+    started?: boolean
     /** What the operator did with the confirmation screen. */
     answer?: Commands
     aborts?: boolean
@@ -49,12 +51,18 @@ const harness = (setup: Setup = {}): Harness => {
         setup.stored === undefined ? undefined : { ok: true, manifest: setup.stored },
     )
     const operator = createFakeOperator(setup.answer, setup.aborts ?? false)
-    const records = createFakeRunRecords({ events: setup.events ?? false })
+    const records = createFakeRunRecords()
+    const events = createFakeEventLog(
+        setup.started === true
+            ? [{ ticket: 10, step: "implement", outcome: "running", at: "2026-09-15T11:18:38.314Z" }]
+            : [],
+    )
     const planned: { root: string; spec: number }[] = []
 
     const service = createStartService({
         cwd: "/repo/packages/thing",
         environment: environment.copy,
+        events: events.log,
         git: git.git,
         manifests: manifests.store,
         operator: operator.operator,
@@ -101,7 +109,7 @@ describe("createStartService", () => {
 
     it("should refuse a bare invocation when a run already exists", async () => {
         // given
-        const { start } = harness({ events: true, stored: MANIFEST })
+        const { start } = harness({ started: true, stored: MANIFEST })
 
         // when
         const result = await start()
@@ -112,7 +120,7 @@ describe("createStartService", () => {
 
     it("should plan nothing when it refused", async () => {
         // given
-        const { start, planned } = harness({ events: true, stored: MANIFEST })
+        const { start, planned } = harness({ started: true, stored: MANIFEST })
 
         // when
         await start()

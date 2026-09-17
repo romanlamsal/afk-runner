@@ -10,6 +10,7 @@ import { createStartService } from "../../src/service/start.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
 import { createStubDrive } from "../fakes/drive.ts"
 import { createFakeEnvironment } from "../fakes/environment.ts"
+import { createFakeEventLog } from "../fakes/event-log.ts"
 import { createStubFinish } from "../fakes/finish.ts"
 import { createStubFresh } from "../fakes/fresh.ts"
 import { createFakeGit } from "../fakes/git.ts"
@@ -35,6 +36,7 @@ const harness = ({ trunk, answer }: { trunk?: TrunkState; answer?: Commands } = 
     const git = createFakeGit(trunk === undefined ? {} : { trunk })
     const operator = createFakeOperator(answer)
     const records = createFakeRunRecords()
+    const events = createFakeEventLog()
     const printed: string[] = []
     const errors: string[] = []
     const cli = createCli({
@@ -45,12 +47,18 @@ const harness = ({ trunk, answer }: { trunk?: TrunkState; answer?: Commands } = 
             drive: createStubDrive(),
             finish: createStubFinish(),
             start: createStartService({
+                events: events.log,
                 cwd: "/repo",
                 environment: environment.copy,
                 git: git.git,
                 manifests: manifests.store,
                 operator: operator.operator,
-                plan: createPlanService({ agent: agent.run, manifests: manifests.store, now: () => new Date() }),
+                plan: createPlanService({
+                    agent: agent.run,
+                    events: events.log,
+                    manifests: manifests.store,
+                    now: () => new Date(),
+                }),
                 records: records.records,
             }),
             print: line => printed.push(line),
