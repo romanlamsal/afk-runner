@@ -314,6 +314,33 @@ export const reverted = (ticket: number, at: Date, detail: string): LifecycleEve
     detail,
 })
 
+/**
+ * The four things a ticket can come to, and the whole of what a run says about one. A ticket the log
+ * has not brought to any of them — never attempted, or mid-step — has come to none, which is why
+ * `cameTo` may answer nothing.
+ */
+export const CONCLUSIONS = ["verified", "unverified", "failed", "skipped"] as const
+
+export type Conclusion = (typeof CONCLUSIONS)[number]
+
+/**
+ * What a ticket came to, decided here and nowhere else. It is not display-only: the exit code and
+ * the pull request's draft flag are read from it, so a second route to the same judgement would let
+ * what the operator is shown disagree with what the process returns (`layers.md`, question 3).
+ */
+export const cameTo = (events: readonly LifecycleEvent[], ticket: number): Conclusion | undefined => {
+    switch (statusOf(events, ticket)?.outcome) {
+        case "ok":
+            return verified(events, ticket) ? "verified" : "unverified"
+        case "failed":
+            return "failed"
+        case "skipped":
+            return "skipped"
+        default:
+            return undefined
+    }
+}
+
 export type Progress = {
     /** Tickets whose gate went green. Nothing else proves a ticket landed sound (ADR-0008). */
     verified: readonly number[]
@@ -323,16 +350,18 @@ export type Progress = {
     skipped: readonly number[]
 }
 
-/** What the log says a run came to, read for the operator rather than for a decision. */
+/**
+ * What the log says a run came to, read for the operator rather than for a decision: the same
+ * classification as `cameTo`, one bucket per answer.
+ */
 export const progressOf = (tickets: readonly number[], events: readonly LifecycleEvent[]): Progress => {
-    const withOutcome = (outcome: Outcome): readonly number[] =>
-        tickets.filter(ticket => statusOf(events, ticket)?.outcome === outcome)
+    const whichCameTo = (conclusion: Conclusion): readonly number[] =>
+        tickets.filter(ticket => cameTo(events, ticket) === conclusion)
 
-    const wentWell = withOutcome("ok")
     return {
-        verified: wentWell.filter(ticket => verified(events, ticket)),
-        unverified: wentWell.filter(ticket => !verified(events, ticket)),
-        failed: withOutcome("failed"),
-        skipped: withOutcome("skipped"),
+        verified: whichCameTo("verified"),
+        unverified: whichCameTo("unverified"),
+        failed: whichCameTo("failed"),
+        skipped: whichCameTo("skipped"),
     }
 }

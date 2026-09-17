@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
     attempts,
     brokenStep,
+    cameTo,
     cutFrom,
     type LifecycleEvent,
     type Outcome,
@@ -131,6 +132,28 @@ describe("settled", () => {
 
         // then
         expect(done).toBe(expected)
+    })
+})
+
+describe("cameTo", () => {
+    it.each([
+        ["a gate that went green", [event(10, "gate", "ok")], "verified"],
+        ["an implementer that reported back", [event(10, "implement", "ok")], "unverified"],
+        ["a squash the gate has not run over", [event(10, "merge", "ok")], "unverified"],
+        ["a step that failed", [event(10, "implement", "failed")], "failed"],
+        ["a revert", [event(10, "revert", "failed")], "failed"],
+        ["a ticket a blocker took down", [event(10, "implement", "skipped")], "skipped"],
+        ["a step that began and never ended", [event(10, "implement", "running")], undefined],
+        ["a rebase git stopped part-way", [event(10, "rebase", "conflicted")], undefined],
+        ["a ticket the log never mentioned", [], undefined],
+    ] as const)("should say %s came to %s", (_name, events, expected) => {
+        // given — the events from the table
+
+        // when
+        const conclusion = cameTo(events, 10)
+
+        // then
+        expect(conclusion).toBe(expected)
     })
 })
 

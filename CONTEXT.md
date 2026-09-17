@@ -214,6 +214,13 @@ _Avoid_: cancelled, dropped, blocked
 A ticket that was attempted, could not land, and that a later resume may repair.
 _Avoid_: errored, broken, stuck
 
+**Conclusion**:
+What a ticket came to: verified, unverified, failed or skipped. One classification, decided in the
+domain and nowhere else, because the run's summary, its exit code and the pull request's draft flag
+all read it and a second route would let them disagree. A ticket never attempted or mid-step has
+come to none.
+_Avoid_: result, final status, verdict
+
 **Board**:
 What a run shows while it runs: every ticket of the spec at once, each on the track it is currently
 on. Derived from the event log **and** the driver's live action set, never from the log alone,
