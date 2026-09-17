@@ -129,15 +129,10 @@ between them. A status is not stored and is not a word of its own in the log —
 the last lifecycle event, which is a step and an outcome together.
 
 **Step**:
-The closed vocabulary recovery keys on: `plan`, `setup`, `implement`, `prepare`, `rebase`,
-`resolve`, `merge`, `gate`, `fix`, `revert`, `pull-request`. A phase that can be killed on its own,
-or that carries a budget of its own, is a step of its own (ADR-0022).
-
-Every step between `setup` and `revert` is a move in one ticket's machine, and each is also an
-action the decision function can give — the action set is the step set, one for one (ADR-0026).
-`plan` and `pull-request` are about the **run** instead, and their events name no ticket (ADR-0028).
-`pull-request` is the step the `finish` action takes; `plan` is the one step that is no action at
-all, because planning happens before the machine it would be a move in.
+The named thing recovery keys on: one move a ticket makes, or one thing a run does. A phase that can
+be killed on its own, or that carries a budget of its own, is a step of its own (ADR-0022). Most are
+also actions the decision function can give (ADR-0026); the run-level ones name no ticket
+(ADR-0028).
 _Avoid_: phase, stage, state
 
 **Setup step**:
@@ -154,10 +149,8 @@ Nothing an attempt does happens before its start event.
 _Avoid_: try, run, invocation
 
 **Started**:
-A spec whose log names a ticket, and so a spec a run has begun for. Not a spec whose log *exists* —
-planning appends to it before any ticket is touched — which is what keeps `--plan-only` followed by
-`--implement-only` from refusing itself (ADR-0028). It is what the operator is told as "has a run
-already".
+A spec whose log names a ticket, and so a spec a run has begun for. A spec that has only been
+planned is not started, its log notwithstanding (ADR-0028).
 _Avoid_: in progress, live, under way, open
 
 **Event log**:
@@ -227,9 +220,9 @@ expected to exist on another machine.
 _Avoid_: cache, workspace, scratch
 
 **Starting over**:
-What `--force-fresh` does: the run's worktrees, this spec's branches local and remote, its pull
-request and its run directory, taken away in one command with no prompt — the flag is the consent.
-It takes nothing back off the tracker: a claim is never released (ADR-0013).
+Taking a spec back to nothing: its worktrees, its branches local and remote, its pull request and
+its run directory, all away in one act and without a prompt. It takes nothing back off the tracker —
+a claim is never released (ADR-0013).
 _Avoid_: reset, clean, wipe, rollback
 
 ## Tracker
@@ -267,16 +260,14 @@ The agent that writes the spec PR's title and summary.
 _Avoid_: summariser, scribe
 
 **Agent profile**:
-What one role is invoked with: the model and effort of the agent afk starts, and the model of every
-agent that one spawns. One per role, and the only thing that distinguishes two invocations besides
-the prompt and the schema. It is why afk does not run `--bare`: the preamble was never the cost, and
-the fan-out is (ADR-0027).
+What one role is invoked with: the model and effort of the agent afk starts, and the model of the
+agents that one spawns. One per role, and the only thing distinguishing two invocations besides the
+prompt and the schema (ADR-0027).
 _Avoid_: tier, agent config, model settings
 
 **Fan-out**:
 The agents a role's skills spawn inside its own invocation. afk starts one agent per attempt and
-never these, so the only thing that reaches them is the profile's `subagentModel` — which is where
-most of a run's consumption goes.
+never any of these, so a fan-out is reached only through the profile the attempt was given.
 _Avoid_: subagents, sub-tasks, children
 
 ## Code
