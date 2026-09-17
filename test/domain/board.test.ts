@@ -488,3 +488,52 @@ describe("boardOf: why a step came to what it did", () => {
         expect(row?.detail).toBe("the budget ran out")
     })
 })
+
+describe("boardOf: when the last thing happened", () => {
+    /** An event that says when it happened, which is the only thing these cases turn on. */
+    const at = (when: string): LifecycleEvent => ({ ...event(7, "implement", "running"), at: when })
+
+    it("should carry the timestamp of the log's most recent event", () => {
+        // given
+        const events = [at("2026-09-15T11:18:38.314Z"), at("2026-09-15T11:42:07.001Z")]
+
+        // when
+        const view = boardOf(MANIFEST, events)
+
+        // then
+        expect(view.at).toBe("2026-09-15T11:42:07.001Z")
+    })
+
+    it("should carry nothing where the log holds no event", () => {
+        // given
+        const events: readonly LifecycleEvent[] = []
+
+        // when
+        const view = boardOf(MANIFEST, events)
+
+        // then
+        expect(view.at).toBeUndefined()
+    })
+
+    it("should carry the last event's own timestamp rather than a reading of the clock", () => {
+        // given: a log whose last event is an hour old, read now
+        const events = [at("2026-09-15T10:00:00.000Z")]
+
+        // when
+        const view = boardOf(MANIFEST, events)
+
+        // then
+        expect(view.at).toBe("2026-09-15T10:00:00.000Z")
+    })
+
+    it("should say the same thing about the same log however often it is read", () => {
+        // given
+        const events = [at("2026-09-15T10:00:00.000Z"), at("2026-09-15T10:00:04.000Z")]
+
+        // when
+        const views = [boardOf(MANIFEST, events), boardOf(MANIFEST, events)]
+
+        // then
+        expect(views.map(view => view.at)).toEqual(["2026-09-15T10:00:04.000Z", "2026-09-15T10:00:04.000Z"])
+    })
+})

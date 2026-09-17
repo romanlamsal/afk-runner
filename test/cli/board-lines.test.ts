@@ -27,7 +27,7 @@ const row = (steps: readonly BoardStep[], rest: { track?: Track; detail?: string
     detail: rest.detail,
 })
 
-const view = (...rows: readonly BoardRow[]): BoardView => ({ rows })
+const view = (...rows: readonly BoardRow[]): BoardView => ({ rows, at: undefined })
 
 const UNTOUCHED = row(trail({ setup: "ahead", implement: "ahead" }))
 

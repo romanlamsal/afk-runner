@@ -17,9 +17,9 @@ import {
  * grows or shrinks while somebody is reading it. That is also why a title is truncated rather than
  * wrapped: a wrapped line would break the one property the layout rests on.
  *
- * A run status line — the drain notice, and so far nothing else — sits under the blocks, where it
- * is the one thing that is about the run rather than about a ticket. It is the frame's last line
- * from the moment there is one, so the rows above it never move.
+ * A footer sits under the blocks, where the things that are about the run rather than about a
+ * ticket go: when the last thing happened, and then the drain notice. The notice stays the frame's
+ * last line from the moment there is one, so the rows above it never move.
  */
 
 const HEADINGS: Record<Track, string> = {
@@ -65,6 +65,16 @@ const WAITING = "waiting"
  */
 const DEAD = "dead"
 
+/**
+ * When the last thing happened, written as the event carries it. It says whose time it is rather
+ * than standing alone, because an instant on its own under a board reads as the time now — which is
+ * the one thing it is not, and the whole reason it is read off the log instead of a clock.
+ *
+ * It is written only where the log has an event to have it from: a run nothing has happened in says
+ * nothing, and never says it has been waiting since the epoch.
+ */
+const WHEN = "last event"
+
 /** What a cut line ends in, so that a truncated title reads as a truncated title. */
 const ELLIPSIS = "..."
 
@@ -105,5 +115,7 @@ export const boardFrame = (view: BoardView, width: number, notice?: string): str
         return [fitted(HEADINGS[track], width), ...rows.map(row => rowLine(row, label, steps, width))]
     })
 
-    return notice === undefined ? blocks : [...blocks, fitted(notice, width)]
+    const footer = [...(view.at === undefined ? [] : [`${WHEN} ${view.at}`]), ...(notice === undefined ? [] : [notice])]
+
+    return [...blocks, ...footer.map(line => fitted(line, width))]
 }

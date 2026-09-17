@@ -118,6 +118,16 @@ export const dead = (row: BoardRow): boolean => row.conclusion === "failed" || r
  */
 export type BoardView = {
     rows: readonly BoardRow[]
+    /**
+     * When the last thing happened, as the log's most recent event carries it, or nothing where the
+     * log holds no event at all — a run that has not started has no last thing, and a placeholder
+     * for one would be the board claiming something the log does not say.
+     *
+     * It is read off the event rather than from a clock, which is what keeps the board without one:
+     * the same view is the same frame whenever it is drawn, on screen and in a scrollback alike, and
+     * a run that is only thinking still redraws nothing until it moves (ADR-0030).
+     */
+    at: string | undefined
 }
 
 /**
@@ -207,6 +217,9 @@ const trailOf = (
 
 /** The whole view, as a pure function of the manifest and the log. */
 export const boardOf = (manifest: Manifest, events: readonly LifecycleEvent[]): BoardView => ({
+    // The log is append-only, so its last line is the last thing that happened: the order it was
+    // written in is the order it happened in, and no event is ever rewritten (ADR-0011).
+    at: events.at(-1)?.at,
     rows: manifest.tickets.map(ticket => {
         const track = trackOf(events, ticket.number)
         const open = runningStep(events, ticket.number)
