@@ -1,5 +1,6 @@
 import { type Board, boardOf } from "../domain/board.ts"
-import { type EventLog, progressOf } from "../domain/events.ts"
+import { concluded } from "../domain/decide.ts"
+import { type EventLog, type LifecycleEvent, progressOf } from "../domain/events.ts"
 import type { Git } from "../domain/git.ts"
 import type { ManifestStore } from "../domain/manifest.ts"
 import { wholeSpec } from "../domain/pull-request.ts"
@@ -34,13 +35,19 @@ export type ShowBoardDeps = {
 }
 
 /**
- * The viewer: the manifest and the event log, read once, turned into the view the runner draws and
- * handed to the board.
+ * The viewer: the manifest and the event log, turned into the view the runner draws and handed to
+ * the board — once for the log as it stands, and again every time the log changes, until the log
+ * says the run is over.
  *
  * It writes nothing — no run directory, no event, no branch — which is what lets it be pointed at a
  * run in flight without disturbing it, and what makes a second viewer cost that run nothing
  * (ADR-0030). It is a service rather than something the cli does for itself because every read afk
  * makes is service-side: the cli is handed built data.
+ *
+ * There is nothing to choose between watching and looking: a finished run concludes on the first
+ * frame and gives the shell back, and a live one draws until it does. What it will not do is give
+ * up on its own — no timeout and no idle threshold, because a slow gate and a run that stopped look
+ * identical from the outside and only one of them is finished (ADR-0030).
  */
 export const createShowBoardService =
     ({ board, cwd, events, git, manifests }: ShowBoardDeps): ShowBoard =>
@@ -64,9 +71,17 @@ export const createShowBoardService =
         }
         const manifest = stored.manifest
 
-        const log = await events.read(root, spec)
-        board.show(boardOf(manifest, log))
+        // Every state of the log, starting with the one it is in: a frame per change, and the last
+        // of them is the frame that stays on screen.
+        let last: readonly LifecycleEvent[] = []
+        for await (const log of events.follow(root, spec)) {
+            last = log
+            board.show(boardOf(manifest, log))
+            if (concluded(manifest, log)) {
+                break
+            }
+        }
 
         const tickets = manifest.tickets.map(ticket => ticket.number)
-        return { outcome: "shown", whole: wholeSpec(tickets, progressOf(tickets, log)) }
+        return { outcome: "shown", whole: wholeSpec(tickets, progressOf(tickets, last)) }
     }

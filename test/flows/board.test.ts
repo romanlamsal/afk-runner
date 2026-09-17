@@ -26,9 +26,18 @@ const at = (minute: number): string => `2026-01-01T10:0${minute}:00.000Z`
 /** A run the viewer must never start: reaching `start` at all is the failure this catches. */
 const refusingStart: StartRun = async () => ({ outcome: "refused", reason: "the viewer started a run" })
 
-const harness = ({ planned = true, log = [] }: { planned?: boolean; log?: readonly LifecycleEvent[] } = {}) => {
+const harness = ({
+    planned = true,
+    log = [],
+    changes = [],
+}: {
+    planned?: boolean
+    log?: readonly LifecycleEvent[]
+    /** What a run appends while the viewer is following: one group per change to the log. */
+    changes?: readonly (readonly LifecycleEvent[])[]
+} = {}) => {
     const board = createFakeBoard()
-    const events = createFakeEventLog(log)
+    const events = createFakeEventLog(log, { changes })
     const manifests = createFakeManifestStore(planned ? { ok: true, manifest: MANIFEST } : undefined)
     const git = createFakeGit()
     const printed: string[] = []
@@ -177,6 +186,86 @@ describe("afk <spec> --board-only", () => {
             expect(code).toEqual(expected)
         },
     )
+
+    it("should draw a frame for the log as it stands and for each change to it", async () => {
+        // given
+        const { cli, board } = harness({
+            changes: [
+                [{ ticket: 5, step: "setup", outcome: "running", at: at(1) }],
+                [{ ticket: 5, step: "setup", outcome: "ok", at: at(2) }],
+            ],
+        })
+
+        // when
+        await cli(["4", "--board-only"])
+
+        // then
+        expect(board.shown.map(view => view.rows[0]?.steps)).toEqual([
+            [
+                { step: "setup", state: "ahead" },
+                { step: "implement", state: "ahead" },
+            ],
+            [
+                { step: "setup", state: "running" },
+                { step: "implement", state: "ahead" },
+            ],
+            [
+                { step: "setup", state: "settled", outcome: "ok" },
+                { step: "implement", state: "ahead" },
+            ],
+        ])
+    })
+
+    it("should keep following while a step the log started has not ended", async () => {
+        // given
+        const { cli, board } = harness({
+            log: [
+                { ticket: 5, step: "gate", outcome: "ok", at: at(1) },
+                { ticket: 6, step: "gate", outcome: "running", at: at(2) },
+            ],
+            changes: [[{ ticket: 6, step: "gate", outcome: "ok", at: at(3) }]],
+        })
+
+        // when
+        await cli(["4", "--board-only"])
+
+        // then
+        expect(board.shown).toHaveLength(2)
+    })
+
+    it("should stop at the frame the log concluded on", async () => {
+        // given
+        const { cli, board } = harness({
+            log: [
+                { ticket: 5, step: "gate", outcome: "ok", at: at(1) },
+                { ticket: 6, step: "gate", outcome: "ok", at: at(2) },
+            ],
+            changes: [[{ ticket: 5, step: "revert", outcome: "failed", at: at(3) }]],
+        })
+
+        // when
+        await cli(["4", "--board-only"])
+
+        // then
+        expect(board.shown).toHaveLength(1)
+    })
+
+    it("should exit with the run's own code once a log it followed concludes", async () => {
+        // given
+        const { cli } = harness({
+            log: [{ ticket: 5, step: "gate", outcome: "running", at: at(1) }],
+            changes: [
+                [{ ticket: 5, step: "gate", outcome: "ok", at: at(2) }],
+                [{ ticket: 6, step: "gate", outcome: "ok", at: at(3) }],
+            ],
+        })
+
+        // when
+        const code = await cli(["4", "--board-only"])
+
+        // then
+        expect(code).toEqual(EXIT.complete)
+    })
 
     it("should write nothing to the run directory", async () => {
         // given

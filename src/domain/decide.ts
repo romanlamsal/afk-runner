@@ -11,6 +11,7 @@ import {
     rebased,
     repairableStep,
     running,
+    runStepRunning,
     settled,
     setUp,
     statusOf,
@@ -365,3 +366,22 @@ export const nextActions = (
     const actions = [...skips, ...merges, ...starts]
     return actions.length > 0 ? actions : idle()
 }
+
+/**
+ * Whether the log shows a run that has come to its end: the decision function has nothing left to
+ * hand out, and no step about the run itself is still going.
+ *
+ * It is the same question the driver's loop breaks on, asked with nothing in flight — because a
+ * follower holds no actions and never will (ADR-0030). That is what makes it safe: every trailing
+ * `running` event is a step the schedule still has a move for, so a slow gate, a long implementer
+ * and a run killed mid-step all read the same, which is *not concluded*. There is no timeout and no
+ * idle threshold here for exactly that reason; a run that is thinking must never look finished.
+ *
+ * `maxParallel` is one because the answer does not depend on it: slots bound how many starts come
+ * back, never whether there are any.
+ */
+export const concluded = (manifest: Manifest, events: readonly LifecycleEvent[]): boolean =>
+    !runStepRunning(events) &&
+    nextActions(manifest, events, { inFlight: [], maxParallel: 1, draining: false }).some(
+        action => action.kind === "finish",
+    )

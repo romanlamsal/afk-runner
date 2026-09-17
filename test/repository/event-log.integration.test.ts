@@ -21,6 +21,30 @@ const event = (ticket: number, outcome: LifecycleEvent["outcome"]): LifecycleEve
     at: "2026-09-15T11:18:38.314Z",
 })
 
+/**
+ * A follower with nothing to wait on between looks, so that a test about a growing file is over as
+ * soon as the file has grown.
+ */
+const watched = createFileEventLog({ pollMs: 1 })
+
+/** The first state of the log a follower is given, which is the log as it stands. */
+const firstState = async (root: string, spec: number): Promise<readonly LifecycleEvent[]> => {
+    for await (const events of watched.follow(root, spec)) {
+        return events
+    }
+    return []
+}
+
+/** The state a follower is given once the log holds this many events. */
+const stateWith = async (root: string, spec: number, count: number): Promise<readonly LifecycleEvent[]> => {
+    for await (const events of watched.follow(root, spec)) {
+        if (events.length >= count) {
+            return events
+        }
+    }
+    return []
+}
+
 describe("createFileEventLog", () => {
     it("should read back nothing for a spec that has no log", async () => {
         // given
@@ -95,5 +119,41 @@ describe("createFileEventLog", () => {
 
         // then
         expect(events).toEqual([event(10, "running"), event(10, "ok")])
+    })
+
+    it("should give a follower the log as it stands before anything changes", async () => {
+        // given
+        const repository = await root()
+        await log.append(repository, 4, event(10, "running"))
+
+        // when
+        const events = await firstState(repository, 4)
+
+        // then
+        expect(events).toEqual([event(10, "running")])
+    })
+
+    it("should give a follower no events for a spec whose log does not exist yet", async () => {
+        // given
+        const repository = await root()
+
+        // when
+        const events = await firstState(repository, 4)
+
+        // then
+        expect(events).toEqual([])
+    })
+
+    it("should give a follower the whole log again once it has been appended to", async () => {
+        // given
+        const repository = await root()
+        await log.append(repository, 4, event(10, "running"))
+        const followed = stateWith(repository, 4, 2)
+
+        // when
+        await log.append(repository, 4, event(10, "ok"))
+
+        // then
+        expect(await followed).toEqual([event(10, "running"), event(10, "ok")])
     })
 })

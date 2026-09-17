@@ -36,7 +36,7 @@ afk <spec> [--plan-only | --implement-only | --board-only] [--resume] [--force-f
 | bare | plan, confirm, implement. Refuses when a manifest or a run already exists, naming the flag to use |
 | `--plan-only` | plan the spec, write the manifest, print the execution order, exit |
 | `--implement-only` | implement an existing manifest without planning again. Refuses an existing run unless `--resume` consents |
-| `--board-only` | draw this spec's board from its run directory and exit. It reads and never writes, so it can be pointed at a run in flight. Refuses a spec that has never been planned: the rows and the frame's height come from the manifest |
+| `--board-only` | draw this spec's board from its run directory, redraw it every time the log changes, and exit once the log says the run is over. It reads and never writes, so it can be pointed at a run in flight. Refuses a spec that has never been planned: the rows and the frame's height come from the manifest |
 | `--resume` | consent to continuing an existing run. It changes no behaviour — a resumed run is the ordinary loop against a log that is not empty |
 | `--force-fresh` | delete this spec's branches local and remote, its run directory and its pull request, then start over. No prompt: the flag is the consent |
 | `--max-parallel <n>` | implementer slots, default 3 |
@@ -153,7 +153,10 @@ clone.
 
 `--board-only` exits with the run's own code, read from the same classification: `0` where the log
 says every ticket of the manifest was verified, `1` otherwise, and `3` for a spec that was never
-planned.
+planned. It exits when the log shows the run is over — nothing left to start and nothing still
+going — and follows it until then, so a finished run prints one frame and gives the shell back and a
+live one is watched to its end. There is no timeout and no idle threshold: a run that is thinking
+must never look finished, so a run that was killed is followed until you stop it.
 
 A refusal to *start* — no manifest to implement, a run that already exists, nothing that is a git
 worktree, a confirmation the operator closed — is `3` rather than `2`: the arguments were fine, and

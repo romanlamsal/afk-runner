@@ -3,36 +3,75 @@ import { dirname, join } from "node:path"
 import { type EventLog, type LifecycleEvent, readEvent } from "../domain/events.ts"
 import { eventLogPath } from "../domain/paths.ts"
 
+/** How often a follower looks at the file. Small enough that a frame follows an append, and no more. */
+const POLL_MS = 200
+
+const pause = (ms: number): Promise<void> =>
+    new Promise(resolve => {
+        setTimeout(resolve, ms)
+    })
+
 /**
  * The event log on disk: one JSON object per line, opened for append.
  *
  * The format is the durability argument. A line is written whole or it is not, so a run killed
  * mid-write costs the last line and never the file — and a line that does not parse is dropped on
  * read rather than failing everything before it (ADR-0011).
+ *
+ * `pollMs` is how long a follower waits between looks. It is a parameter so that a test can watch a
+ * file without waiting on it, and nothing else ever passes one.
  */
-export const createFileEventLog = (): EventLog => ({
-    read: async (root, spec) => {
-        const contents = await readFile(join(root, eventLogPath(spec)), "utf8").catch(() => undefined)
-        if (contents === undefined) {
-            return []
-        }
+export const createFileEventLog = ({ pollMs = POLL_MS }: { pollMs?: number } = {}): EventLog => {
+    const contentsOf = (root: string, spec: number): Promise<string | undefined> =>
+        readFile(join(root, eventLogPath(spec)), "utf8").catch(() => undefined)
 
-        return contents.split("\n").flatMap((line): LifecycleEvent[] => {
-            if (line.trim() === "") {
-                return []
-            }
-            try {
-                const event = readEvent(JSON.parse(line))
-                return event === undefined ? [] : [event]
-            } catch {
-                return []
-            }
-        })
-    },
+    const eventsIn = (contents: string | undefined): readonly LifecycleEvent[] =>
+        contents === undefined
+            ? []
+            : contents.split("\n").flatMap((line): LifecycleEvent[] => {
+                  if (line.trim() === "") {
+                      return []
+                  }
+                  try {
+                      const event = readEvent(JSON.parse(line))
+                      return event === undefined ? [] : [event]
+                  } catch {
+                      return []
+                  }
+              })
 
-    append: async (root, spec, event) => {
-        const path = join(root, eventLogPath(spec))
-        await mkdir(dirname(path), { recursive: true })
-        await appendFile(path, `${JSON.stringify(event)}\n`, "utf8")
-    },
-})
+    return {
+        read: async (root, spec) => eventsIn(await contentsOf(root, spec)),
+
+        append: async (root, spec, event) => {
+            const path = join(root, eventLogPath(spec))
+            await mkdir(dirname(path), { recursive: true })
+            await appendFile(path, `${JSON.stringify(event)}\n`, "utf8")
+        },
+
+        /**
+         * Polling, and not a file watch: a poll is one read of a file nothing else is waiting on, so
+         * a run is undisturbed by being followed and a second follower costs it nothing (ADR-0030).
+         * It also needs nothing to exist yet — a spec whose log has not been written is a log with
+         * no events, and the first append is a change like any other.
+         *
+         * The file's bytes are what "changed" is decided on. The log is append-only, so bytes that
+         * are the same are a log that has not moved, and a torn last line that is completed later is
+         * a change even where it parsed to nothing before.
+         */
+        follow: async function* (root, spec) {
+            let seen: string | undefined
+            let looked = false
+
+            for (;;) {
+                const contents = await contentsOf(root, spec)
+                if (!looked || contents !== seen) {
+                    seen = contents
+                    looked = true
+                    yield eventsIn(contents)
+                }
+                await pause(pollMs)
+            }
+        },
+    }
+}
