@@ -1,4 +1,12 @@
-import { type BoardRow, type BoardView, type StepState, TRACKS, type Track } from "../domain/board.ts"
+import {
+    type BoardRow,
+    type BoardStep,
+    type BoardView,
+    dead,
+    type SettledOutcome,
+    TRACKS,
+    type Track,
+} from "../domain/board.ts"
 
 /**
  * The board's frame: a pure mapping from a view and a terminal width to the lines that view is. It
@@ -20,17 +28,40 @@ const HEADINGS: Record<Track, string> = {
 }
 
 /**
- * How a step is written at each of the three weights. Brackets and nothing else: what a step is read
- * at has to survive `NO_COLOR`, so colour may repeat this and may never be the only thing saying it.
+ * What a settled step came to, in one character each. A glyph rather than a word, because telling a
+ * green step from a red one is the thing the row is read for, and because it has to survive
+ * `NO_COLOR`: colour may repeat these and may never be the only thing saying them.
  */
-const WEIGHTS: Record<StepState, (step: string) => string> = {
-    settled: step => step,
-    live: step => `<${step}>`,
-    ahead: step => `(${step})`,
+const OUTCOMES: Record<SettledOutcome, string> = {
+    ok: "\u2713",
+    failed: "\u2717",
+    skipped: "\u00b7",
+    conflicted: "!",
+}
+
+/**
+ * How a step is written at each of the three weights: what it came to, brackets, and nothing else.
+ */
+const written = (entry: BoardStep): string => {
+    switch (entry.state) {
+        case "settled":
+            return `${entry.step}${OUTCOMES[entry.outcome]}`
+        case "live":
+            return `<${entry.step}>`
+        case "ahead":
+            return `(${entry.step})`
+    }
 }
 
 /** What a ticket the merge track has not taken yet reads as. It is a state, never a position. */
 const WAITING = "waiting"
+
+/**
+ * What a ticket nothing more will happen to reads as. It is written at the end of the trail the
+ * ticket died on rather than in a block of its own, so that a dead ticket stays where it died and
+ * the frame's height stays the ticket count.
+ */
+const DEAD = "dead"
 
 /** What a cut line ends in, so that a truncated title reads as a truncated title. */
 const ELLIPSIS = "..."
@@ -46,7 +77,7 @@ const fitted = (line: string, width: number): string => {
 
 /** A row's trail, which is what has happened, what is happening and what is next, in that order. */
 const trail = (row: BoardRow): string =>
-    [...row.steps.map(({ step, state }) => WEIGHTS[state](step)), ...(row.waiting ? [WAITING] : [])].join(" ")
+    [...row.steps.map(written), ...(row.waiting ? [WAITING] : []), ...(dead(row) ? [DEAD] : [])].join(" ")
 
 /**
  * One ticket's line: its number, its trail, and its title. The title comes last because it is the

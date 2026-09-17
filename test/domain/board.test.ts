@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { boardOf, type StepState, type Track } from "../../src/domain/board.ts"
+import {
+    type BoardStep,
+    boardOf,
+    dead,
+    type SettledOutcome,
+    type StepState,
+    type Track,
+} from "../../src/domain/board.ts"
 import type { Action } from "../../src/domain/decide.ts"
 import type { LifecycleEvent, Outcome, Step } from "../../src/domain/events.ts"
 import { manifestOf, ticket } from "../fixtures/manifest.ts"
@@ -269,5 +276,140 @@ describe("boardOf: a ticket the merge track has not taken yet", () => {
             { ...view.rows[0], ticket: 0, title: "" },
             { ...view.rows[0], ticket: 0, title: "" },
         ])
+    })
+})
+
+/** What a settled step of a row's trail came to, which is the whole of what a settled step says. */
+const outcomeOf = (events: readonly LifecycleEvent[], number: number, step: Step): SettledOutcome | undefined => {
+    const entry: BoardStep | undefined = rowOf(events, number)?.steps.find(candidate => candidate.step === step)
+    return entry?.state === "settled" ? entry.outcome : undefined
+}
+
+describe("boardOf: what a settled step came to", () => {
+    it.each([
+        ["a step that went green", event(7, "setup", "ok"), "ok"],
+        ["a step that broke", event(7, "setup", "failed"), "failed"],
+        ["a step that will not happen", event(7, "implement", "skipped"), "skipped"],
+    ] as const)("should carry %s as %s", (_case, settling, expected) => {
+        // given
+        const events = [event(7, settling.step, "running"), settling]
+
+        // when
+        const outcome = outcomeOf(events, 7, settling.step)
+
+        // then
+        expect(outcome).toBe(expected)
+    })
+
+    it("should carry a rebase git stopped part-way as conflicted", () => {
+        // given
+        const events = [...implemented(7), event(7, "rebase", "running"), event(7, "rebase", "conflicted")]
+
+        // when
+        const outcome = outcomeOf(events, 7, "rebase")
+
+        // then
+        expect(outcome).toBe("conflicted")
+    })
+
+    it("should carry what the last attempt of a step came to", () => {
+        // given: a failed implementer, the pass it earned, and the attempt that pass bought
+        const events = [
+            event(7, "implement", "failed"),
+            event(7, "prepare", "ok"),
+            event(7, "implement", "running"),
+            event(7, "implement", "ok"),
+        ]
+
+        // when
+        const outcome = outcomeOf(events, 7, "implement")
+
+        // then
+        expect(outcome).toBe("ok")
+    })
+
+    it("should carry nothing for a step that only ever began", () => {
+        // given: what a killed run leaves behind, with no driver saying the step is happening
+        const events = [event(7, "setup", "running")]
+
+        // when
+        const outcome = outcomeOf(events, 7, "setup")
+
+        // then
+        expect(outcome).toBeUndefined()
+    })
+})
+
+describe("boardOf: a ticket nothing more will happen to", () => {
+    it.each([
+        ["a ticket whose implementer failed", [event(7, "implement", "failed")], "implement" as Track],
+        ["a ticket skipped before it started", [event(7, "implement", "skipped")], "implement" as Track],
+        [
+            "a ticket taken back off the spec branch",
+            [...implemented(7), event(7, "merge", "ok"), event(7, "revert", "failed")],
+            "merge" as Track,
+        ],
+    ] as const)("should leave %s dead on the %s track", (_case, events, track) => {
+        // given
+        const log = events
+
+        // when
+        const row = rowOf(log, 7)
+
+        // then
+        expect(row && { track: row.track, dead: dead(row) }).toEqual({ track, dead: true })
+    })
+
+    it("should leave a dead ticket at the step it died at", () => {
+        // given
+        const events = [...implemented(7), event(7, "merge", "ok"), event(7, "revert", "failed")]
+
+        // when
+        const outcome = outcomeOf(events, 7, "revert")
+
+        // then
+        expect(outcome).toBe("failed")
+    })
+
+    it("should not read a verified ticket as dead", () => {
+        // given
+        const events = [...implemented(7), event(7, "merge", "ok"), event(7, "gate", "ok")]
+
+        // when
+        const row = rowOf(events, 7)
+
+        // then
+        expect(row && dead(row)).toBe(false)
+    })
+
+    it("should keep a verified ticket listed", () => {
+        // given: the whole spec worked through, which is the frame the run is left looking at
+        const events = [7, 8, 9].flatMap(number => [...implemented(number), event(number, "gate", "ok")])
+
+        // when
+        const view = boardOf(MANIFEST, events, [])
+
+        // then
+        expect(view.rows.map(row => row.ticket)).toEqual([7, 8, 9])
+    })
+})
+
+describe("boardOf: what a ticket came to", () => {
+    it.each([
+        ["a ticket nothing has happened to", [], undefined],
+        ["a ticket mid-step", [event(7, "implement", "running")], undefined],
+        ["a ticket the gate proved", [...implemented(7), event(7, "gate", "ok")], "verified"],
+        ["a ticket a step got through", implemented(7), "unverified"],
+        ["a ticket whose implementer failed", [event(7, "implement", "failed")], "failed"],
+        ["a ticket blocked by one that will not land", [event(7, "implement", "skipped")], "skipped"],
+    ] as const)("should read %s as %s", (_case, events, expected) => {
+        // given
+        const log = events
+
+        // when
+        const row = rowOf(log, 7)
+
+        // then
+        expect(row?.conclusion).toBe(expected)
     })
 })

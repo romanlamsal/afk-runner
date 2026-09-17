@@ -1,24 +1,39 @@
 import { describe, expect, it } from "vitest"
 import { boardFrame } from "../../src/cli/board-frame.ts"
-import type { BoardRow, BoardStep, BoardView, StepState, Track } from "../../src/domain/board.ts"
-import type { Step } from "../../src/domain/events.ts"
+import type { BoardRow, BoardStep, BoardView, SettledOutcome, Track } from "../../src/domain/board.ts"
+import type { Conclusion, Step } from "../../src/domain/events.ts"
 
-/** A trail written the short way: the steps of a track, each at the weight it is read at. */
-const trail = (steps: Readonly<Record<string, StepState>>): readonly BoardStep[] =>
-    Object.entries(steps).map(([step, state]) => ({ step: step as Step, state }))
+/**
+ * A trail written the short way: the steps of a track, each at the weight it is read at — `live` or
+ * `ahead`, or what a settled step came to.
+ */
+const trail = (steps: Readonly<Record<string, SettledOutcome | "live" | "ahead">>): readonly BoardStep[] =>
+    Object.entries(steps).map(([name, weight]) => {
+        const step = name as Step
+        return weight === "live" || weight === "ahead"
+            ? { step, state: weight }
+            : { step, state: "settled", outcome: weight }
+    })
 
-const row = (ticket: number, title: string, track: Track, steps: readonly BoardStep[], waiting = false): BoardRow => ({
+const row = (
+    ticket: number,
+    title: string,
+    track: Track,
+    steps: readonly BoardStep[],
+    rest: { waiting?: boolean; conclusion?: Conclusion } = {},
+): BoardRow => ({
     ticket,
     title,
     track,
     steps,
-    waiting,
+    waiting: rest.waiting ?? false,
+    conclusion: rest.conclusion,
 })
 
-const IMPLEMENTING = trail({ setup: "settled", implement: "live" })
+const IMPLEMENTING = trail({ setup: "ok", implement: "live" })
 
 const MERGING = trail({
-    rebase: "settled",
+    rebase: "ok",
     resolve: "ahead",
     merge: "live",
     gate: "ahead",
@@ -56,7 +71,7 @@ describe("boardFrame", () => {
         const lines = boardFrame(view, WIDE)
 
         // then
-        expect(lines).toEqual(["implement track", "  #7  setup <implement>  Implement the slate", "merge track"])
+        expect(lines).toEqual(["implement track", "  #7  setup\u2713 <implement>  Implement the slate", "merge track"])
     })
 
     it("should put a ticket's row under the heading of the track it is on", () => {
@@ -69,14 +84,14 @@ describe("boardFrame", () => {
         // then
         expect(lines).toEqual([
             "implement track",
-            "  #108  setup <implement>  Rebase onto the spec branch",
+            "  #108  setup\u2713 <implement>  Rebase onto the spec branch",
             "merge track",
-            "  #7    rebase (resolve) <merge> (gate) (fix) (revert)  Implement the slate",
+            "  #7    rebase\u2713 (resolve) <merge> (gate) (fix) (revert)  Implement the slate",
         ])
     })
 
     it.each([
-        ["a settled step", "setup"],
+        ["a settled step", "setup\u2713"],
         ["the live step", "<implement>"],
         ["a step still ahead", "(rebase)"],
     ] as const)("should write %s as %s", (_case, written) => {
@@ -97,13 +112,64 @@ describe("boardFrame", () => {
 
     it("should say that a ticket the merge track has not taken yet is waiting", () => {
         // given
-        const waiting = row(7, "A ticket", "implement", trail({ setup: "settled", implement: "settled" }), true)
+        const waiting = row(7, "A ticket", "implement", trail({ setup: "ok", implement: "ok" }), { waiting: true })
 
         // when
         const lines = boardFrame({ rows: [waiting] }, WIDE)
 
         // then
-        expect(lines).toContain("  #7  setup implement waiting  A ticket")
+        expect(lines).toContain("  #7  setup\u2713 implement\u2713 waiting  A ticket")
+    })
+
+    it.each([
+        ["ok", "\u2713"],
+        ["failed", "\u2717"],
+        ["skipped", "\u00b7"],
+        ["conflicted", "!"],
+    ] as const)("should write a step that came to %s with the glyph %s", (outcome, glyph) => {
+        // given
+        const view: BoardView = { rows: [row(7, "A ticket", "implement", trail({ setup: outcome }))] }
+
+        // when
+        const lines = boardFrame(view, WIDE)
+
+        // then
+        expect(lines).toContain(`  #7  setup${glyph}  A ticket`)
+    })
+
+    it.each([
+        [
+            "a ticket whose implementer failed",
+            row(7, "A ticket", "implement", trail({ setup: "ok", implement: "failed" }), { conclusion: "failed" }),
+            "  #7  setup\u2713 implement\u2717 dead  A ticket",
+        ],
+        [
+            "a ticket blocked by one that will not land",
+            row(7, "A ticket", "implement", trail({ setup: "ahead", implement: "skipped" }), {
+                conclusion: "skipped",
+            }),
+            "  #7  (setup) implement\u00b7 dead  A ticket",
+        ],
+    ] as const)("should mark %s dead where it died", (_case, dying, expected) => {
+        // given
+        const view: BoardView = { rows: [dying] }
+
+        // when
+        const lines = boardFrame(view, WIDE)
+
+        // then
+        expect(lines).toContain(expected)
+    })
+
+    it("should not mark a verified ticket dead", () => {
+        // given
+        const verified = row(7, "A ticket", "merge", trail({ gate: "ok" }), { conclusion: "verified" })
+
+        // when
+        const lines = boardFrame({ rows: [verified] }, WIDE)
+
+        // then
+        expect(lines).toContain("  #7  gate\u2713  A ticket")
     })
 
     it("should be as tall as the row count plus one heading per track", () => {
@@ -140,7 +206,7 @@ describe("boardFrame", () => {
         const lines = boardFrame(view, 32)
 
         // then
-        expect(lines).toContain("  #7  setup <implement>  A ti...")
+        expect(lines).toContain("  #7  setup\u2713 <implement>  A t...")
     })
 })
 
