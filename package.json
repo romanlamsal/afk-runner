@@ -1,0 +1,35 @@
+{
+  "name": "afk",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Runs a whole spec's tickets unattended",
+  "bin": {
+    "afk": "./src/main.ts"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "afk": "node src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:watch": "vitest --project unit",
+    "check": "run-s typecheck lint test"
+  },
+  "dependencies": {
+    "cleye": "^2.6.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.13",
+    "@types/node": "^26.5.1",
+    "npm-run-all2": "^9.0.3",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  }
+}

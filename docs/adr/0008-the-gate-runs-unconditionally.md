@@ -10,9 +10,9 @@ mistake. That distinction is the reason it exists: every other check can be gree
 is broken. Two tickets with no textual overlap, each verified in isolation, once failed to compile
 together because one moved a type the other had just imported.
 
-**Decision: one gate worktree, created at run start and reused across every merge. `setup` runs
-unconditionally before every gate. The gate runs after every merge, without exception. On resume the
-worktree is re-created rather than reused.**
+**Decision: one gate worktree, created at process start and reused across every merge. `setup` runs
+unconditionally before every gate. The gate runs after every merge, without exception. The worktree
+is re-created at every process start rather than reused across processes.**
 
 ## Considered options
 
@@ -27,8 +27,10 @@ worktree is re-created rather than reused.**
 
 ## Consequences
 
-- Re-creation on resume is **once per resumed run, not once per merge** — the reuse that makes the
-  track viable is untouched. A killed run can leave that worktree dirty, mid-`verify`, or holding a
-  half-applied merge, and proving it safe is worse than paying the reinstall.
+- Re-creation is **once per process start, not once per merge** — the reuse that makes the track
+  viable is untouched. It is keyed on the process rather than on resume because resume is not a code
+  path (ADR-0019): every start re-creates it, and the run that most needs it is simply the one that
+  follows a kill. A killed run can leave that worktree dirty, mid-`verify`, or holding a half-applied
+  merge, and proving it safe is worse than paying the reinstall.
 - Every merged tree is verified, so `verified` means exactly one thing everywhere it is used: the
   slate's blocker test, and the spec PR's `Closes` lines.

@@ -23,8 +23,26 @@ requires probing whether a conflict would occur.
   path that can never work. It is also the warm, installed worktree, so the resolver can run this
   repository's own checks on what it produced instead of resolving blind.
 - The tree must be clean before the rebase starts. Rebasing over uncommitted work buries it.
-- The resolving skill never aborts; the script does — on a non-zero exit, or on a tree still
-  conflicted after the agent exits.
 - When the rebase cannot land: `git rebase --abort`, ticket failed, dependents skipped transitively,
   and **the spec branch is untouched** — no revert, no gate re-run. The branch, the worktree and the
   transcript are kept, which is what makes the ticket recoverable on a later resume.
+
+## Who may abort
+
+The resolving skill never aborts. Two things may, and they are the two that cannot be confused with
+each other:
+
+- **The script, during a run.** It aborts what the resolver left in its way — on a non-zero exit, on
+  a tree still conflicted after the agent exits, and on a rebase that ended without landing. The
+  third is the one worth naming: a resolver that aborted leaves a tree that is clean, unconflicted
+  and exactly where it started, which is indistinguishable from a rebase that never conflicted
+  unless the branch is asked whether it now contains the tip it was rebased onto. So it is asked.
+- **The prepare agent, before one.** A killed run leaves a rebase nobody is holding, and the worktree
+  stays stuck until something abandons it. This ADR grants that abort to the prepare agent — the
+  agent ADR-0012 makes responsible for a ticket stuck at `rebase:failed`, and the only thing that
+  looks at a wrecked worktree before the normal track picks it up. It is a different act from the
+  script's: the script's abort ends an attempt that failed, the prepare agent's clears wreckage so
+  that a fresh attempt can be made.
+
+Abort is the only rebase state change that is not a failure in itself, which is why asking for one
+where there is no rebase is not an error either: every failure path can ask.

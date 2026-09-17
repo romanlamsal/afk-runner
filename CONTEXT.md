@@ -25,6 +25,11 @@ _Avoid_: frontier, ready queue, wave, batch
 
 ## Git
 
+**Trunk**:
+The local branch a spec branch is cut from — what `origin/HEAD` names, else `main`, else `master`.
+afk reads it, compares it against its remote, and never moves it (ADR-0018).
+_Avoid_: default branch, base branch, main, master
+
 **Spec branch**:
 `afk/<spec>/spec` — the single branch every ticket lands on, and the only branch a run writes to.
 _Avoid_: integration branch, layer branch, base branch
@@ -42,9 +47,23 @@ _Avoid_: base commit, fork point, merge base
 which ticket landed.
 _Avoid_: marker, tag, annotation
 
+**afk-reverted trailer**:
+`afk-reverted: <spec>/<n>`, carried by the revert commit that takes a ticket back off the spec
+branch. The last trailer naming a ticket is the one that says where it stands, which is what keeps
+"ask git which tickets landed" answerable after a revert (ADR-0009).
+_Avoid_: rollback marker, undo tag
+
 **Spec PR**:
 The one pull request a run opens — spec branch into the repository's default branch, squash-merged.
+Opening it is the last thing a run does, and merging it is the operator's (ADR-0007).
 _Avoid_: layer PR, ticket PR, stack
+
+**The push**:
+Publishing the spec branch to its remote, once, immediately before the spec PR is opened. It is what
+makes the pull request possible, and it is the only write besides the tracker's two that leaves the
+machine — ADR-0013 counts writes to the *tracker*, and this is not one. It moves no branch and no
+working tree; the upstream it records for the spec branch is the only local mark it leaves.
+_Avoid_: publish, upload, sync
 
 ## Commands
 
@@ -66,6 +85,12 @@ Setup then verify, run on the spec branch after a ticket merges into it. It asse
 everything merged so far, and it is the only thing that produces `verified`.
 _Avoid_: verification step, integration test, CI run
 
+**Proving the branch**:
+Running setup then verify in the gate worktree with nothing written down. It is what the gate does
+before it records a verdict, and what the revert asks about the tip it leaves behind — where a green
+is a statement about the ticket that just failed rather than one that passed (ADR-0009).
+_Avoid_: re-gating, checking, validating
+
 **Gate worktree**:
 The single long-lived worktree holding the spec branch checked out, and the sole writer to it.
 _Avoid_: main worktree, scratch worktree
@@ -80,6 +105,13 @@ _Avoid_: pool, layer, batch
 The serial, single-writer sequence taking one ticket at a time from skip-check through rebase, merge
 and gate.
 _Avoid_: merge queue, merge worker
+
+**Drain**:
+Stopping a run without stopping what it is already doing: nothing new starts, every in-flight step
+finishes and records its event, and the process then exits. What the first interrupt asks for, and
+what a halt does on its way out. A drained run is a partial one, and opens the pull request a
+partial run opens.
+_Avoid_: graceful shutdown, soft stop, quiesce
 
 ## State
 
@@ -111,6 +143,17 @@ _Avoid_: done, passed, green, complete
 A ticket squashed onto the spec branch whose gate has not yet run.
 _Avoid_: landed, integrated, shipped
 
+**Unverified**:
+A ticket a step got through that the gate has not proven — implemented, or merged. What a run
+reports beside verified, so that a partial run never reads as a finished one.
+_Avoid_: pending, unproven, in progress
+
+**Reverted**:
+A ticket whose merge was taken back off the spec branch by a revert commit, after the gate stayed
+red through the one fix attempt. It is a failed ticket: nothing more happens to it, and its
+dependents are skipped.
+_Avoid_: rolled back, undone, backed out
+
 **Skipped**:
 A ticket that will not land, because a blocker failed or was reverted.
 _Avoid_: cancelled, dropped, blocked
@@ -123,6 +166,12 @@ _Avoid_: errored, broken, stuck
 The run directory — the event log, worktrees, agent transcripts. Machine-local; nothing in it is
 expected to exist on another machine.
 _Avoid_: cache, workspace, scratch
+
+**Starting over**:
+What `--force-fresh` does: the run's worktrees, this spec's branches local and remote, its pull
+request and its run directory, taken away in one command with no prompt — the flag is the consent.
+It takes nothing back off the tracker: a claim is never released (ADR-0013).
+_Avoid_: reset, clean, wipe, rollback
 
 ## Tracker
 
@@ -154,43 +203,10 @@ _Avoid_: recovery agent, triage agent
 The agent that writes the spec PR's title and summary.
 _Avoid_: summariser, scribe
 
-## Deprecated
-
-These terms describe the superseded implementation in `main.ts`. They are recorded so that code can
-be read, not so that it can be extended. None of them may appear in the design that replaces it.
+## Code
 
 **Layer**:
-A batch of tickets that ran in parallel, merged into a shared branch and was verified as a unit.
-Replaced by the slate — ADR-0001. Unrelated to `docs/agents/layers.md`'s *layer*, which is a server
-architecture tier and remains current; the collision is coincidental.
-
-**Layer branch**:
-`afk<spec>/layers/<n>`, the branch a layer's tickets merged into. There is now one spec branch —
-ADR-0006.
-
-**Ticket PR**:
-A pull request per ticket into its layer branch. Merging is now entirely local — ADR-0007.
-
-**Stack / `gh-stack`**:
-The pull request stack linking layer PRs. A run now opens one spec PR — ADR-0007.
-
-**`verifyLayer`**:
-The per-layer verification pass, run once a layer's merge queue drained. Replaced by the gate, which
-runs after every merge — ADR-0008.
-
-**Stored `status` enum**:
-`pending | implementing | implemented | merged | failed | skipped`, written into `state.json`. Status
-is now derived from the event log — ADR-0011.
-
-**`mergeable` polling**:
-Waiting for GitHub to report a pull request mergeable before merging it, with a retry-and-backoff
-loop around the merge. Gone with ticket PRs — ADR-0007.
-
-**`merge-tree` probe**:
-A check for whether a ticket would conflict, used to choose between a fast and a slow merge path.
-Every ticket is now rebased unconditionally — ADR-0005.
-
-**`changed-base`**:
-An implementer failure meaning the ticket's branch was behind its layer branch. Being behind is now
-the normal state of every ticket that is not first to merge, and is the merge track's business —
-ADR-0004.
+One division of afk's own source tree — `docs/agents/layers.md`'s sense, and the only sense the word
+has here. It never means a batch of tickets: the schedule is a flat DAG worked by the slate
+(ADR-0001).
+_Avoid_: tier, ring, level

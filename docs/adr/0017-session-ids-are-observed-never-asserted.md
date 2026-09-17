@@ -27,7 +27,7 @@ model work.
 ## Considered options
 
 - **Pre-generate the id and pass `--session-id`.** Rejected: see above. It is what the superseded
-  implementation does.
+  implementation did.
 - **Derive the id deterministically from `(spec, ticket, step, attempt)`.** Rejected. It removes the
   need to store the id but not the need to know whether the session exists, which is the actual
   problem.

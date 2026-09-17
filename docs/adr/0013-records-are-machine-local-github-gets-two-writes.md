@@ -9,6 +9,18 @@ not portable.** It lives on one machine and is never expected anywhere else. **G
 exactly twice:** the ticket is claimed when its implementer starts, and the spec PR is opened at the
 end.
 
+## Amendment: the run directory ignores itself
+
+`.afk/` lives inside the target repository — worktrees are git objects and belong with everything
+else a run writes (ADR-0020) — so what it holds would otherwise show up in the operator's status:
+transcripts, whole checkouts, and the environment files copied into them.
+
+**afk writes a `.gitignore` into the run directory when it creates it, ignoring everything beside it
+and itself.** It is written before anything else is, so nothing afk produces is ever visible for a
+moment first. **No file the consumer owns is modified** — not their `.gitignore`, not their
+`.git/info/exclude` — which is what makes this afk's own guarantee rather than a request the
+operator has to have granted.
+
 ## Consequences
 
 - **Anything a second reader needs must reach the spec branch's commits, or it does not exist.**
@@ -17,8 +29,12 @@ end.
 - **No progress comments, no labels, and no conflict-resolution note on the ticket issue.** A
   comment pointing at a resolution that exists only in `.afk/` on one machine is worse than no
   comment at all.
-- **A claimed ticket is never released.** An unassigned ticket looks unattempted; an
-  attempted-and-failed one is exactly what you want to find later.
+- **A claimed ticket is never released**, `--force-fresh` included. An unassigned ticket looks
+  unattempted; an attempted-and-failed one is exactly what you want to find later.
+- **The two writes are what a *run* makes.** `--force-fresh` throws a run away rather than making
+  one, and closing the pull request it opened is the undoing of one of the two rather than a third.
+  It is closed before its head branch is deleted, because deleting the head closes it anyway — and
+  afk would then be reporting there was nothing to close.
 - Interaction worth knowing: `docs/agents/issue-tracker.md`'s *Frontier query* drops assigned
   issues, so an afk-claimed ticket is invisible to it for as long as the claim stands — which is
   correct, and which nobody would predict.
