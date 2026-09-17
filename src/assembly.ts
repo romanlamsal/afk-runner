@@ -1,3 +1,4 @@
+import { createTerminalBoard, silentBoard } from "./cli/board-writer.ts"
 import { type Cli, createCli } from "./cli/cli.ts"
 import { EXIT } from "./cli/exit-codes.ts"
 import { createTerminalOperator } from "./cli/operator.ts"
@@ -83,7 +84,18 @@ export const assembleCli = (): Cli => {
     // branch that ticket was taken back off (ADR-0009).
     const prove = createProveBranch({ commands })
 
+    // Selection is TTY detection and there is no flag: the board is simply what a run looks like
+    // when there is a terminal to draw it on (ADR-0029).
+    const board =
+        process.stdout.isTTY === true
+            ? createTerminalBoard({
+                  write: chunk => process.stdout.write(chunk),
+                  columns: () => process.stdout.columns ?? 80,
+              })
+            : silentBoard
+
     const drive = createDriveService({
+        board,
         events,
         interrupts,
         implement: createImplementService({ agent, events, git, now }),

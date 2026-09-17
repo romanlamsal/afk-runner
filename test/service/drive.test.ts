@@ -4,6 +4,7 @@ import type { Manifest } from "../../src/domain/manifest.ts"
 import type { PreparedRun } from "../../src/domain/run.ts"
 import type { StepResult } from "../../src/service/attempt.ts"
 import { createDriveService } from "../../src/service/drive.ts"
+import { createFakeBoard } from "../fakes/board.ts"
 import { createFakeEventLog, type FakeEventLog } from "../fakes/event-log.ts"
 import { createFakeInterrupts } from "../fakes/interrupts.ts"
 
@@ -87,11 +88,13 @@ const harness = ({
     duringImplement,
 }: Setup = {}) => {
     const events = createFakeEventLog(log)
+    const board = createFakeBoard()
     const { interrupts, interrupt } = createFakeInterrupts()
     /** Every action the loop handed out, as `<kind>:<ticket>`: which service got what, and nothing else. */
     const dispatched: string[] = []
 
     const drive = createDriveService({
+        board: board.board,
         events: events.log,
         interrupts,
         now: () => new Date(AT),
@@ -143,7 +146,7 @@ const harness = ({
         },
     })
 
-    return { drive, events, dispatched, interrupt }
+    return { drive, events, dispatched, interrupt, board }
 }
 
 describe("createDriveService: the service an action reaches", () => {
@@ -240,5 +243,29 @@ describe("createDriveService: what the run comes to", () => {
 
         // then
         expect(result.progress.verified).toEqual([7, 8])
+    })
+})
+
+describe("createDriveService: what the board is shown", () => {
+    it("should show every ticket of the spec from the first frame", async () => {
+        // given
+        const { drive, board } = harness()
+
+        // when
+        await drive(RUN, { maxParallel: 2 })
+
+        // then
+        expect(board.shown[0]?.rows.map(row => row.ticket)).toEqual([7, 8])
+    })
+
+    it("should show what the run came to as its last frame", async () => {
+        // given: a run that gets both tickets through, so both end on the merge track
+        const { drive, board } = harness()
+
+        // when
+        await drive(RUN, { maxParallel: 2 })
+
+        // then
+        expect(board.shown.at(-1)?.rows.map(row => row.track)).toEqual(["merge", "merge"])
     })
 })

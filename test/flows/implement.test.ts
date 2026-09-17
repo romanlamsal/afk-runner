@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { silentBoard } from "../../src/cli/board-writer.ts"
 import { createCli } from "../../src/cli/cli.ts"
 import { EXIT } from "../../src/cli/exit-codes.ts"
 import { createRun } from "../../src/cli/run.ts"
@@ -236,6 +237,7 @@ const harness = ({
                 records: records.records,
             }),
             drive: createDriveService({
+                board: silentBoard,
                 events: events.log,
                 interrupts: interrupts.interrupts,
                 implement: createImplementService({

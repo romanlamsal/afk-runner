@@ -6,11 +6,11 @@ import {
     implemented,
     type LifecycleEvent,
     merged,
+    mergeSideStep,
     prepared,
     rebased,
     repairableStep,
     running,
-    type Step,
     settled,
     setUp,
     statusOf,
@@ -117,25 +117,22 @@ const ATTEMPT_BUDGET = 2
  */
 const FIX_BUDGET = 1
 
-/**
- * The steps the merge track owns. What makes them one thing is the spec branch: an action about any
- * of them is an action about the branch one worktree writes, so at most one is ever in flight
- * (ADR-0006).
- */
-const MERGE_SIDE: ReadonlySet<Step> = new Set<Step>(["rebase", "resolve", "merge", "gate", "fix", "revert"])
-
 const ticketsOf = (actions: readonly Action[]): ReadonlySet<number> =>
     new Set(actions.flatMap(action => ("ticket" in action ? [action.ticket] : [])))
 
-/** Whether an action is one about the spec branch, which is the set seriality is enforced over. */
-const onMergeTrack = (action: Action): boolean =>
+/**
+ * Whether an action is one about the spec branch, which is the set seriality is enforced over — and
+ * the set the board reads a ticket's track off, so that the two never disagree about what the merge
+ * track is.
+ */
+export const onMergeTrack = (action: Action): boolean =>
     action.kind === "rebase" ||
     action.kind === "resolve" ||
     action.kind === "merge" ||
     action.kind === "gate" ||
     action.kind === "fix" ||
     action.kind === "revert" ||
-    (action.kind === "prepare" && MERGE_SIDE.has(action.brokenStep))
+    (action.kind === "prepare" && mergeSideStep(action.brokenStep))
 
 /**
  * What a prepare pass would be sent to repair on a ticket, or nothing where no pass would help.
@@ -285,7 +282,7 @@ export const nextActions = (
     // (ADR-0010).
     const mergeSide = (ticket: number): Action | undefined => {
         const repair = repairFor(events, ticket)
-        if (repair !== undefined && MERGE_SIDE.has(repair)) {
+        if (repair !== undefined && mergeSideStep(repair)) {
             return { kind: "prepare", ticket, brokenStep: repair }
         }
 

@@ -1,3 +1,4 @@
+import { type Board, boardOf } from "../domain/board.ts"
 import type { Clock } from "../domain/clock.ts"
 import { type Action, nextActions } from "../domain/decide.ts"
 import { type EventLog, type Progress, progressOf, skipped } from "../domain/events.ts"
@@ -29,6 +30,11 @@ export type DriveResult = {
 }
 
 export type DriveDeps = {
+    /**
+     * Where the run is shown while it runs. A driven port, so the loop neither knows nor cares
+     * whether anything is drawing: off a terminal the adapter shows nothing (ADR-0029).
+     */
+    board: Board
     events: EventLog
     /** The one attempt a red gate is worth, and no more of the sequence than that (ADR-0009). */
     fix: FixTicket
@@ -66,6 +72,7 @@ type Settled = { action: Action; result: StepResult }
  */
 export const createDriveService =
     ({
+        board,
         events,
         fix,
         gate,
@@ -86,8 +93,14 @@ export const createDriveService =
 
         for (;;) {
             const log = await events.read(root, spec)
+            const live = [...inFlight.keys()]
+            // The same three inputs the decision reads, shown before it is asked: the board is a
+            // second pure function of them, so a frame is drawn on every pass of the loop and the
+            // last of them is what stays on screen when the run ends (ADR-0029).
+            board.show(boardOf(manifest, log, live))
+
             const actions = nextActions(manifest, log, {
-                inFlight: [...inFlight.keys()],
+                inFlight: live,
                 maxParallel,
                 // Two things drain, for one reason: nothing new starts, and what is running
                 // finishes and records. The run stopping itself, and the operator stopping it.

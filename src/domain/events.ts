@@ -56,6 +56,18 @@ export type BrokenStep = (typeof BROKEN_STEPS)[number]
 export const repairableStep = (step: Step): step is BrokenStep => BROKEN_STEPS.some(broken => broken === step)
 
 /**
+ * The steps the merge track owns. What makes them one thing is the spec branch: an action about any
+ * of them is an action about the branch one worktree writes, so at most one is ever in flight
+ * (ADR-0006).
+ *
+ * A property of the steps themselves rather than of the decision that hands them out, which is why
+ * it sits here: the schedule enforces seriality over it, and the board groups its rows by it.
+ */
+export const MERGE_SIDE_STEPS = ["rebase", "resolve", "merge", "gate", "fix", "revert"] as const
+
+export const mergeSideStep = (step: Step): boolean => MERGE_SIDE_STEPS.some(side => side === step)
+
+/**
  * Closed, and it grows only by a deliberate act. The test a member must pass: an outcome names
  * **what the tool distinguished**, never **what afk ascribed** (ADR-0025).
  *
