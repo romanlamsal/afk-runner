@@ -221,7 +221,7 @@ describe("boardFrame: the run's status line", () => {
         // then
         expect(lines).toEqual([
             "implement track",
-            "  #7  setup <implement>  Implement the slate",
+            "  #7  setup\u2713 <implement>  Implement the slate",
             "merge track",
             "afk: interrupted",
         ])

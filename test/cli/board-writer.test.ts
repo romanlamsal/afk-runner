@@ -15,10 +15,11 @@ const VIEW: BoardView = {
             title: "Implement the slate",
             track: "implement",
             steps: [
-                { step: "setup", state: "settled" },
+                { step: "setup", state: "settled", outcome: "ok" },
                 { step: "implement", state: "live" },
             ],
             waiting: false,
+            conclusion: undefined,
         },
     ],
 }
