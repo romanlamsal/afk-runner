@@ -42,6 +42,13 @@ _Avoid_: feature branch, work branch
 The commit a ticket's worktree was cut from, and the base its implementer asserts it built on.
 _Avoid_: base commit, fork point, merge base
 
+**Abort**:
+Taking a ticket's own worktree back off a rebase that did not land, leaving its commits intact. The
+prepare agent's backward move, and the script's alone — the conflict resolver never aborts
+(ADR-0005, ADR-0012). It is local to the ticket and is **not** a revert: nothing on the spec branch
+moves.
+_Avoid_: revert, roll back, undo, reset
+
 **afk-ticket trailer**:
 `afk-ticket: <spec>/<n>`, carried by each squash commit on the spec branch. The git-side record of
 which ticket landed, and the only witness in the one window where the log cannot say whether a
