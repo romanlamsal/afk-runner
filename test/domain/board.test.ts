@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { boardOf, type Track } from "../../src/domain/board.ts"
+import { boardOf, type StepState, type Track } from "../../src/domain/board.ts"
 import type { Action } from "../../src/domain/decide.ts"
 import type { LifecycleEvent, Outcome, Step } from "../../src/domain/events.ts"
 import { manifestOf, ticket } from "../fixtures/manifest.ts"
@@ -120,5 +120,154 @@ describe("boardOf: which track a ticket is on", () => {
 
         // then
         expect(track).toBe("merge")
+    })
+})
+
+/** The weight one step of a ticket's trail is read at, which is the whole of what a trail says. */
+const weightOf = (
+    events: readonly LifecycleEvent[],
+    number: number,
+    step: Step,
+    inFlight: readonly Action[] = [],
+): StepState | undefined =>
+    boardOf(MANIFEST, events, inFlight)
+        .rows.find(row => row.ticket === number)
+        ?.steps.find(entry => entry.step === step)?.state
+
+const rowOf = (events: readonly LifecycleEvent[], number: number, inFlight: readonly Action[] = []) =>
+    boardOf(MANIFEST, events, inFlight).rows.find(row => row.ticket === number)
+
+describe("boardOf: the steps a row covers", () => {
+    it("should cover setup and implement on the implement track", () => {
+        // given
+        const events: readonly LifecycleEvent[] = []
+
+        // when
+        const row = rowOf(events, 7)
+
+        // then
+        expect(row?.steps.map(entry => entry.step)).toEqual(["setup", "implement"])
+    })
+
+    it("should cover the merge-side steps on the merge track", () => {
+        // given
+        const events = [...implemented(7), event(7, "rebase", "running")]
+
+        // when
+        const row = rowOf(events, 7)
+
+        // then
+        expect(row?.steps.map(entry => entry.step)).toEqual(["rebase", "resolve", "merge", "gate", "fix", "revert"])
+    })
+})
+
+describe("boardOf: what a step is read at", () => {
+    it.each([
+        ["a step the log has been through", [event(7, "setup", "ok")], "setup" as Step, [], "settled"],
+        ["a step the log has never mentioned", [], "implement" as Step, [], "ahead"],
+        [
+            "the step the driver is running",
+            [event(7, "setup", "running")],
+            "setup" as Step,
+            [{ kind: "setup", ticket: 7 }] as const,
+            "live",
+        ],
+        [
+            "a step still ahead of the one being run",
+            [event(7, "setup", "running")],
+            "implement" as Step,
+            [{ kind: "setup", ticket: 7 }] as const,
+            "ahead",
+        ],
+    ] as const)("should read %s as %s", (_case, events, step, inFlight, expected) => {
+        // given
+        const log = events
+
+        // when
+        const weight = weightOf(log, 7, step, inFlight)
+
+        // then
+        expect(weight).toBe(expected)
+    })
+
+    it("should read a prepare pass at the step it was sent to repair", () => {
+        // given: the pass is on the implement track, because that is what it is repairing
+        const events = [event(7, "implement", "failed"), event(7, "prepare", "running")]
+        const inFlight: readonly Action[] = [{ kind: "prepare", ticket: 7, brokenStep: "implement" }]
+
+        // when
+        const weight = weightOf(events, 7, "implement", inFlight)
+
+        // then
+        expect(weight).toBe("live")
+    })
+
+    it("should read a merge-side prepare pass on the merge track", () => {
+        // given
+        const events = [...implemented(7), event(7, "merge", "failed"), event(7, "prepare", "running")]
+        const inFlight: readonly Action[] = [{ kind: "prepare", ticket: 7, brokenStep: "merge" }]
+
+        // when
+        const weight = weightOf(events, 7, "merge", inFlight)
+
+        // then
+        expect(weight).toBe("live")
+    })
+
+    it("should give at most one ticket a live step on the merge track", () => {
+        // given: the merge track is serial, so the live action set holds one of its actions at most
+        const events = [...implemented(7), ...implemented(8)]
+        const inFlight: readonly Action[] = [{ kind: "rebase", ticket: 7 }]
+
+        // when
+        const view = boardOf(MANIFEST, events, inFlight)
+
+        // then
+        expect(
+            view.rows.filter(row => row.track === "merge" && row.steps.some(entry => entry.state === "live")),
+        ).toHaveLength(1)
+    })
+})
+
+describe("boardOf: a ticket the merge track has not taken yet", () => {
+    it("should read an implemented ticket as waiting", () => {
+        // given
+        const events = implemented(7)
+
+        // when
+        const row = rowOf(events, 7)
+
+        // then
+        expect(row?.waiting).toBe(true)
+    })
+
+    it.each([
+        ["a ticket nothing has happened to", []],
+        ["a ticket being implemented", [event(7, "implement", "running")]],
+        ["a ticket the merge track has taken", [...implemented(7), event(7, "rebase", "running")]],
+    ] as const)("should not read %s as waiting", (_case, events) => {
+        // given
+        const log = events
+
+        // when
+        const row = rowOf(log, 7)
+
+        // then
+        expect(row?.waiting).toBe(false)
+    })
+
+    it("should tell three waiting tickets apart in no way at all", () => {
+        // given: three implemented tickets and no merge-side action, which is the whole of the queue
+        const events = [...implemented(7), ...implemented(8), ...implemented(9)]
+
+        // when
+        const view = boardOf(MANIFEST, events, [])
+
+        // then
+        expect(view.rows.map(row => ({ ...row, ticket: 0, title: "" }))).toEqual([
+            { ...view.rows[0], ticket: 0, title: "" },
+            { ...view.rows[0], ticket: 0, title: "" },
+            { ...view.rows[0], ticket: 0, title: "" },
+        ])
     })
 })

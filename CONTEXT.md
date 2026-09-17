@@ -229,6 +229,13 @@ because whether a `running` event is a step that is *happening* is a question th
 has no watcher of its own (ADR-0029).
 _Avoid_: dashboard, monitor, progress view, TUI
 
+**Trail**:
+A row's steps, across the track that row is on: the ones the log has been through, the one the
+driver is running now, and the ones still ahead. What has happened, what is happening and what is
+next, on one line. A prepare pass is no step of a trail — it is read at the step it was sent to
+repair, which is the step the domain already routes it by.
+_Avoid_: progress bar, timeline, breadcrumb
+
 **`.afk/`**:
 The run directory — the event log, worktrees, agent transcripts. Machine-local; nothing in it is
 expected to exist on another machine.
