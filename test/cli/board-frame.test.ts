@@ -12,9 +12,9 @@ import {
 import type { Conclusion, Step } from "../../src/domain/events.ts"
 
 /**
- * The layout, and no palette: every assertion here is either the plain text of a line or what a
- * span asks to be read at, and none of them holds an escape sequence. What a terminal makes of a
- * tone or a hue is the colouring step's, and it is asserted beside it (ADR-0031).
+ * The layout, and no palette: every assertion here is either the plain text of a line or the role a
+ * span carries, and none of them holds an escape sequence. What a terminal makes of a role is the
+ * colouring step's, and it is asserted beside it (ADR-0031, ADR-0033).
  *
  * Every rule of the frame has one test that is about it, and no rule has two. An expected line is
  * written out whole, because that is what makes a row readable as a row in a test; restating a
@@ -22,19 +22,19 @@ import type { Conclusion, Step } from "../../src/domain/events.ts"
  * it.
  */
 
-/** The weight one step of a trail is read at: what it came to, or where it stands. */
-type Weight = SettledOutcome | "running" | "ahead"
+/** Where one step of a trail stands: what it came to, or that it is running or still ahead. */
+type Standing = SettledOutcome | "running" | "ahead"
 
 /**
- * A trail written the short way: every step of the run, in order, at the weight it is read at. A
- * step left unnamed is still ahead, because a row covers every step whatever track it is on.
+ * A trail written the short way: every step of the run, in order, where it stands. A step left
+ * unnamed is still ahead, because a row covers every step whatever track it is on.
  */
-const trail = (steps: Partial<Record<Step, Weight>>): readonly BoardStep[] =>
+const trail = (steps: Partial<Record<Step, Standing>>): readonly BoardStep[] =>
     TRAIL_STEPS.map((step): BoardStep => {
-        const weight = steps[step] ?? "ahead"
-        return weight === "running" || weight === "ahead"
-            ? { step, state: weight }
-            : { step, state: "settled", outcome: weight }
+        const standing = steps[step] ?? "ahead"
+        return standing === "running" || standing === "ahead"
+            ? { step, state: standing }
+            : { step, state: "settled", outcome: standing }
     })
 
 const row = (
@@ -50,7 +50,7 @@ const row = (
     steps,
     waiting: rest.waiting ?? false,
     conclusion: rest.conclusion,
-    // Why a step came to what it did is the line adapter's to say: a row says it in a hue.
+    // Why a step came to what it did is the line adapter's to say: a row says it in a colour.
     detail: undefined,
 })
 
@@ -326,9 +326,8 @@ describe("boardFrame: the footer", () => {
 
 /**
  * The layout hands out spans, and this is where they are read as spans rather than as the text they
- * carry: where a step stands in the run is a tone, and an outcome worth noticing is a hue. No
- * assertion here holds an escape sequence — what colour makes of a tone is the colouring step's
- * (ADR-0031).
+ * carry: what each part of a row is, as the role it is given. No assertion here holds an escape
+ * sequence — what a terminal makes of a role is the colouring step's (ADR-0031, ADR-0033).
  */
 describe("boardFrame: what a row asks to be read at", () => {
     it("should hand a row out as the parts it is made of, each in a span of its own", () => {
@@ -362,54 +361,68 @@ describe("boardFrame: what a row asks to be read at", () => {
     })
 
     it.each([
-        ["a step still ahead", "ahead", "dim"],
-        ["a settled step", "ok", "normal"],
-        ["a step the log started and has not ended", "running", "bright"],
-    ] as const)("should read %s at its own weight", (_case, weight, tone) => {
+        ["a step still ahead", "ahead", "ahead"],
+        ["a step the log started and has not ended", "running", "running"],
+        ["a settled step that went well", "ok", "plain"],
+        ["a settled conflicted step", "conflicted", "conflicted"],
+        ["a settled failed step", "failed", "failed"],
+        ["a settled skipped step", "skipped", "skipped"],
+    ] as const)("should read %s as its own role", (_case, standing, role) => {
         // given
         const view: BoardView = {
             at: undefined,
-            rows: [row(7, "A ticket", "implement", trail({ setup: weight }))],
+            rows: [row(7, "A ticket", "implement", trail({ resolve: standing }))],
         }
 
         // when
         const [line] = boardFrame(view, WIDE)
 
         // then
-        expect(spanFor(line, "setup")?.tone).toBe(tone)
+        expect(spanFor(line, "resolve")?.role).toBe(role)
     })
 
     it.each([
-        ["a settled conflicted step", "conflicted", "amber"],
-        ["a settled failed step", "failed", "red"],
-        ["a settled step that went well", "ok", undefined],
-        ["a settled skipped step", "skipped", undefined],
-    ] as const)("should give %s its hue", (_case, outcome, hue) => {
+        ["a ticket the gate has proven", "verified", "verified"],
+        ["a ticket that broke", "failed", "failed"],
+        ["a ticket a blocker took down with it", "skipped", "skipped"],
+        ["a ticket that landed unproven", "unverified", "plain"],
+    ] as const)("should read the number of %s as the run's verdict on it", (_case, conclusion, role) => {
         // given
         const view: BoardView = {
             at: undefined,
-            rows: [row(7, "A ticket", "implement", trail({ resolve: outcome }))],
+            rows: [row(7, "A ticket", "merge", trail({ gate: "ok" }), { conclusion })],
         }
 
         // when
         const [line] = boardFrame(view, WIDE)
 
         // then
-        expect(spanFor(line, "resolve")?.hue).toBe(hue)
+        expect(spanFor(line, "7")?.role).toBe(role)
     })
 
-    it("should turn a verified ticket's number green", () => {
+    it("should read a ticket the run has brought to nothing yet as plain", () => {
         // given
-        const verified = row(7, "A ticket", "merge", trail({ gate: "ok" }), { conclusion: "verified" })
+        const view: BoardView = { at: undefined, rows: [row(7, "A ticket", "implement", IMPLEMENTING)] }
 
         // when
-        const [line] = boardFrame({ at: undefined, rows: [verified] }, WIDE)
+        const [line] = boardFrame(view, WIDE)
 
         // then
-        expect(spanFor(line, "7")?.hue).toBe("green")
+        expect(spanFor(line, "7")?.role).toBe("plain")
     })
 
-    it("should give green to nothing but a verified ticket's number", () => {
+    it("should mark a dead ticket at the verdict its number carries", () => {
+        // given
+        const skipped = row(7, "A ticket", "implement", trail({ setup: "ok" }), { conclusion: "skipped" })
+
+        // when
+        const [line] = boardFrame({ at: undefined, rows: [skipped] }, WIDE)
+
+        // then
+        expect(spanFor(line, "dead")?.role).toBe("skipped")
+    })
+
+    it("should give verified to nothing but the number of a ticket the gate proved", () => {
         // given: every row a run has, verified and unverified, alongside every settled outcome
         const view: BoardView = {
             at: undefined,
@@ -421,9 +434,9 @@ describe("boardFrame: what a row asks to be read at", () => {
         }
 
         // when
-        const green = boardFrame(view, WIDE).flatMap(line => line.filter(span => span.hue === "green"))
+        const verified = boardFrame(view, WIDE).flatMap(line => line.filter(span => span.role === "verified"))
 
         // then
-        expect(green.map(span => span.text)).toEqual(["7"])
+        expect(verified.map(span => span.text)).toEqual(["7"])
     })
 })

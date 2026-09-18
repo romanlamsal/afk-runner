@@ -223,18 +223,17 @@ come to none.
 _Avoid_: result, final status, verdict
 
 **Board**:
-What a run shows while it runs: every ticket of the spec at once, each on the track it is currently
-on. Derived from the manifest and the event log and from nothing else: it says what the log says,
-and claims nothing about liveness, because a step the log left `running` is one whose end event is
-not written rather than one that is certainly happening (ADR-0030). Nothing about it is written
+What a run shows while it runs: every ticket of the spec at once, one row each. Derived from the
+manifest and the event log and from nothing else: it says what the log says, and claims nothing
+about liveness, because a step the log left `running` is one whose end event is not written rather
+than one that is certainly happening (ADR-0030). Nothing about it is written
 down, and `afk <spec> --board-only` draws the same board from the run directory.
 _Avoid_: dashboard, monitor, progress view, TUI
 
 **Trail**:
-A row's steps, across the track that row is on: the ones the log has been through, the one it
-started and has not ended, and the ones still ahead. What has happened, what was begun and what is
-next, on one line. A prepare pass is no step of a trail — it is read at the step it was sent to
-repair, which is the step the domain already routes it by.
+The steps on a board's row: every step of the run, in the order a ticket takes them, and the same on
+every row whatever track the ticket is on. What has happened, what was begun and what is still
+ahead, on one line.
 _Avoid_: progress bar, timeline, breadcrumb
 
 **Interrupted**:

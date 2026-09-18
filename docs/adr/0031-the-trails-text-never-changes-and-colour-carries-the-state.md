@@ -26,6 +26,11 @@ state is carried by colour.**
 The trail is `setup implement rebase resolve merge gate fix revert`, identical on every row and in
 every frame. A step's place in the run is a tone, and an outcome worth noticing is a hue:
 
+> **The table below is superseded by ADR-0033.** The tone ladder was the part of this decision that
+> failed: on a real terminal SGR 2 can go unrendered and SGR 1 selects the scheme's intense
+> foreground rather than a weight, so two of its three levels did not read. State is now carried by
+> hue and underline, and the palette lives only in `board-paint.ts`. Everything else here stands.
+
 | meaning | treatment |
 | --- | --- |
 | step still ahead | dim |

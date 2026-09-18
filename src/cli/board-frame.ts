@@ -1,5 +1,6 @@
 import { type BoardRow, type BoardStep, type BoardView, dead, type SettledOutcome } from "../domain/board.ts"
-import { type Hue, type Line, plain, type Span, type Tone, widthOf } from "./board-span.ts"
+import type { Conclusion } from "../domain/events.ts"
+import { type Line, plain, type Role, type Span, widthOf } from "./board-span.ts"
 
 /**
  * The board's frame: a pure mapping from a view and a terminal width to the lines that view is. It
@@ -11,11 +12,11 @@ import { type Hue, type Line, plain, type Span, type Tone, widthOf } from "./boa
  * sequence is characters to `padEnd` and to a length check (ADR-0031).
  *
  * The trail's text is written once and never changes: every row carries the same step names in the
- * same columns for the whole run, and what a step is read at is a tone and an outcome worth noticing
- * is a hue. The board therefore needs a colour terminal and consults nothing about whether it has
- * one — with colour off, every row reads as the same eight words, which is the price ADR-0031 takes
- * for a row that never moves while it is being read. Off a terminal there is no board at all, and
- * `boardLines` is what runs.
+ * same columns for the whole run, and what a step is is a role the colouring gives a treatment to.
+ * The board therefore needs a colour terminal and consults nothing about whether it has one — with
+ * colour off, every row reads as the same eight words, which is the price ADR-0031 takes for a row
+ * that never moves while it is being read. Off a terminal there is no board at all, and `boardLines`
+ * is what runs.
  *
  * There is one block and no headings: a row spans every step in order, whatever track its ticket is
  * on, so a ticket reaching the merge track changes what its trail says rather than where its row is
@@ -36,54 +37,57 @@ import { type Hue, type Line, plain, type Span, type Tone, widthOf } from "./boa
  * wrapped would occupy two rows while counting as one, which puts every later redraw out by a line.
  */
 
+/** What a settled step came to, as the role it is read as. A step that simply worked is plain. */
+const SETTLED_ROLES: Record<SettledOutcome, Role> = {
+    ok: "plain",
+    conflicted: "conflicted",
+    failed: "failed",
+    skipped: "skipped",
+}
+
 /**
- * Where a step stands in the run, as the tone it is read at. A step still ahead is dim, a settled
- * one is normal, and a step the log started and has not ended is the brightest thing on its row,
- * which is what makes the live edge of the run findable at a glance (ADR-0031).
+ * Where a step stands in the run, as the role it is read as: a step not reached yet is ahead, a step
+ * the log started and has not ended is running, and a settled one is whatever it settled on.
  */
-const toneOf = (entry: BoardStep): Tone => {
+const roleOf = (entry: BoardStep): Role => {
     switch (entry.state) {
         case "settled":
-            return "normal"
+            return SETTLED_ROLES[entry.outcome]
         case "running":
-            return "bright"
+            return "running"
         case "ahead":
-            return "dim"
+            return "ahead"
     }
 }
 
 /**
- * What a settled step came to, where it came to something worth a colour of its own. A conflicted
- * step is amber rather than red, because the board does not call a state git drew a failure, and a
- * step that settled on anything else is the run working and needs no hue to say so.
- */
-const HUES: Partial<Record<SettledOutcome, Hue>> = {
-    conflicted: "amber",
-    failed: "red",
-}
-
-/**
  * One step of a trail: its name, and nothing else ever. The brackets and the outcome glyph are gone
- * — they existed so a green step and a red one differed with colour off, and hue says it now — so a
- * step occupies the same columns from the first frame to the last (ADR-0031).
+ * — they existed so a green step and a red one differed with colour off, and the palette says it now
+ * — so a step occupies the same columns from the first frame to the last (ADR-0031).
  */
-const stepSpan = (entry: BoardStep): Span => {
-    const hue = entry.state === "settled" ? HUES[entry.outcome] : undefined
-    const span = { text: entry.step, tone: toneOf(entry) }
+const stepSpan = (entry: BoardStep): Span => ({ text: entry.step, role: roleOf(entry) })
 
-    return hue === undefined ? span : { ...span, hue }
+/**
+ * What a ticket came to, as the role its number is read as. A run that has not brought the ticket to
+ * anything, and one that has brought it no further than unverified, is plain: the number column
+ * answers what landed, and a ticket still moving has not answered yet.
+ */
+const CONCLUSION_ROLES: Record<Conclusion, Role> = {
+    verified: "verified",
+    unverified: "plain",
+    failed: "failed",
+    skipped: "skipped",
 }
 
 /**
- * A row's ticket number, green once the gate has proven the ticket and plain until then. Green is
- * the board's one reward and nothing smaller than a verified ticket is ever given it, so that a
- * screen of green numbers is a count of what has landed (ADR-0031).
+ * What the row's verdict is read as, and the reason the number column is worth reading on its own:
+ * green landed, red broke, amber never got its chance, plain still going. A screen of numbers is
+ * therefore the run's tally, and the trail is only consulted when one of them is odd (ADR-0033).
  */
-const numberSpan = (row: BoardRow): Span => {
-    const text = `${row.ticket}`
+const verdictOf = (row: BoardRow): Role => (row.conclusion === undefined ? "plain" : CONCLUSION_ROLES[row.conclusion])
 
-    return row.conclusion === "verified" ? { text, tone: "normal", hue: "green" } : plain(text)
-}
+/** A row's ticket number, at the verdict the run has reached about it. */
+const numberSpan = (row: BoardRow): Span => ({ text: `${row.ticket}`, role: verdictOf(row) })
 
 /** What a ticket the merge track has not taken yet reads as. It is a state, never a position. */
 const WAITING = "waiting"
@@ -92,6 +96,9 @@ const WAITING = "waiting"
  * What a ticket nothing more will happen to reads as. It is written at the end of the trail the
  * ticket died on rather than in a block of its own, so that a dead ticket stays where it died and
  * the frame's height stays the ticket count.
+ *
+ * It carries the row's verdict, like the number does: a ticket that broke and one that never got its
+ * chance are both dead and are not the same news.
  */
 const DEAD = "dead"
 
@@ -181,9 +188,13 @@ const wrapped = (text: string, width: number): readonly Line[] => {
  * where there is nothing after them to push around (ADR-0031).
  */
 const trail = (row: BoardRow): Line =>
-    [...row.steps.map(stepSpan), ...(row.waiting ? [plain(WAITING)] : []), ...(dead(row) ? [plain(DEAD)] : [])]
+    [
+        ...row.steps.map(stepSpan),
+        ...(row.waiting ? [plain(WAITING)] : []),
+        ...(dead(row) ? [{ text: DEAD, role: verdictOf(row) }] : []),
+    ]
         // A separator of its own between two steps, so that the step spans hold nothing but a step
-        // and the tone a step is read at reaches no space beside it.
+        // and what a step is read as reaches no space beside it.
         .flatMap((span, index): Span[] => (index === 0 ? [span] : [plain(" "), span]))
 
 /** A column's worth of padding, and no span at all where a column needs none. */

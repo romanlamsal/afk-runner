@@ -13,9 +13,8 @@ three pieces with one seam between each (ADR-0031).
 - **The frame** (`board-frame.ts`) holds the layout and nothing else: a pure mapping from a view
   and a terminal width to lines of spans. The trail, the ticket number's padding, one block in
   manifest order, the markers at the end of a row, cutting a row too wide for the terminal, and
-  the footer under the rows with its own wrapping. It says what each span is to be read at — a
-  tone, and a hue where there is an outcome worth one — and never what colour that is, so every
-  width it computes is computed on plain text.
+  the footer under the rows with its own wrapping. It says what each span is — a role — and never
+  what that looks like, so every width it computes is computed on plain text.
 - **The colouring** (`board-paint.ts`) holds the palette and no layout: a pure mapping from a line
   of spans to the string the writer writes. It is the last thing that happens to a line, and it
   changes no span's width. Changing a colour is a change here and nowhere else.
@@ -24,8 +23,9 @@ three pieces with one seam between each (ADR-0031).
   went away is not a run that failed. Off a terminal the second adapter of the same port runs, and
   it prints `board-lines.ts` — one line per row the next view changed.
 
-`board-span.ts` is the vocabulary the three share: a span, a tone, a hue, and what a line is worth
-in columns.
+`board-span.ts` is the vocabulary the three share: a span, the roles a span can have, and what a
+line is worth in columns. A role is what a thing is and never what it looks like, so the palette is
+one table in `board-paint.ts` and changing it touches nothing else (ADR-0033).
 
 The tests follow the same seam. Layout rules are asserted against the frame as plain text, with no
 escape sequence in any of them; palette rules are asserted against the colouring, with no layout in
