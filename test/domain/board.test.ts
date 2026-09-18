@@ -489,6 +489,10 @@ describe("boardOf: why a step came to what it did", () => {
     })
 })
 
+/**
+ * When the last thing happened is read off the log's last event rather than from a clock, which is
+ * what keeps the board without one: the same view is the same frame whenever it is drawn.
+ */
 describe("boardOf: when the last thing happened", () => {
     /** An event that says when it happened, which is the only thing these cases turn on. */
     const at = (when: string): LifecycleEvent => ({ ...event(7, "implement", "running"), at: when })

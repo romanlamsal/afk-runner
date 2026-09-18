@@ -9,7 +9,7 @@ import type { BoardView } from "../../src/domain/board.ts"
  */
 
 const VIEW: BoardView = {
-    at: undefined,
+    at: "2026-09-15T11:18:38.314Z",
     rows: [
         {
             ticket: 7,
@@ -82,7 +82,7 @@ describe("createLineBoard", () => {
     }
 
     const IMPLEMENTED: BoardView = {
-        at: undefined,
+        at: VIEW.at,
         rows: VIEW.rows.map(row => ({
             ...row,
             steps: [

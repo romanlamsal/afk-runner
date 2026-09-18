@@ -228,63 +228,28 @@ describe("boardFrame", () => {
     })
 })
 
-describe("boardFrame: the run's status line", () => {
-    it("should put a notice under both blocks, where no row ever moves for it", () => {
+/**
+ * The footer is what is about the run rather than about a ticket, and it sits under every row. It
+ * may grow — a notice arrives, and a long one takes several lines — and growing moves nothing above
+ * it, because the writer rewinds over the lines it last drew (ADR-0029).
+ */
+describe("boardFrame: the footer", () => {
+    const AT = "2026-09-15T11:18:38.314Z"
+
+    it("should carry the last event's timestamp under every row", () => {
         // given
-        const view: BoardView = { at: undefined, rows: [row(7, "Implement the slate", "implement", IMPLEMENTING)] }
-
-        // when
-        const lines = boardFrame(view, WIDE, "afk: interrupted").map(textOf)
-
-        // then
-        expect(lines).toEqual([
-            "implement track",
-            "  #7  setup\u2713 <implement>  Implement the slate",
-            "merge track",
-            "afk: interrupted",
-        ])
-    })
-
-    it("should leave the frame as it was where the run has said nothing", () => {
-        // given
-        const view = VIEW
+        const view: BoardView = { ...VIEW, at: AT }
 
         // when
         const lines = boardFrame(view, WIDE).map(textOf)
 
         // then
-        expect(lines).toHaveLength(VIEW.rows.length + 2)
+        expect(lines.at(-1)).toBe(`last event ${AT}`)
     })
 
-    it("should truncate a notice too long for the terminal rather than wrap it", () => {
+    it("should say nothing about time where the log holds no event", () => {
         // given
         const view = VIEW
-
-        // when
-        const lines = boardFrame(view, 20, "afk: interrupted — starting nothing new").map(textOf)
-
-        // then
-        expect(lines.at(-1)).toBe("afk: interrupted ...")
-    })
-})
-
-describe("boardFrame: when the last thing happened", () => {
-    const WHEN = "2026-09-15T11:18:38.314Z"
-
-    it("should write the view's timestamp under the blocks", () => {
-        // given
-        const view: BoardView = { ...VIEW, at: WHEN }
-
-        // when
-        const lines = boardFrame(view, WIDE).map(textOf)
-
-        // then
-        expect(lines.at(-1)).toBe(`last event ${WHEN}`)
-    })
-
-    it("should write nothing where the view carries no timestamp", () => {
-        // given
-        const view: BoardView = { ...VIEW, at: undefined }
 
         // when
         const lines = boardFrame(view, WIDE).map(textOf)
@@ -293,26 +258,60 @@ describe("boardFrame: when the last thing happened", () => {
         expect(lines.some(line => line.includes("last event"))).toBe(false)
     })
 
-    it("should keep the notice the frame's last line", () => {
+    it("should put the notice beneath the timestamp", () => {
         // given
-        const view: BoardView = { ...VIEW, at: WHEN }
+        const view: BoardView = { ...VIEW, at: AT }
 
         // when
         const lines = boardFrame(view, WIDE, "afk: interrupted").map(textOf)
 
         // then
-        expect(lines.slice(-2)).toEqual([`last event ${WHEN}`, "afk: interrupted"])
+        expect(lines.slice(-2)).toEqual([`last event ${AT}`, "afk: interrupted"])
     })
 
-    it("should truncate a timestamp line too long for the terminal rather than wrap it", () => {
+    it("should move no row when the footer grows", () => {
         // given
-        const view: BoardView = { ...VIEW, at: WHEN }
+        const view: BoardView = { ...VIEW, at: AT }
+        const before = boardFrame(view, WIDE).map(textOf)
 
         // when
-        const lines = boardFrame(view, 20).map(textOf)
+        const after = boardFrame(view, WIDE, "afk: interrupted").map(textOf)
 
         // then
-        expect(lines.at(-1)).toBe("last event 2026-0...")
+        expect(after.slice(0, before.length)).toEqual(before)
+    })
+
+    it("should wrap a notice too long for the terminal rather than truncate it", () => {
+        // given
+        const notice = "afk: interrupted — starting nothing new"
+
+        // when
+        const lines = boardFrame(VIEW, 20, notice).map(textOf)
+
+        // then
+        expect(lines.slice(VIEW.rows.length + 2).join(" ")).toBe(notice)
+    })
+
+    it.each([[WIDE], [20], [8], [1]] as const)("should hold the footer within a width of %i", width => {
+        // given
+        const view: BoardView = { ...VIEW, at: AT }
+
+        // when
+        const lines = boardFrame(view, width, "afk: interrupted — starting nothing new")
+
+        // then
+        expect(lines.every(line => widthOf(line) <= width)).toBe(true)
+    })
+
+    it("should break a word no terminal of that width could hold", () => {
+        // given
+        const view: BoardView = { ...VIEW, at: AT }
+
+        // when
+        const lines = boardFrame(view, 8).map(textOf)
+
+        // then
+        expect(lines.slice(VIEW.rows.length + 2)).toEqual(["last", "event", "2026-09-", "15T11:18", ":38.314Z"])
     })
 })
 

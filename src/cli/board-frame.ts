@@ -18,13 +18,18 @@ import { type Line, plain, type Span, widthOf } from "./board-span.ts"
  * text before any colour exists. Colour is applied after the layout, never inside it: an escape
  * sequence is characters to `padEnd` and to a length check (ADR-0031).
  *
- * The height is the row count plus one header per track, whatever the view says, so the block never
- * grows or shrinks while somebody is reading it. That is also why a title is truncated rather than
+ * The block is the row count plus one header per track, whatever the view says, so it never grows
+ * or shrinks while somebody is reading it. That is also why a title is truncated rather than
  * wrapped: a wrapped line would break the one property the layout rests on.
  *
- * A footer sits under the blocks, where the things that are about the run rather than about a
- * ticket go: when the last thing happened, and then the drain notice. The notice stays the frame's
- * last line from the moment there is one, so the rows above it never move.
+ * Under the block sits the footer, which carries what is about the run rather than about a ticket:
+ * when the last thing happened, and beneath that the drain notice when there is one. The footer may
+ * grow, and growing costs nothing — the writer rewinds over the lines it last drew, so a line
+ * appended at the bottom moves no row above it.
+ *
+ * A footer line too wide for the terminal is wrapped here rather than truncated or left to the
+ * terminal: half an interrupt acknowledgement is the wrong thing to show, and a line the terminal
+ * wrapped would occupy two rows while counting as one, which puts every later redraw out by a line.
  */
 
 const HEADINGS: Record<Track, string> = {
@@ -112,6 +117,36 @@ const fitted = (line: Line, width: number): Line => {
     return [...kept, plain(ELLIPSIS)]
 }
 
+/**
+ * A footer line as the lines the terminal can hold it in: broken between words where it can be, and
+ * through a word no terminal of this width could hold whole. Nothing is dropped, because what the
+ * footer carries is what the operator asked for an answer to.
+ */
+const wrapped = (text: string, width: number): readonly Line[] => {
+    // A terminal claiming no width at all still gets a line each, rather than an endless one.
+    const room = Math.max(1, width)
+    const lines: string[] = []
+    let current = ""
+
+    for (const word of text.split(" ")) {
+        if (current !== "" && `${current} ${word}`.length <= room) {
+            current = `${current} ${word}`
+            continue
+        }
+        if (current !== "") {
+            lines.push(current)
+        }
+        let rest = word
+        while (rest.length > room) {
+            lines.push(rest.slice(0, room))
+            rest = rest.slice(room)
+        }
+        current = rest
+    }
+
+    return [...lines, current].map(line => [plain(line)])
+}
+
 /** A row's trail, which is what has happened, what is happening and what is next, in that order. */
 const trail = (row: BoardRow): Line =>
     [...row.steps.map(written), ...(row.waiting ? [WAITING] : []), ...(dead(row) ? [DEAD] : [])]
@@ -165,5 +200,5 @@ export const boardFrame = (view: BoardView, width: number, notice?: string): rea
 
     const footer = [...(view.at === undefined ? [] : [`${WHEN} ${view.at}`]), ...(notice === undefined ? [] : [notice])]
 
-    return [...blocks, ...footer.map(line => fitted([plain(line)], width))]
+    return [...blocks, ...footer.flatMap(line => wrapped(line, width))]
 }
