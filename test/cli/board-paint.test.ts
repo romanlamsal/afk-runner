@@ -3,8 +3,9 @@ import { painted } from "../../src/cli/board-paint.ts"
 import { type Hue, type Line, plain, type Tone, widthOf } from "../../src/cli/board-span.ts"
 
 /**
- * The palette, and no layout: every assertion here is one span and what a terminal makes of it, so
- * that changing a colour breaks this suite and nothing else (ADR-0031).
+ * The palette, and no layout: every assertion here is a span and what a terminal makes of it. No
+ * column, no padding and no row of the board appears in one, so that changing a colour breaks this
+ * suite and changing the layout does not (ADR-0031).
  */
 
 const span = (text: string, tone: Tone, hue?: Hue): Line => [hue === undefined ? { text, tone } : { text, tone, hue }]
@@ -21,12 +22,12 @@ const stripped = (drawn: string): string =>
 
 describe("painted", () => {
     it.each([
-        ["a step still ahead", "dim", "\u001b[2msetup\u001b[0m"],
-        ["a settled step", "normal", "setup"],
-        ["a step that started and has not ended", "bright", "\u001b[1msetup\u001b[0m"],
+        ["a step still ahead", "dim", "\u001b[2mtext\u001b[0m"],
+        ["a settled step", "normal", "text"],
+        ["a step that started and has not ended", "bright", "\u001b[1mtext\u001b[0m"],
     ] as const)("should write %s at its own weight", (_case, tone, expected) => {
         // given
-        const line = span("setup", tone)
+        const line = span("text", tone)
 
         // when
         const drawn = painted(line)
@@ -36,12 +37,12 @@ describe("painted", () => {
     })
 
     it.each([
-        ["a settled conflicted step", "amber", "\u001b[33mresolve\u001b[0m"],
-        ["a settled failed step", "red", "\u001b[31mresolve\u001b[0m"],
-        ["a verified ticket's number", "green", "\u001b[32mresolve\u001b[0m"],
+        ["a settled conflicted step", "amber", "\u001b[33mtext\u001b[0m"],
+        ["a settled failed step", "red", "\u001b[31mtext\u001b[0m"],
+        ["a verified ticket's number", "green", "\u001b[32mtext\u001b[0m"],
     ] as const)("should write %s in its own hue", (_case, hue, expected) => {
         // given
-        const line = span("resolve", "normal", hue)
+        const line = span("text", "normal", hue)
 
         // when
         const drawn = painted(line)
@@ -52,34 +53,29 @@ describe("painted", () => {
 
     it("should carry a span's weight and its hue at once", () => {
         // given
-        const line = span("revert", "dim", "red")
+        const line = span("text", "dim", "red")
 
         // when
         const drawn = painted(line)
 
         // then
-        expect(drawn).toBe("\u001b[2;31mrevert\u001b[0m")
+        expect(drawn).toBe("\u001b[2;31mtext\u001b[0m")
     })
 
     it("should leave a span with nothing to say as the text it is", () => {
         // given
-        const line: Line = [plain("  "), plain("#7")]
+        const line: Line = [plain("one"), plain("two")]
 
         // when
         const drawn = painted(line)
 
         // then
-        expect(drawn).toBe("  #7")
+        expect(drawn).toBe("onetwo")
     })
 
     it("should cost a line none of its width", () => {
         // given
-        const line: Line = [
-            plain("  "),
-            { text: "#7", tone: "normal", hue: "green" },
-            plain("  "),
-            ...span("setup", "dim"),
-        ]
+        const line: Line = [plain("one"), { text: "two", tone: "normal", hue: "green" }, ...span("three", "dim")]
 
         // when
         const drawn = painted(line)

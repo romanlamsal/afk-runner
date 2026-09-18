@@ -15,6 +15,11 @@ import type { Conclusion, Step } from "../../src/domain/events.ts"
  * The layout, and no palette: every assertion here is either the plain text of a line or what a
  * span asks to be read at, and none of them holds an escape sequence. What a terminal makes of a
  * tone or a hue is the colouring step's, and it is asserted beside it (ADR-0031).
+ *
+ * Every rule of the frame has one test that is about it, and no rule has two. An expected line is
+ * written out whole, because that is what makes a row readable as a row in a test; restating a
+ * row's shape inside a test about something else is the row being read, not a second assertion of
+ * it.
  */
 
 /** The weight one step of a trail is read at: what it came to, or where it stands. */
@@ -71,7 +76,7 @@ const TRAIL = "setup implement rebase resolve merge gate fix revert"
 const spanFor = (line: Line | undefined, text: string): Span | undefined => line?.find(span => span.text === text)
 
 describe("boardFrame", () => {
-    it("should hold every row in one block, with no headings", () => {
+    it("should hold every row in one block, one line each, with no heading between them", () => {
         // given
         const view = VIEW
 
@@ -85,7 +90,7 @@ describe("boardFrame", () => {
     it.each([
         ["a ticket on the implement track", row(7, "A ticket", "implement", IMPLEMENTING)],
         ["a ticket the merge track has taken", row(7, "A ticket", "merge", MERGING)],
-    ] as const)("should cover every step, in order, for %s", (_case, only) => {
+    ] as const)("should write every step, in order, for %s, whatever track it is on", (_case, only) => {
         // given
         const view: BoardView = { at: undefined, rows: [only] }
 
@@ -134,10 +139,10 @@ describe("boardFrame", () => {
         const waiting = row(7, "A ticket", "implement", trail({ setup: "ok", implement: "ok" }), { waiting: true })
 
         // when
-        const lines = boardFrame({ at: undefined, rows: [waiting] }, WIDE).map(textOf)
+        const [line] = boardFrame({ at: undefined, rows: [waiting] }, WIDE).map(textOf)
 
         // then
-        expect(lines).toContain(`    7  ${TRAIL} waiting`)
+        expect(line).toBe(`    7  ${TRAIL} waiting`)
     })
 
     it.each([
@@ -148,10 +153,10 @@ describe("boardFrame", () => {
         const view: BoardView = { at: undefined, rows: [row(7, "A ticket", "implement", steps, { conclusion })] }
 
         // when
-        const lines = boardFrame(view, WIDE).map(textOf)
+        const [line] = boardFrame(view, WIDE).map(textOf)
 
         // then
-        expect(lines).toContain(`    7  ${TRAIL} dead`)
+        expect(line).toBe(`    7  ${TRAIL} dead`)
     })
 
     it("should not mark a verified ticket dead", () => {
@@ -159,10 +164,10 @@ describe("boardFrame", () => {
         const verified = row(7, "A ticket", "merge", trail({ gate: "ok" }), { conclusion: "verified" })
 
         // when
-        const lines = boardFrame({ at: undefined, rows: [verified] }, WIDE).map(textOf)
+        const [line] = boardFrame({ at: undefined, rows: [verified] }, WIDE).map(textOf)
 
         // then
-        expect(lines).toContain(`    7  ${TRAIL}`)
+        expect(line).toBe(`    7  ${TRAIL}`)
     })
 
     it("should say nothing about repair beside a step the log left running", () => {
@@ -170,10 +175,10 @@ describe("boardFrame", () => {
         const stuck = row(7, "A ticket", "merge", trail({ rebase: "ok", revert: "running" }))
 
         // when
-        const lines = boardFrame({ at: undefined, rows: [stuck] }, WIDE).map(textOf)
+        const [line] = boardFrame({ at: undefined, rows: [stuck] }, WIDE).map(textOf)
 
         // then
-        expect(lines).toContain(`    7  ${TRAIL}`)
+        expect(line).toBe(`    7  ${TRAIL}`)
     })
 
     it.each([
@@ -203,23 +208,6 @@ describe("boardFrame", () => {
     })
 
     it.each([
-        ["waiting", row(7, "A ticket", "implement", trail({ setup: "ok", implement: "ok" }), { waiting: true })],
-        [
-            "dead",
-            row(7, "A ticket", "implement", trail({ setup: "ok", implement: "failed" }), { conclusion: "failed" }),
-        ],
-    ] as const)("should put %s at the end of the row, with nothing after it", (marker, marked) => {
-        // given
-        const view: BoardView = { at: undefined, rows: [marked] }
-
-        // when
-        const [line] = boardFrame(view, WIDE).map(textOf)
-
-        // then
-        expect(line?.endsWith(` ${marker}`)).toBe(true)
-    })
-
-    it.each([
         ["a ticket being implemented", row(7, "A ticket", "implement", IMPLEMENTING)],
         ["a ticket being merged", row(108, "Another", "merge", MERGING)],
         ["a verified ticket", row(12345, "A third", "merge", trail({ gate: "ok" }), { conclusion: "verified" })],
@@ -232,17 +220,6 @@ describe("boardFrame", () => {
 
         // then
         expect(line?.endsWith("...")).toBe(false)
-    })
-
-    it("should be as tall as the row count, because there is one block and no heading", () => {
-        // given
-        const view = VIEW
-
-        // when
-        const lines = boardFrame(view, WIDE).map(textOf)
-
-        // then
-        expect(lines).toHaveLength(VIEW.rows.length)
     })
 
     it.each([[WIDE], [24], [8], [2]] as const)("should truncate rather than wrap at a width of %i", width => {
@@ -279,28 +256,6 @@ describe("boardFrame", () => {
 describe("boardFrame: the footer", () => {
     const AT = "2026-09-15T11:18:38.314Z"
 
-    it("should put a notice under the rows, where no row ever moves for it", () => {
-        // given
-        const view: BoardView = { at: undefined, rows: [row(7, "Implement the slate", "implement", IMPLEMENTING)] }
-
-        // when
-        const lines = boardFrame(view, WIDE, "afk: interrupted").map(textOf)
-
-        // then
-        expect(lines).toEqual([`    7  ${TRAIL}`, "afk: interrupted"])
-    })
-
-    it("should carry the last event's timestamp under every row", () => {
-        // given
-        const view: BoardView = { ...VIEW, at: AT }
-
-        // when
-        const lines = boardFrame(view, WIDE).map(textOf)
-
-        // then
-        expect(lines.at(-1)).toBe(`last event ${AT}`)
-    })
-
     it("should say nothing about time where the log holds no event", () => {
         // given
         const view = VIEW
@@ -312,7 +267,7 @@ describe("boardFrame: the footer", () => {
         expect(lines.some(line => line.includes("last event"))).toBe(false)
     })
 
-    it("should put the notice beneath the timestamp", () => {
+    it("should carry the last event's timestamp under the rows, with the notice beneath it", () => {
         // given
         const view: BoardView = { ...VIEW, at: AT }
 

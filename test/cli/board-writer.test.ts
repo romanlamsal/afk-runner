@@ -3,10 +3,14 @@ import { createLineBoard, createTerminalBoard } from "../../src/cli/board-writer
 import type { BoardView } from "../../src/domain/board.ts"
 
 /**
- * The cursor is the writer's and nothing here asserts about it: what is asserted is the one thing
- * the writer alone owns, which is that a notice arriving out of the loop's turn — a signal handler
- * is the caller — reaches the screen at once and stays on the frames after it (ADR-0029).
+ * The writer's own rules and none of the frame's: how far it rewinds before it draws again, that a
+ * terminal which went away cannot fail a run, and that a notice arriving out of the loop's turn — a
+ * signal handler is the caller — reaches the screen at once and stays on the frames after it
+ * (ADR-0029). What a frame is made of is the frame's, and it is asserted there.
  */
+
+/** Cursor up over one line and clear it, which is what rewinding over a drawn line costs. */
+const REWIND = "\u001b[A\u001b[2K"
 
 const VIEW: BoardView = {
     at: "2026-09-15T11:18:38.314Z",
@@ -57,6 +61,46 @@ describe("createTerminalBoard", () => {
 
         // then
         expect(written.at(-1)).toContain(DRAINING)
+    })
+
+    it("should rewind over every line it last drew before it draws again", () => {
+        // given
+        const { written, board } = harness()
+        board.show(VIEW)
+        const drawn = written.at(-1)?.split("\n").length ?? 0
+
+        // when
+        board.show(VIEW)
+
+        // then
+        expect(written.at(-1)?.startsWith(REWIND.repeat(drawn - 1))).toBe(true)
+    })
+
+    it("should rewind over nothing before the first frame, where there is nothing drawn to rewind over", () => {
+        // given
+        const { written, board } = harness()
+
+        // when
+        board.show(VIEW)
+
+        // then
+        expect(written.at(-1)?.startsWith(REWIND)).toBe(false)
+    })
+
+    it("should swallow a write that fails, because a terminal that went away is not a run that failed", () => {
+        // given
+        const board = createTerminalBoard({
+            write: () => {
+                throw new Error("EPIPE")
+            },
+            columns: () => 80,
+        })
+
+        // when
+        const drawing = () => board.show(VIEW)
+
+        // then
+        expect(drawing).not.toThrow()
     })
 
     it("should write nothing for a notice that arrives before the first frame", () => {
