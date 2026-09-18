@@ -119,12 +119,10 @@ describe("boardLines", () => {
         expect(lines).toEqual(["#7 setup ok", "#7 implement running"])
     })
 
-    it("should say nothing for the trail a ticket left behind when it moved track", () => {
-        // given
-        const before = view(row(trail({ setup: "ok", implement: "ok" })))
-        const merging = row(trail({ rebase: "running", resolve: "ahead", merge: "ahead", gate: "ahead" }), {
-            track: "merge",
-        })
+    it("should say only the step that began when a ticket reaches the merge track", () => {
+        // given: a row spans every step, so a track change leaves no trail behind it
+        const before = view(row(trail({ setup: "ok", implement: "ok", rebase: "ahead" })))
+        const merging = row(trail({ setup: "ok", implement: "ok", rebase: "running" }), { track: "merge" })
 
         // when
         const lines = boardLines(before, view(merging))

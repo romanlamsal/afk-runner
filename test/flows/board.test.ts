@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest"
 import { createCli } from "../../src/cli/cli.ts"
 import { EXIT, type ExitCode } from "../../src/cli/exit-codes.ts"
 import { createRun } from "../../src/cli/run.ts"
-import type { LifecycleEvent } from "../../src/domain/events.ts"
+import { type BoardStep, TRAIL_STEPS } from "../../src/domain/board.ts"
+import type { LifecycleEvent, Step } from "../../src/domain/events.ts"
 import { createShowBoardService } from "../../src/service/board.ts"
 import type { StartRun } from "../../src/service/start.ts"
 import { createFakeBoard } from "../fakes/board.ts"
@@ -22,6 +23,16 @@ import { manifestOf, ticket } from "../fixtures/manifest.ts"
 const MANIFEST = manifestOf([ticket(5), ticket(6, [5])])
 
 const at = (minute: number): string => `2026-01-01T10:0${minute}:00.000Z`
+
+/**
+ * A row's trail, written as the steps that are not still ahead: a row covers every step of the run
+ * whatever track its ticket is on (ADR-0031).
+ */
+const steps = (weights: Partial<Record<Step, "ahead" | "running" | "ok">>): readonly BoardStep[] =>
+    TRAIL_STEPS.map((step): BoardStep => {
+        const weight = weights[step] ?? "ahead"
+        return weight === "ok" ? { step, state: "settled", outcome: "ok" } : { step, state: weight }
+    })
 
 /** A run the viewer must never start: reaching `start` at all is the failure this catches. */
 const refusingStart: StartRun = async () => ({ outcome: "refused", reason: "the viewer started a run" })
@@ -114,10 +125,7 @@ describe("afk <spec> --board-only", () => {
                         ticket: 5,
                         title: "ticket 5",
                         track: "implement",
-                        steps: [
-                            { step: "setup", state: "ahead" },
-                            { step: "implement", state: "ahead" },
-                        ],
+                        steps: steps({}),
                         waiting: false,
                         conclusion: undefined,
                         detail: undefined,
@@ -126,10 +134,7 @@ describe("afk <spec> --board-only", () => {
                         ticket: 6,
                         title: "ticket 6",
                         track: "implement",
-                        steps: [
-                            { step: "setup", state: "ahead" },
-                            { step: "implement", state: "ahead" },
-                        ],
+                        steps: steps({}),
                         waiting: false,
                         conclusion: undefined,
                         detail: undefined,
@@ -149,10 +154,7 @@ describe("afk <spec> --board-only", () => {
         await cli(["4", "--board-only"])
 
         // then
-        expect(board.shown[0]?.rows[0]?.steps).toEqual([
-            { step: "setup", state: "ahead" },
-            { step: "implement", state: "running" },
-        ])
+        expect(board.shown[0]?.rows[0]?.steps).toEqual(steps({ implement: "running" }))
     })
 
     it.each([
@@ -201,18 +203,9 @@ describe("afk <spec> --board-only", () => {
 
         // then
         expect(board.shown.map(view => view.rows[0]?.steps)).toEqual([
-            [
-                { step: "setup", state: "ahead" },
-                { step: "implement", state: "ahead" },
-            ],
-            [
-                { step: "setup", state: "running" },
-                { step: "implement", state: "ahead" },
-            ],
-            [
-                { step: "setup", state: "settled", outcome: "ok" },
-                { step: "implement", state: "ahead" },
-            ],
+            steps({}),
+            steps({ setup: "running" }),
+            steps({ setup: "ok" }),
         ])
     })
 

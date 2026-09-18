@@ -1,16 +1,26 @@
 import { describe, expect, it } from "vitest"
 import { boardFrame } from "../../src/cli/board-frame.ts"
 import { textOf, widthOf } from "../../src/cli/board-span.ts"
-import type { BoardRow, BoardStep, BoardView, SettledOutcome, Track } from "../../src/domain/board.ts"
+import {
+    type BoardRow,
+    type BoardStep,
+    type BoardView,
+    type SettledOutcome,
+    TRAIL_STEPS,
+    type Track,
+} from "../../src/domain/board.ts"
 import type { Conclusion, Step } from "../../src/domain/events.ts"
 
+/** The weight one step of a trail is read at: what it came to, or where it stands. */
+type Weight = SettledOutcome | "running" | "ahead"
+
 /**
- * A trail written the short way: the steps of a track, each at the weight it is read at — `running`
- * or `ahead`, or what a settled step came to.
+ * A trail written the short way: every step of the run, in order, at the weight it is read at. A
+ * step left unnamed is still ahead, because a row covers every step whatever track it is on.
  */
-const trail = (steps: Readonly<Record<string, SettledOutcome | "running" | "ahead">>): readonly BoardStep[] =>
-    Object.entries(steps).map(([name, weight]) => {
-        const step = name as Step
+const trail = (steps: Partial<Record<Step, Weight>>): readonly BoardStep[] =>
+    TRAIL_STEPS.map((step): BoardStep => {
+        const weight = steps[step] ?? "ahead"
         return weight === "running" || weight === "ahead"
             ? { step, state: weight }
             : { step, state: "settled", outcome: weight }
@@ -35,16 +45,9 @@ const row = (
 
 const IMPLEMENTING = trail({ setup: "ok", implement: "running" })
 
-const MERGING = trail({
-    rebase: "ok",
-    resolve: "ahead",
-    merge: "running",
-    gate: "ahead",
-    fix: "ahead",
-    revert: "ahead",
-})
+const MERGING = trail({ setup: "ok", implement: "ok", rebase: "ok", merge: "running" })
 
-/** A view with a row on each track, which is the shape the layout has to hold. */
+/** A view with a row on each track, which is the shape the one block has to hold. */
 const VIEW: BoardView = {
     at: undefined,
     rows: [
@@ -56,29 +59,7 @@ const VIEW: BoardView = {
 const WIDE = 120
 
 describe("boardFrame", () => {
-    it.each([["implement track"], ["merge track"]] as const)("should head its blocks with %s", heading => {
-        // given
-        const view = VIEW
-
-        // when
-        const lines = boardFrame(view, WIDE).map(textOf)
-
-        // then
-        expect(lines).toContain(heading)
-    })
-
-    it("should head both blocks even where one of them has no rows", () => {
-        // given
-        const view: BoardView = { at: undefined, rows: [row(7, "Implement the slate", "implement", IMPLEMENTING)] }
-
-        // when
-        const lines = boardFrame(view, WIDE).map(textOf)
-
-        // then
-        expect(lines).toEqual(["implement track", "  #7  setup\u2713 <implement>  Implement the slate", "merge track"])
-    })
-
-    it("should put a ticket's row under the heading of the track it is on", () => {
+    it("should hold every row in one block, with no headings", () => {
         // given
         const view = VIEW
 
@@ -87,25 +68,51 @@ describe("boardFrame", () => {
 
         // then
         expect(lines).toEqual([
-            "implement track",
-            "  #108  setup\u2713 <implement>  Rebase onto the spec branch",
-            "merge track",
-            "  #7    rebase\u2713 (resolve) <merge> (gate) (fix) (revert)  Implement the slate",
+            "  #7    setup✓ implement✓ rebase✓ (resolve) <merge> (gate) (fix) (revert)    Implement the slate",
+            "  #108  setup✓ <implement> (rebase) (resolve) (merge) (gate) (fix) (revert)  Rebase onto the spec branch",
         ])
     })
 
     it.each([
-        ["a settled step", "setup\u2713"],
+        ["a ticket on the implement track", row(7, "A ticket", "implement", IMPLEMENTING)],
+        ["a ticket the merge track has taken", row(7, "A ticket", "merge", MERGING)],
+    ] as const)("should cover every step, in order, for %s", (_case, only) => {
+        // given
+        const view: BoardView = { at: undefined, rows: [only] }
+
+        // when
+        const [line] = boardFrame(view, WIDE).map(textOf)
+
+        // then
+        expect(TRAIL_STEPS.every(step => line?.includes(step))).toBe(true)
+    })
+
+    it("should keep a ticket that reached the merge track in the row it has always had", () => {
+        // given: the same view twice, with its second ticket taken into the merge track
+        const others = [row(7, "A ticket", "merge", MERGING)]
+        const implementing: BoardView = {
+            at: undefined,
+            rows: [...others, row(108, "Another", "implement", IMPLEMENTING)],
+        }
+        const merging: BoardView = { at: undefined, rows: [...others, row(108, "Another", "merge", MERGING)] }
+        const was = boardFrame(implementing, WIDE).findIndex(line => textOf(line).includes("#108"))
+
+        // when
+        const now = boardFrame(merging, WIDE).findIndex(line => textOf(line).includes("#108"))
+
+        // then
+        expect(now).toBe(was)
+    })
+
+    it.each([
+        ["a settled step", "setup✓"],
         ["a step the log has not ended", "<implement>"],
         ["a step still ahead", "(rebase)"],
     ] as const)("should write %s as %s", (_case, written) => {
         // given
         const view: BoardView = {
             at: undefined,
-            rows: [
-                row(7, "A ticket", "implement", IMPLEMENTING),
-                row(8, "Another ticket", "merge", trail({ rebase: "ahead", merge: "ahead" })),
-            ],
+            rows: [row(7, "A ticket", "implement", IMPLEMENTING), row(8, "Another ticket", "merge", MERGING)],
         }
 
         // when
@@ -123,13 +130,15 @@ describe("boardFrame", () => {
         const lines = boardFrame({ at: undefined, rows: [waiting] }, WIDE).map(textOf)
 
         // then
-        expect(lines).toContain("  #7  setup\u2713 implement\u2713 waiting  A ticket")
+        expect(lines).toContain(
+            "  #7  setup✓ implement✓ (rebase) (resolve) (merge) (gate) (fix) (revert) waiting  A ticket",
+        )
     })
 
     it.each([
-        ["ok", "\u2713"],
-        ["failed", "\u2717"],
-        ["skipped", "\u00b7"],
+        ["ok", "✓"],
+        ["failed", "✗"],
+        ["skipped", "·"],
         ["conflicted", "!"],
     ] as const)("should write a step that came to %s with the glyph %s", (outcome, glyph) => {
         // given
@@ -139,21 +148,21 @@ describe("boardFrame", () => {
         const lines = boardFrame(view, WIDE).map(textOf)
 
         // then
-        expect(lines).toContain(`  #7  setup${glyph}  A ticket`)
+        expect(lines).toContain(
+            `  #7  setup${glyph} (implement) (rebase) (resolve) (merge) (gate) (fix) (revert)  A ticket`,
+        )
     })
 
     it.each([
         [
             "a ticket whose implementer failed",
             row(7, "A ticket", "implement", trail({ setup: "ok", implement: "failed" }), { conclusion: "failed" }),
-            "  #7  setup\u2713 implement\u2717 dead  A ticket",
+            "  #7  setup✓ implement✗ (rebase) (resolve) (merge) (gate) (fix) (revert) dead  A ticket",
         ],
         [
             "a ticket blocked by one that will not land",
-            row(7, "A ticket", "implement", trail({ setup: "ahead", implement: "skipped" }), {
-                conclusion: "skipped",
-            }),
-            "  #7  (setup) implement\u00b7 dead  A ticket",
+            row(7, "A ticket", "implement", trail({ implement: "skipped" }), { conclusion: "skipped" }),
+            "  #7  (setup) implement· (rebase) (resolve) (merge) (gate) (fix) (revert) dead  A ticket",
         ],
     ] as const)("should mark %s dead where it died", (_case, dying, expected) => {
         // given
@@ -174,7 +183,7 @@ describe("boardFrame", () => {
         const lines = boardFrame({ at: undefined, rows: [verified] }, WIDE).map(textOf)
 
         // then
-        expect(lines).toContain("  #7  gate\u2713  A ticket")
+        expect(lines).toContain("  #7  (setup) (implement) (rebase) (resolve) (merge) gate✓ (fix) (revert)  A ticket")
     })
 
     it("should say nothing about repair beside a step the log left running", () => {
@@ -185,10 +194,10 @@ describe("boardFrame", () => {
         const lines = boardFrame({ at: undefined, rows: [stuck] }, WIDE).map(textOf)
 
         // then
-        expect(lines).toContain("  #7  rebase\u2713 <revert>  A ticket")
+        expect(lines).toContain("  #7  (setup) (implement) rebase✓ (resolve) (merge) (gate) (fix) <revert>  A ticket")
     })
 
-    it("should be as tall as the row count plus one heading per track", () => {
+    it("should be as tall as the row count, because there is one block and no heading", () => {
         // given
         const view = VIEW
 
@@ -196,7 +205,7 @@ describe("boardFrame", () => {
         const lines = boardFrame(view, WIDE).map(textOf)
 
         // then
-        expect(lines).toHaveLength(VIEW.rows.length + 2)
+        expect(lines).toHaveLength(VIEW.rows.length)
     })
 
     it.each([[WIDE], [24], [8], [2]] as const)("should truncate rather than wrap at a width of %i", width => {
@@ -213,18 +222,15 @@ describe("boardFrame", () => {
         expect(lines.every(line => widthOf(line) <= width)).toBe(true)
     })
 
-    it("should mark a truncated title as cut", () => {
+    it("should mark a truncated row as cut", () => {
         // given
-        const view: BoardView = {
-            at: undefined,
-            rows: [row(7, "A title far longer than the terminal it is read on", "implement", IMPLEMENTING)],
-        }
+        const view: BoardView = { at: undefined, rows: [row(7, "A ticket", "implement", IMPLEMENTING)] }
 
         // when
         const lines = boardFrame(view, 32).map(textOf)
 
         // then
-        expect(lines).toContain("  #7  setup\u2713 <implement>  A t...")
+        expect(lines).toContain("  #7  setup✓ <implement> (reb...")
     })
 })
 
@@ -235,6 +241,20 @@ describe("boardFrame", () => {
  */
 describe("boardFrame: the footer", () => {
     const AT = "2026-09-15T11:18:38.314Z"
+
+    it("should put a notice under the rows, where no row ever moves for it", () => {
+        // given
+        const view: BoardView = { at: undefined, rows: [row(7, "Implement the slate", "implement", IMPLEMENTING)] }
+
+        // when
+        const lines = boardFrame(view, WIDE, "afk: interrupted").map(textOf)
+
+        // then
+        expect(lines).toEqual([
+            "  #7  setup✓ <implement> (rebase) (resolve) (merge) (gate) (fix) (revert)  Implement the slate",
+            "afk: interrupted",
+        ])
+    })
 
     it("should carry the last event's timestamp under every row", () => {
         // given
@@ -289,7 +309,7 @@ describe("boardFrame: the footer", () => {
         const lines = boardFrame(VIEW, 20, notice).map(textOf)
 
         // then
-        expect(lines.slice(VIEW.rows.length + 2).join(" ")).toBe(notice)
+        expect(lines.slice(VIEW.rows.length).join(" ")).toBe(notice)
     })
 
     it.each([[WIDE], [20], [8], [1]] as const)("should hold the footer within a width of %i", width => {
@@ -311,7 +331,7 @@ describe("boardFrame: the footer", () => {
         const lines = boardFrame(view, 8).map(textOf)
 
         // then
-        expect(lines.slice(VIEW.rows.length + 2)).toEqual(["last", "event", "2026-09-", "15T11:18", ":38.314Z"])
+        expect(lines.slice(VIEW.rows.length)).toEqual(["last", "event", "2026-09-", "15T11:18", ":38.314Z"])
     })
 })
 
@@ -326,16 +346,28 @@ describe("boardFrame: the spans a line is made of", () => {
         const view: BoardView = { at: undefined, rows: [row(7, "A ticket", "implement", IMPLEMENTING)] }
 
         // when
-        const [, line] = boardFrame(view, WIDE)
+        const [line] = boardFrame(view, WIDE)
 
         // then
         expect(line?.map(span => span.text)).toEqual([
             "  ",
             "#7",
             "  ",
-            "setup\u2713",
+            "setup✓",
             " ",
             "<implement>",
+            " ",
+            "(rebase)",
+            " ",
+            "(resolve)",
+            " ",
+            "(merge)",
+            " ",
+            "(gate)",
+            " ",
+            "(fix)",
+            " ",
+            "(revert)",
             "  ",
             "A ticket",
         ])

@@ -137,26 +137,21 @@ const rowOf = (events: readonly LifecycleEvent[], number: number) =>
     boardOf(MANIFEST, events).rows.find(row => row.ticket === number)
 
 describe("boardOf: the steps a row covers", () => {
-    it("should cover setup and implement on the implement track", () => {
+    const EVERY_STEP = ["setup", "implement", "rebase", "resolve", "merge", "gate", "fix", "revert"]
+
+    it.each([
+        ["a ticket nothing has happened to", []],
+        ["a ticket on the implement track", [event(7, "setup", "ok")]],
+        ["a ticket the merge track has taken", [...implemented(7), event(7, "rebase", "running")]],
+    ] as const)("should cover every step in order for %s", (_case, events) => {
         // given
-        const events: readonly LifecycleEvent[] = []
+        const log = events
 
         // when
-        const row = rowOf(events, 7)
+        const row = rowOf(log, 7)
 
         // then
-        expect(row?.steps.map(entry => entry.step)).toEqual(["setup", "implement"])
-    })
-
-    it("should cover the merge-side steps on the merge track", () => {
-        // given
-        const events = [...implemented(7), event(7, "rebase", "running")]
-
-        // when
-        const row = rowOf(events, 7)
-
-        // then
-        expect(row?.steps.map(entry => entry.step)).toEqual(["rebase", "resolve", "merge", "gate", "fix", "revert"])
+        expect(row?.steps.map(entry => entry.step)).toEqual(EVERY_STEP)
     })
 })
 

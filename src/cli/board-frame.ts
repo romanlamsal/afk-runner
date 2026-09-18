@@ -1,12 +1,4 @@
-import {
-    type BoardRow,
-    type BoardStep,
-    type BoardView,
-    dead,
-    type SettledOutcome,
-    TRACKS,
-    type Track,
-} from "../domain/board.ts"
+import { type BoardRow, type BoardStep, type BoardView, dead, type SettledOutcome } from "../domain/board.ts"
 import { type Line, plain, type Span, widthOf } from "./board-span.ts"
 
 /**
@@ -18,9 +10,14 @@ import { type Line, plain, type Span, widthOf } from "./board-span.ts"
  * text before any colour exists. Colour is applied after the layout, never inside it: an escape
  * sequence is characters to `padEnd` and to a length check (ADR-0031).
  *
- * The block is the row count plus one header per track, whatever the view says, so it never grows
- * or shrinks while somebody is reading it. That is also why a title is truncated rather than
- * wrapped: a wrapped line would break the one property the layout rests on.
+ * There is one block and no headings: a row spans every step in order, whatever track its ticket is
+ * on, so a ticket reaching the merge track changes what its trail says rather than where its row is
+ * (ADR-0031). The rows are the manifest's, in the manifest's order, and nothing here groups, filters
+ * or sorts by a row's track.
+ *
+ * The block's height is therefore the row count, whatever the view says, so it never grows or
+ * shrinks while somebody is reading it. That is also why a title is truncated rather than wrapped: a
+ * wrapped line would break the one property the layout rests on.
  *
  * Under the block sits the footer, which carries what is about the run rather than about a ticket:
  * when the last thing happened, and beneath that the drain notice when there is one. The footer may
@@ -31,11 +28,6 @@ import { type Line, plain, type Span, widthOf } from "./board-span.ts"
  * terminal: half an interrupt acknowledgement is the wrong thing to show, and a line the terminal
  * wrapped would occupy two rows while counting as one, which puts every later redraw out by a line.
  */
-
-const HEADINGS: Record<Track, string> = {
-    implement: "implement track",
-    merge: "merge track",
-}
 
 /**
  * What a settled step came to, in one character each. A glyph rather than a word, because telling a
@@ -186,19 +178,15 @@ const rowLine = (row: BoardRow, label: number, steps: number, width: number): Li
  * because it is not derived from the run's state: it arrives from whoever had something to say.
  */
 export const boardFrame = (view: BoardView, width: number, notice?: string): readonly Line[] => {
-    // One label column for the whole frame, so that the rows line up across both blocks.
+    // One label column for the whole frame, so that every trail starts in the same column.
     const label = Math.max(0, ...view.rows.map(row => `#${row.ticket}`.length))
 
-    const blocks = TRACKS.flatMap(track => {
-        const rows = view.rows.filter(row => row.track === track)
-        // A trail column per block, because the two tracks are different lengths and a column wide
-        // enough for the merge track would push every implement title off a narrow terminal.
-        const steps = Math.max(0, ...rows.map(row => widthOf(trail(row))))
+    // One trail column for the whole block, so that a title starts in the same place on every row.
+    const steps = Math.max(0, ...view.rows.map(row => widthOf(trail(row))))
 
-        return [fitted([plain(HEADINGS[track])], width), ...rows.map(row => rowLine(row, label, steps, width))]
-    })
+    const rows = view.rows.map(row => rowLine(row, label, steps, width))
 
     const footer = [...(view.at === undefined ? [] : [`${WHEN} ${view.at}`]), ...(notice === undefined ? [] : [notice])]
 
-    return [...blocks, ...footer.flatMap(line => wrapped(line, width))]
+    return [...rows, ...footer.flatMap(line => wrapped(line, width))]
 }
