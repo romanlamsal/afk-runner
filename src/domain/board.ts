@@ -21,23 +21,28 @@ import type { Manifest } from "./manifest.ts"
  * a process behind it — stays the driver's, because scheduling needs it and a view does not.
  */
 
-/** The two tracks a run is made of, and the two blocks the board is made of (CONTEXT.md). */
+/**
+ * The two tracks a run is made of (CONTEXT.md). The view still says which one a ticket is on,
+ * because the waiting derivation needs it; nothing in the layout reads it any more, since a row
+ * spans every step whatever track it sits on (ADR-0031).
+ */
 export const TRACKS = ["implement", "merge"] as const
 
 export type Track = (typeof TRACKS)[number]
 
 /**
- * The steps each track is made of, and so the trail a row on it carries. The merge track's are the
- * merge-side steps themselves, read from where the schedule reads them, so that the board and the
- * seriality rule can never disagree about what the merge track is.
+ * The steps a row carries, in the order a ticket takes them, and the same list on every row. A
+ * ticket reaching the merge track therefore changes what its trail says rather than where its row
+ * is, which is what lets one block hold the whole run (ADR-0031).
  *
- * `prepare` is on neither list, and that is the domain's existing rule rather than a new one: a pass
- * is never a step of its own on a row — it is read at the step it was sent to repair.
+ * The merge-side tail is read from where the schedule reads it, so that the board and the seriality
+ * rule can never disagree about what the merge track is.
+ *
+ * `prepare` is not on the list, and that is the domain's existing rule rather than a new one: a pass
+ * is never a step of its own on a row — it is read at the step it was sent to repair, which is the
+ * step `onMergeTrack` already routes it by.
  */
-export const TRACK_STEPS: Record<Track, readonly Step[]> = {
-    implement: ["setup", "implement"],
-    merge: MERGE_SIDE_STEPS,
-}
+export const TRAIL_STEPS: readonly Step[] = ["setup", "implement", ...MERGE_SIDE_STEPS]
 
 /**
  * The weights a step is carried at, which is what makes a row answer three questions at once: what
@@ -70,10 +75,14 @@ export type BoardStep =
 /** One ticket's line. Every ticket of the spec has exactly one, from the first frame to the last. */
 export type BoardRow = {
     ticket: number
-    /** The issue title as the manifest carries it. Fitting it to a terminal is the frame's job. */
+    /**
+     * The issue title as the manifest carries it. Nothing draws it: a fixed trail leaves a title
+     * twenty-one columns on an eighty-column terminal, and the number identifies the row already
+     * (ADR-0031). It stays on the view because the view is what the run knows about a ticket.
+     */
     title: string
     track: Track
-    /** The trail across the track's steps, in the order the track takes them. */
+    /** The trail across every step, in the order a ticket takes them, whatever track it is on. */
     steps: readonly BoardStep[]
     /**
      * A ticket whose implementer reported back, with the merge track yet to take it. It carries no
@@ -195,19 +204,14 @@ const detailOf = (events: readonly LifecycleEvent[], ticket: number): string | u
 
 /**
  * A row's trail. A step the log started and has not ended is running; a step the log has already
- * settled has happened, and carries what it came to; everything else on the track is still ahead.
+ * settled has happened, and carries what it came to; everything else is still ahead.
  *
  * The remainder of a row picked back up begins at its running step, so the operator reads what a
  * resume is about to do before it does it — and reads the same trail whether the run is alive or
  * long dead.
  */
-const trailOf = (
-    events: readonly LifecycleEvent[],
-    ticket: number,
-    track: Track,
-    open: Step | undefined,
-): readonly BoardStep[] =>
-    TRACK_STEPS[track].map((step): BoardStep => {
+const trailOf = (events: readonly LifecycleEvent[], ticket: number, open: Step | undefined): readonly BoardStep[] =>
+    TRAIL_STEPS.map((step): BoardStep => {
         if (step === open) {
             return { step, state: "running" }
         }
@@ -228,7 +232,7 @@ export const boardOf = (manifest: Manifest, events: readonly LifecycleEvent[]): 
             ticket: ticket.number,
             title: ticket.title,
             track,
-            steps: trailOf(events, ticket.number, track, open),
+            steps: trailOf(events, ticket.number, open),
             waiting: track === "implement" && implemented(events, ticket.number) && open === undefined,
             conclusion: cameTo(events, ticket.number),
             detail: detailOf(events, ticket.number),

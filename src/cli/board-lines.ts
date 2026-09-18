@@ -34,8 +34,9 @@ const changes = (before: BoardRow, after: BoardRow): readonly Change[] => {
                     ? []
                     : [{ step: entry.step, outcome: entry.outcome }]
             case "ahead":
-                // A step going back to ahead is a track change taking its trail with it, and the
-                // steps it left behind were already said when they settled.
+                // A step that has not happened yet is no news, and no step ever goes back to being
+                // ahead: every row spans every step from the first frame, and the log a weight is
+                // read off only grows (ADR-0031).
                 return []
         }
     })
