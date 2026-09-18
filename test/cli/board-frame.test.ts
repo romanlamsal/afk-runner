@@ -68,8 +68,8 @@ describe("boardFrame", () => {
 
         // then
         expect(lines).toEqual([
-            "  #7    setup✓ implement✓ rebase✓ (resolve) <merge> (gate) (fix) (revert)    Implement the slate",
-            "  #108  setup✓ <implement> (rebase) (resolve) (merge) (gate) (fix) (revert)  Rebase onto the spec branch",
+            "    7  setup✓ implement✓ rebase✓ (resolve) <merge> (gate) (fix) (revert)",
+            "  108  setup✓ <implement> (rebase) (resolve) (merge) (gate) (fix) (revert)",
         ])
     })
 
@@ -95,10 +95,10 @@ describe("boardFrame", () => {
             rows: [...others, row(108, "Another", "implement", IMPLEMENTING)],
         }
         const merging: BoardView = { at: undefined, rows: [...others, row(108, "Another", "merge", MERGING)] }
-        const was = boardFrame(implementing, WIDE).findIndex(line => textOf(line).includes("#108"))
+        const was = boardFrame(implementing, WIDE).findIndex(line => textOf(line).startsWith("  108"))
 
         // when
-        const now = boardFrame(merging, WIDE).findIndex(line => textOf(line).includes("#108"))
+        const now = boardFrame(merging, WIDE).findIndex(line => textOf(line).startsWith("  108"))
 
         // then
         expect(now).toBe(was)
@@ -130,9 +130,7 @@ describe("boardFrame", () => {
         const lines = boardFrame({ at: undefined, rows: [waiting] }, WIDE).map(textOf)
 
         // then
-        expect(lines).toContain(
-            "  #7  setup✓ implement✓ (rebase) (resolve) (merge) (gate) (fix) (revert) waiting  A ticket",
-        )
+        expect(lines).toContain("    7  setup✓ implement✓ (rebase) (resolve) (merge) (gate) (fix) (revert) waiting")
     })
 
     it.each([
@@ -148,21 +146,19 @@ describe("boardFrame", () => {
         const lines = boardFrame(view, WIDE).map(textOf)
 
         // then
-        expect(lines).toContain(
-            `  #7  setup${glyph} (implement) (rebase) (resolve) (merge) (gate) (fix) (revert)  A ticket`,
-        )
+        expect(lines).toContain(`    7  setup${glyph} (implement) (rebase) (resolve) (merge) (gate) (fix) (revert)`)
     })
 
     it.each([
         [
             "a ticket whose implementer failed",
             row(7, "A ticket", "implement", trail({ setup: "ok", implement: "failed" }), { conclusion: "failed" }),
-            "  #7  setup✓ implement✗ (rebase) (resolve) (merge) (gate) (fix) (revert) dead  A ticket",
+            "    7  setup✓ implement✗ (rebase) (resolve) (merge) (gate) (fix) (revert) dead",
         ],
         [
             "a ticket blocked by one that will not land",
             row(7, "A ticket", "implement", trail({ implement: "skipped" }), { conclusion: "skipped" }),
-            "  #7  (setup) implement· (rebase) (resolve) (merge) (gate) (fix) (revert) dead  A ticket",
+            "    7  (setup) implement· (rebase) (resolve) (merge) (gate) (fix) (revert) dead",
         ],
     ] as const)("should mark %s dead where it died", (_case, dying, expected) => {
         // given
@@ -183,7 +179,7 @@ describe("boardFrame", () => {
         const lines = boardFrame({ at: undefined, rows: [verified] }, WIDE).map(textOf)
 
         // then
-        expect(lines).toContain("  #7  (setup) (implement) (rebase) (resolve) (merge) gate✓ (fix) (revert)  A ticket")
+        expect(lines).toContain("    7  (setup) (implement) (rebase) (resolve) (merge) gate✓ (fix) (revert)")
     })
 
     it("should say nothing about repair beside a step the log left running", () => {
@@ -194,7 +190,65 @@ describe("boardFrame", () => {
         const lines = boardFrame({ at: undefined, rows: [stuck] }, WIDE).map(textOf)
 
         // then
-        expect(lines).toContain("  #7  (setup) (implement) rebase✓ (resolve) (merge) (gate) (fix) <revert>  A ticket")
+        expect(lines).toContain("    7  (setup) (implement) rebase✓ (resolve) (merge) (gate) (fix) <revert>")
+    })
+
+    it.each([
+        [7, "    7  "],
+        [108, "  108  "],
+        [12345, "12345  "],
+    ] as const)("should write ticket %i right-aligned into five columns with no prefix", (ticket, written) => {
+        // given
+        const view: BoardView = { at: undefined, rows: [row(ticket, "A ticket", "implement", IMPLEMENTING)] }
+
+        // when
+        const [line] = boardFrame(view, WIDE).map(textOf)
+
+        // then
+        expect(line?.slice(0, written.length)).toBe(written)
+    })
+
+    it("should not render the issue title", () => {
+        // given
+        const view: BoardView = { at: undefined, rows: [row(7, "Implement the slate", "implement", IMPLEMENTING)] }
+
+        // when
+        const lines = boardFrame(view, WIDE).map(textOf)
+
+        // then
+        expect(lines.some(line => line.includes("Implement the slate"))).toBe(false)
+    })
+
+    it.each([
+        ["waiting", row(7, "A ticket", "implement", trail({ setup: "ok", implement: "ok" }), { waiting: true })],
+        [
+            "dead",
+            row(7, "A ticket", "implement", trail({ setup: "ok", implement: "failed" }), { conclusion: "failed" }),
+        ],
+    ] as const)("should put %s at the end of the row, with nothing after it", (marker, marked) => {
+        // given
+        const view: BoardView = { at: undefined, rows: [marked] }
+
+        // when
+        const [line] = boardFrame(view, WIDE).map(textOf)
+
+        // then
+        expect(line?.endsWith(` ${marker}`)).toBe(true)
+    })
+
+    it.each([
+        ["a ticket being implemented", row(7, "A ticket", "implement", IMPLEMENTING)],
+        ["a ticket being merged", row(108, "Another", "merge", MERGING)],
+        ["a verified ticket", row(12345, "A third", "merge", trail({ gate: "ok" }), { conclusion: "verified" })],
+    ] as const)("should hold %s within an eighty-column terminal, uncut", (_case, only) => {
+        // given
+        const view: BoardView = { at: undefined, rows: [only] }
+
+        // when
+        const [line] = boardFrame(view, 80).map(textOf)
+
+        // then
+        expect(line?.endsWith("...")).toBe(false)
     })
 
     it("should be as tall as the row count, because there is one block and no heading", () => {
@@ -212,7 +266,7 @@ describe("boardFrame", () => {
         // given
         const view: BoardView = {
             at: undefined,
-            rows: [row(7, "A title far longer than the terminal it is read on", "implement", IMPLEMENTING)],
+            rows: [row(7, "A ticket", "implement", IMPLEMENTING)],
         }
 
         // when
@@ -230,7 +284,7 @@ describe("boardFrame", () => {
         const lines = boardFrame(view, 32).map(textOf)
 
         // then
-        expect(lines).toContain("  #7  setup✓ <implement> (reb...")
+        expect(lines).toContain("    7  setup✓ <implement> (re...")
     })
 })
 
@@ -251,7 +305,7 @@ describe("boardFrame: the footer", () => {
 
         // then
         expect(lines).toEqual([
-            "  #7  setup✓ <implement> (rebase) (resolve) (merge) (gate) (fix) (revert)  Implement the slate",
+            "    7  setup✓ <implement> (rebase) (resolve) (merge) (gate) (fix) (revert)",
             "afk: interrupted",
         ])
     })
@@ -350,8 +404,8 @@ describe("boardFrame: the spans a line is made of", () => {
 
         // then
         expect(line?.map(span => span.text)).toEqual([
-            "  ",
-            "#7",
+            "    ",
+            "7",
             "  ",
             "setup✓",
             " ",
@@ -368,8 +422,6 @@ describe("boardFrame: the spans a line is made of", () => {
             "(fix)",
             " ",
             "(revert)",
-            "  ",
-            "A ticket",
         ])
     })
 

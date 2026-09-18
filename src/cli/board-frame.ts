@@ -16,8 +16,8 @@ import { type Line, plain, type Span, widthOf } from "./board-span.ts"
  * or sorts by a row's track.
  *
  * The block's height is therefore the row count, whatever the view says, so it never grows or
- * shrinks while somebody is reading it. That is also why a title is truncated rather than wrapped: a
- * wrapped line would break the one property the layout rests on.
+ * shrinks while somebody is reading it. That is also why a row is cut rather than wrapped on a
+ * terminal too narrow to hold it: a wrapped row would break the one property the layout rests on.
  *
  * Under the block sits the footer, which carries what is about the run rather than about a ticket:
  * when the last thing happened, and beneath that the drain notice when there is one. The footer may
@@ -77,7 +77,15 @@ const DEAD = "dead"
  */
 const WHEN = "last event"
 
-/** What a cut line ends in, so that a truncated title reads as a truncated title. */
+/**
+ * How wide the ticket number is written, whatever number it is: right-aligned into five columns and
+ * carrying no prefix, which covers every issue number this repository will realistically see. It is
+ * a constant rather than the widest number the view holds, so that the trail starts in the same
+ * column on every board and not merely on every row of one (ADR-0031).
+ */
+const LABEL = 5
+
+/** What a cut line ends in, so that a cut row reads as a cut row. */
 const ELLIPSIS = "..."
 
 /**
@@ -139,7 +147,11 @@ const wrapped = (text: string, width: number): readonly Line[] => {
     return [...lines, current].map(line => [plain(line)])
 }
 
-/** A row's trail, which is what has happened, what is happening and what is next, in that order. */
+/**
+ * A row's trail: what has happened, what is happening and what is next, and then what the ticket is
+ * rather than what has been done to it. `waiting` and `dead` come last, where there is nothing after
+ * them to push around (ADR-0031).
+ */
 const trail = (row: BoardRow): Line =>
     [...row.steps.map(written), ...(row.waiting ? [WAITING] : []), ...(dead(row) ? [DEAD] : [])]
         // A separator of its own between two steps, so that the step spans hold nothing but a step.
@@ -149,28 +161,18 @@ const trail = (row: BoardRow): Line =>
 const padding = (columns: number): Span[] => (columns > 0 ? [plain(" ".repeat(columns))] : [])
 
 /**
- * One ticket's line: its number, its trail, and its title. The title comes last because it is the
- * one part that may be cut — a trail a narrow terminal ate would lose the point of the row.
+ * One ticket's line: its number and its trail, and nothing else. The issue title is not on it — a
+ * fixed trail leaves it twenty-one columns on an eighty-column terminal, which is enough for
+ * `refactor: one cl...` and nothing worth reading, and the number already identifies the row
+ * (ADR-0031).
  *
  * Every column of padding is a span of its own, because padding says nothing and a span that says
- * nothing is what keeps the number, a step and a title each treatable on their own.
+ * nothing is what keeps the number and each step treatable on their own.
  */
-const rowLine = (row: BoardRow, label: number, steps: number, width: number): Line => {
-    const marked = trail(row)
+const rowLine = (row: BoardRow, width: number): Line => {
+    const number = `${row.ticket}`
 
-    return fitted(
-        [
-            plain("  "),
-            plain(`#${row.ticket}`),
-            ...padding(label - `#${row.ticket}`.length),
-            plain("  "),
-            ...marked,
-            ...padding(steps - widthOf(marked)),
-            plain("  "),
-            plain(row.title),
-        ],
-        width,
-    )
+    return fitted([...padding(LABEL - number.length), plain(number), plain("  "), ...trail(row)], width)
 }
 
 /**
@@ -178,13 +180,7 @@ const rowLine = (row: BoardRow, label: number, steps: number, width: number): Li
  * because it is not derived from the run's state: it arrives from whoever had something to say.
  */
 export const boardFrame = (view: BoardView, width: number, notice?: string): readonly Line[] => {
-    // One label column for the whole frame, so that every trail starts in the same column.
-    const label = Math.max(0, ...view.rows.map(row => `#${row.ticket}`.length))
-
-    // One trail column for the whole block, so that a title starts in the same place on every row.
-    const steps = Math.max(0, ...view.rows.map(row => widthOf(trail(row))))
-
-    const rows = view.rows.map(row => rowLine(row, label, steps, width))
+    const rows = view.rows.map(row => rowLine(row, width))
 
     const footer = [...(view.at === undefined ? [] : [`${WHEN} ${view.at}`]), ...(notice === undefined ? [] : [notice])]
 

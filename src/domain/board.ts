@@ -75,7 +75,11 @@ export type BoardStep =
 /** One ticket's line. Every ticket of the spec has exactly one, from the first frame to the last. */
 export type BoardRow = {
     ticket: number
-    /** The issue title as the manifest carries it. Fitting it to a terminal is the frame's job. */
+    /**
+     * The issue title as the manifest carries it. Nothing draws it: a fixed trail leaves a title
+     * twenty-one columns on an eighty-column terminal, and the number identifies the row already
+     * (ADR-0031). It stays on the view because the view is what the run knows about a ticket.
+     */
     title: string
     track: Track
     /** The trail across every step, in the order a ticket takes them, whatever track it is on. */
