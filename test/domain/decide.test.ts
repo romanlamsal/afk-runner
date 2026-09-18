@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type Action, nextActions, type RunParameters, repairFor } from "../../src/domain/decide.ts"
+import { type Action, concluded, nextActions, type RunParameters, repairFor } from "../../src/domain/decide.ts"
 import { type BrokenStep, type LifecycleEvent, type Outcome, STEPS, type Step } from "../../src/domain/events.ts"
 import type { Ticket } from "../../src/domain/manifest.ts"
 import { manifestOf, ticket } from "../fixtures/manifest.ts"
@@ -1386,4 +1386,40 @@ describe("repairFor", () => {
         // then
         expect(repair).toBe(expected)
     })
+})
+
+/**
+ * What a follower asks of a log it is watching: is there anything left for a run to do? A log that
+ * says yes is a run still going, whether or not a process is behind it — which is the whole reason
+ * `--board-only` needs no timeout and no idle threshold (ADR-0030).
+ */
+describe("concluded", () => {
+    const runStep = (outcome: Outcome): LifecycleEvent => ({
+        step: "pull-request",
+        outcome,
+        at: "2026-09-15T11:18:38.314Z",
+    })
+
+    it.each([
+        ["a spec nothing has happened to, which is a run's whole slate ahead of it", [], false],
+        ["a ticket whose implementer has not reported back", [...cut(10), event(10, "implement", "running")], false],
+        ["a ticket whose gate is still going", [event(10, "implement", "ok"), event(10, "gate", "running")], false],
+        ["a ticket implemented and not yet on the branch", [...cut(10), event(10, "implement", "ok")], false],
+        ["a ticket the gate proved", verified(10), true],
+        ["a ticket that spent everything it gets", failed(10), true],
+        ["a run still writing its pull request", [...verified(10), runStep("running")], false],
+        ["a run whose pull request was written", [...verified(10), runStep("running"), runStep("ok")], true],
+    ] as const satisfies readonly (readonly [string, readonly LifecycleEvent[], boolean])[])(
+        "should read %s",
+        (_name, events, expected) => {
+            // given
+            const log = events
+
+            // when
+            const over = concluded(manifestOf([ticket(10)]), log)
+
+            // then
+            expect(over).toBe(expected)
+        },
+    )
 })

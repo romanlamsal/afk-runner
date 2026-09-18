@@ -32,6 +32,7 @@ import { createFakeInterrupts } from "../fakes/interrupts.ts"
 import { createFakeManifestStore } from "../fakes/manifest-store.ts"
 import { createFakeOperator } from "../fakes/operator.ts"
 import { createFakeRunRecords } from "../fakes/run-records.ts"
+import { createStubShowBoard } from "../fakes/show-board.ts"
 import { createFakeTracker, type FakeTrackerSetup } from "../fakes/tracker.ts"
 import { manifestOf, ticket } from "../fixtures/manifest.ts"
 
@@ -225,6 +226,7 @@ const harness = ({
         isInteractive: () => true,
         printError: line => errors.push(line),
         run: createRun({
+            showBoard: createStubShowBoard(),
             fresh: createStubFresh(),
             start: createStartService({
                 events: events.log,

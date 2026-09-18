@@ -94,10 +94,10 @@ export const createDriveService =
         for (;;) {
             const log = await events.read(root, spec)
             const live = [...inFlight.keys()]
-            // The same three inputs the decision reads, shown before it is asked: the board is a
-            // second pure function of them, so a frame is drawn on every pass of the loop and the
-            // last of them is what stays on screen when the run ends (ADR-0029).
-            board.show(boardOf(manifest, log, live))
+            // Drawn from the same bytes the decision is about to be given, and from nothing the
+            // driver holds: the board says what the log says, so a frame is drawn on every pass of
+            // the loop and the last of them is what stays on screen when the run ends (ADR-0030).
+            board.show(boardOf(manifest, log))
 
             const actions = nextActions(manifest, log, {
                 inFlight: live,

@@ -8,6 +8,7 @@ const args = (overrides: Partial<ParsedArgs> = {}): ParsedArgs => ({
     extra: [],
     planOnly: false,
     implementOnly: false,
+    boardOnly: false,
     resume: false,
     forceFresh: false,
     maxParallel: undefined,
@@ -20,6 +21,7 @@ describe("resolveInvocation", () => {
         [{}, "plan-and-implement"],
         [{ planOnly: true }, "plan-only"],
         [{ implementOnly: true }, "implement-only"],
+        [{ boardOnly: true }, "board-only"],
     ] as const satisfies readonly (readonly [Partial<ParsedArgs>, Mode])[])(
         "should resolve %o to the %s mode",
         (overrides, mode) => {
@@ -62,6 +64,7 @@ describe("resolveInvocation", () => {
     it.each([
         [{ planOnly: true }, "plan-only"],
         [{ implementOnly: true }, "implement-only"],
+        [{ boardOnly: true }, "board-only"],
     ] as const satisfies readonly (readonly [Partial<ParsedArgs>, Mode])[])(
         "should accept %o without a terminal",
         (overrides, mode) => {
@@ -91,6 +94,21 @@ describe("resolveInvocation", () => {
             { planOnly: true, implementOnly: true },
             true,
             "--plan-only and --implement-only cannot be combined: each names a different half of a run",
+        ],
+        [
+            { boardOnly: true, planOnly: true },
+            true,
+            "--board-only starts nothing, so it cannot be combined with --plan-only or --implement-only",
+        ],
+        [
+            { boardOnly: true, implementOnly: true },
+            true,
+            "--board-only starts nothing, so it cannot be combined with --plan-only or --implement-only",
+        ],
+        [
+            { boardOnly: true, forceFresh: true },
+            true,
+            "--force-fresh deletes the run --board-only draws: pass --board-only on its own to look at it",
         ],
         [
             { forceFresh: true, implementOnly: true },

@@ -3,7 +3,7 @@ import type { CopyEnvironmentFiles } from "../domain/environment.ts"
 import { type EventLog, started } from "../domain/events.ts"
 import type { Git } from "../domain/git.ts"
 import type { Manifest, ManifestStore } from "../domain/manifest.ts"
-import type { Mode } from "../domain/mode.ts"
+import type { StartMode } from "../domain/mode.ts"
 import type { Commands, ConfirmationScreen, Operator } from "../domain/operator.ts"
 import { gateWorktree } from "../domain/paths.ts"
 import { trunkNotices } from "../domain/preflight.ts"
@@ -18,7 +18,7 @@ export type StartResult =
     | { outcome: "aborted" }
     | { outcome: "refused"; reason: string }
 
-export type StartRequest = { spec: number; mode: Mode; consented: boolean }
+export type StartRequest = { spec: number; mode: StartMode; consented: boolean }
 
 /** The driving port: get from an accepted invocation to a run that is ready to implement. */
 export type StartRun = (request: StartRequest) => Promise<StartResult>
@@ -47,7 +47,7 @@ const refused = (reason: string): StartResult => ({ outcome: "refused", reason }
  */
 const confirmOrReport = async (
     operator: Operator,
-    mode: Mode,
+    mode: StartMode,
     screen: ConfirmationScreen,
 ): Promise<Commands | undefined> => {
     if (mode !== "implement-only") {

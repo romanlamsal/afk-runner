@@ -17,9 +17,9 @@ import {
  * grows or shrinks while somebody is reading it. That is also why a title is truncated rather than
  * wrapped: a wrapped line would break the one property the layout rests on.
  *
- * A run status line — the drain notice, and so far nothing else — sits under the blocks, where it
- * is the one thing that is about the run rather than about a ticket. It is the frame's last line
- * from the moment there is one, so the rows above it never move.
+ * A footer sits under the blocks, where the things that are about the run rather than about a
+ * ticket go: when the last thing happened, and then the drain notice. The notice stays the frame's
+ * last line from the moment there is one, so the rows above it never move.
  */
 
 const HEADINGS: Record<Track, string> = {
@@ -40,22 +40,16 @@ const OUTCOMES: Record<SettledOutcome, string> = {
 }
 
 /**
- * How a step is written at each of its four weights: what it came to, brackets, and nothing else.
+ * How a step is written at each of its three weights: what it came to, brackets, and nothing else.
  * What a step is read at has to survive `NO_COLOR`, so colour may repeat this and may never be the
  * only thing saying it.
- *
- * An interrupted step is written differently from a live one because it is a different thing: the
- * process that began it is gone, and the step is where a resume picks the ticket back up rather than
- * something that is happening now.
  */
 const written = (entry: BoardStep): string => {
     switch (entry.state) {
         case "settled":
             return `${entry.step}${OUTCOMES[entry.outcome]}`
-        case "live":
+        case "running":
             return `<${entry.step}>`
-        case "interrupted":
-            return `[${entry.step}]`
         case "ahead":
             return `(${entry.step})`
     }
@@ -71,8 +65,15 @@ const WAITING = "waiting"
  */
 const DEAD = "dead"
 
-/** What a ticket a resume has nothing to try on reads as, beside the step it was interrupted at. */
-const BEYOND_REPAIR = "beyond repair"
+/**
+ * When the last thing happened, written as the event carries it. It says whose time it is rather
+ * than standing alone, because an instant on its own under a board reads as the time now — which is
+ * the one thing it is not, and the whole reason it is read off the log instead of a clock.
+ *
+ * It is written only where the log has an event to have it from: a run nothing has happened in says
+ * nothing, and never says it has been waiting since the epoch.
+ */
+const WHEN = "last event"
 
 /** What a cut line ends in, so that a truncated title reads as a truncated title. */
 const ELLIPSIS = "..."
@@ -88,12 +89,7 @@ const fitted = (line: string, width: number): string => {
 
 /** A row's trail, which is what has happened, what is happening and what is next, in that order. */
 const trail = (row: BoardRow): string =>
-    [
-        ...row.steps.map(written),
-        ...(row.waiting ? [WAITING] : []),
-        ...(row.beyondRepair ? [BEYOND_REPAIR] : []),
-        ...(dead(row) ? [DEAD] : []),
-    ].join(" ")
+    [...row.steps.map(written), ...(row.waiting ? [WAITING] : []), ...(dead(row) ? [DEAD] : [])].join(" ")
 
 /**
  * One ticket's line: its number, its trail, and its title. The title comes last because it is the
@@ -119,5 +115,7 @@ export const boardFrame = (view: BoardView, width: number, notice?: string): str
         return [fitted(HEADINGS[track], width), ...rows.map(row => rowLine(row, label, steps, width))]
     })
 
-    return notice === undefined ? blocks : [...blocks, fitted(notice, width)]
+    const footer = [...(view.at === undefined ? [] : [`${WHEN} ${view.at}`]), ...(notice === undefined ? [] : [notice])]
+
+    return [...blocks, ...footer.map(line => fitted(line, width))]
 }

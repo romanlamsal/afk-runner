@@ -1,3 +1,4 @@
+import type { ShowBoard } from "../service/board.ts"
 import type { DriveRun } from "../service/drive.ts"
 import type { FinishRun } from "../service/finish.ts"
 import type { StartFresh } from "../service/fresh.ts"
@@ -12,6 +13,8 @@ import { pullRequestOutput } from "./pull-request-output.ts"
 
 export type RunDeps = {
     fresh: StartFresh
+    /** The read-only view of a run, which is the whole of what `--board-only` does. */
+    showBoard: ShowBoard
     start: StartRun
     drive: DriveRun
     finish: FinishRun
@@ -38,8 +41,21 @@ export type RunDeps = {
  * failure mode this whole rewrite exists to remove.
  */
 export const createRun =
-    ({ fresh, start, drive, finish, print, printError, boardDrawn }: RunDeps) =>
+    ({ fresh, showBoard, start, drive, finish, print, printError, boardDrawn }: RunDeps) =>
     async (invocation: Invocation): Promise<ExitCode> => {
+        // Before the run directory is touched by anything, because it is never touched at all: the
+        // viewer reads the manifest and the log and draws what they say (ADR-0030). A spec that was
+        // never planned is refused as a run that cannot start is, because the arguments were fine
+        // and what is missing is on disk.
+        if (invocation.mode === "board-only") {
+            const drawn = await showBoard(invocation.spec)
+            if (drawn.outcome === "refused") {
+                printError(`afk: ${drawn.reason}`)
+                return EXIT.halted
+            }
+            return drawn.whole ? EXIT.complete : EXIT.partial
+        }
+
         // Before anything is read, because what starting over throws away is what starting would
         // otherwise refuse over. A run that cannot be thrown away whole is not started on top of.
         if (invocation.forceFresh) {

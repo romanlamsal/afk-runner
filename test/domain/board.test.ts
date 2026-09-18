@@ -7,17 +7,17 @@ import {
     type StepState,
     type Track,
 } from "../../src/domain/board.ts"
-import type { Action } from "../../src/domain/decide.ts"
 import type { LifecycleEvent, Outcome, Step } from "../../src/domain/events.ts"
 import { manifestOf, ticket } from "../fixtures/manifest.ts"
 
 /**
  * The board's rules, asserted against the pure function that holds them. No fakes, no fixtures and
- * no git: the inputs are a manifest, a list of events and the driver's live action set, and the
- * output is the view a frame is drawn from.
+ * no git: the inputs are a manifest and a list of events, and the output is the view a frame is
+ * drawn from.
  *
- * A resumed run is asserted here too, because there is nothing else to assert: it is this function
- * called against a log a previous process left behind.
+ * A run picked back up is asserted here too, because there is nothing else to assert: it is this
+ * function called against a log a previous process left behind, and it says the same thing about it
+ * as it says about a log its own process is still writing (ADR-0030).
  */
 
 const event = (ticket: number, step: Step, outcome: Outcome): LifecycleEvent => ({
@@ -30,11 +30,8 @@ const event = (ticket: number, step: Step, outcome: Outcome): LifecycleEvent => 
 const MANIFEST = manifestOf([ticket(7), ticket(8, [7]), ticket(9, [7])])
 
 /** The track a ticket's row sits in, which is the whole of what a row says about it for now. */
-const trackOf = (
-    events: readonly LifecycleEvent[],
-    number: number,
-    inFlight: readonly Action[] = [],
-): Track | undefined => boardOf(MANIFEST, events, inFlight).rows.find(row => row.ticket === number)?.track
+const trackOf = (events: readonly LifecycleEvent[], number: number): Track | undefined =>
+    boardOf(MANIFEST, events).rows.find(row => row.ticket === number)?.track
 
 /** A ticket whose implementer reported back: everything the merge track draws from starts here. */
 const implemented = (number: number): readonly LifecycleEvent[] => [
@@ -48,7 +45,7 @@ describe("boardOf: the rows", () => {
         const events = [...implemented(7), event(7, "rebase", "running")]
 
         // when
-        const view = boardOf(MANIFEST, events, [])
+        const view = boardOf(MANIFEST, events)
 
         // then
         expect(view.rows.map(row => row.ticket)).toEqual([7, 8, 9])
@@ -59,7 +56,7 @@ describe("boardOf: the rows", () => {
         const events: readonly LifecycleEvent[] = []
 
         // when
-        const view = boardOf(MANIFEST, events, [])
+        const view = boardOf(MANIFEST, events)
 
         // then
         expect(view.rows.map(row => row.title)).toEqual(["ticket 7", "ticket 8", "ticket 9"])
@@ -70,12 +67,13 @@ describe("boardOf: the rows", () => {
         ["a ticket mid-step", implemented(7)],
         ["a ticket that failed for good", [event(7, "implement", "failed")]],
         ["a whole spec verified", [...implemented(7), event(7, "gate", "ok")]],
+        ["a log fuller of events than the spec has tickets", [7, 8, 9].flatMap(implemented)],
     ] as const)("should have a row for every ticket and nothing else with %s", (_case, events) => {
         // given
         const log = events
 
         // when
-        const view = boardOf(MANIFEST, log, [])
+        const view = boardOf(MANIFEST, log)
 
         // then
         expect(view.rows).toHaveLength(MANIFEST.tickets.length)
@@ -106,16 +104,15 @@ describe("boardOf: which track a ticket is on", () => {
         expect(track).toBe(expected)
     })
 
-    it("should put a ticket the merge track has just been handed on the merge track", () => {
-        // given: the action is live before the step that records it has appended anything
+    it("should keep a ticket on the implement track until a merge-side event is written about it", () => {
+        // given: the merge track has been handed the ticket, and has appended nothing about it yet
         const events = implemented(7)
-        const inFlight: readonly Action[] = [{ kind: "rebase", ticket: 7 }]
 
         // when
-        const track = trackOf(events, 7, inFlight)
+        const track = trackOf(events, 7)
 
         // then
-        expect(track).toBe("merge")
+        expect(track).toBe("implement")
     })
 
     it("should keep a ticket on the merge track once a repair pass is on it", () => {
@@ -131,18 +128,13 @@ describe("boardOf: which track a ticket is on", () => {
 })
 
 /** The weight one step of a ticket's trail is read at, which is the whole of what a trail says. */
-const weightOf = (
-    events: readonly LifecycleEvent[],
-    number: number,
-    step: Step,
-    inFlight: readonly Action[] = [],
-): StepState | undefined =>
-    boardOf(MANIFEST, events, inFlight)
+const weightOf = (events: readonly LifecycleEvent[], number: number, step: Step): StepState | undefined =>
+    boardOf(MANIFEST, events)
         .rows.find(row => row.ticket === number)
         ?.steps.find(entry => entry.step === step)?.state
 
-const rowOf = (events: readonly LifecycleEvent[], number: number, inFlight: readonly Action[] = []) =>
-    boardOf(MANIFEST, events, inFlight).rows.find(row => row.ticket === number)
+const rowOf = (events: readonly LifecycleEvent[], number: number) =>
+    boardOf(MANIFEST, events).rows.find(row => row.ticket === number)
 
 describe("boardOf: the steps a row covers", () => {
     it("should cover setup and implement on the implement track", () => {
@@ -168,30 +160,29 @@ describe("boardOf: the steps a row covers", () => {
     })
 })
 
+/**
+ * The three weights, and the whole of what tells them apart: the log holds an end event for the
+ * step, the log holds a start event and no end, or the log holds nothing about it. Nothing here asks
+ * whether a process is behind the step, because nothing here could answer it (ADR-0030).
+ */
 describe("boardOf: what a step is read at", () => {
     it.each([
-        ["a step the log has been through", [event(7, "setup", "ok")], "setup" as Step, [], "settled"],
-        ["a step the log has never mentioned", [], "implement" as Step, [], "ahead"],
+        ["a step the log has been through", [event(7, "setup", "ok")], "setup" as Step, "settled"],
+        ["a step the log has never mentioned", [], "implement" as Step, "ahead"],
+        ["a step the log started and has not ended", [event(7, "setup", "running")], "setup" as Step, "running"],
+        ["a step still ahead of the one being run", [event(7, "setup", "running")], "implement" as Step, "ahead"],
         [
-            "the step the driver is running",
-            [event(7, "setup", "running")],
-            "setup" as Step,
-            [{ kind: "setup", ticket: 7 }] as const,
-            "live",
-        ],
-        [
-            "a step still ahead of the one being run",
-            [event(7, "setup", "running")],
+            "a step the log started again after it broke",
+            [event(7, "implement", "failed"), event(7, "prepare", "ok"), event(7, "implement", "running")],
             "implement" as Step,
-            [{ kind: "setup", ticket: 7 }] as const,
-            "ahead",
+            "running",
         ],
-    ] as const)("should read %s as %s", (_case, events, step, inFlight, expected) => {
+    ] as const)("should read %s as %s", (_case, events, step, expected) => {
         // given
         const log = events
 
         // when
-        const weight = weightOf(log, 7, step, inFlight)
+        const weight = weightOf(log, 7, step)
 
         // then
         expect(weight).toBe(expected)
@@ -200,44 +191,61 @@ describe("boardOf: what a step is read at", () => {
     it("should read a prepare pass at the step it was sent to repair", () => {
         // given: the pass is on the implement track, because that is what it is repairing
         const events = [event(7, "implement", "failed"), event(7, "prepare", "running")]
-        const inFlight: readonly Action[] = [{ kind: "prepare", ticket: 7, brokenStep: "implement" }]
 
         // when
-        const weight = weightOf(events, 7, "implement", inFlight)
+        const weight = weightOf(events, 7, "implement")
 
         // then
-        expect(weight).toBe("live")
+        expect(weight).toBe("running")
     })
 
     it("should read a merge-side prepare pass on the merge track", () => {
         // given
         const events = [...implemented(7), event(7, "merge", "failed"), event(7, "prepare", "running")]
-        const inFlight: readonly Action[] = [{ kind: "prepare", ticket: 7, brokenStep: "merge" }]
 
         // when
-        const weight = weightOf(events, 7, "merge", inFlight)
+        const weight = weightOf(events, 7, "merge")
 
         // then
-        expect(weight).toBe("live")
+        expect(weight).toBe("running")
     })
 
-    it("should give at most one ticket a live step on the merge track", () => {
-        // given: the merge track is serial, so the live action set holds one of its actions at most
-        const events = [...implemented(7), ...implemented(8)]
-        const inFlight: readonly Action[] = [{ kind: "rebase", ticket: 7 }]
+    it("should leave the steps after a repair ahead of it", () => {
+        // given
+        const events = [...implemented(7), event(7, "merge", "failed"), event(7, "prepare", "running")]
 
         // when
-        const view = boardOf(MANIFEST, events, inFlight)
+        const weight = weightOf(events, 7, "gate")
 
         // then
-        expect(
-            view.rows.filter(row => row.track === "merge" && row.steps.some(entry => entry.state === "live")),
-        ).toHaveLength(1)
+        expect(weight).toBe("ahead")
+    })
+
+    it("should read every step a killed run left open as running", () => {
+        // given: a log full of steps a previous process began, with nothing alive to have begun them
+        const events = [event(7, "setup", "running"), event(8, "implement", "running")]
+
+        // when
+        const view = boardOf(MANIFEST, events)
+
+        // then
+        expect(view.rows.flatMap(row => row.steps).filter(entry => entry.state === "running")).toHaveLength(2)
+    })
+
+    it("should give a ticket at most one running step", () => {
+        // given: the ticket's whole implement track begun and only its last step left open
+        const events = [event(7, "setup", "ok"), event(7, "implement", "running")]
+
+        // when
+        const row = rowOf(events, 7)
+
+        // then
+        expect(row?.steps.filter(entry => entry.state === "running")).toHaveLength(1)
     })
 })
 
 describe("boardOf: a ticket the merge track has not taken yet", () => {
-    it("should read an implemented ticket as waiting", () => {
+    it("should read an implemented ticket with no unfinished step as waiting", () => {
         // given
         const events = implemented(7)
 
@@ -252,6 +260,7 @@ describe("boardOf: a ticket the merge track has not taken yet", () => {
         ["a ticket nothing has happened to", []],
         ["a ticket being implemented", [event(7, "implement", "running")]],
         ["a ticket the merge track has taken", [...implemented(7), event(7, "rebase", "running")]],
+        ["a ticket the merge track is through with", [...implemented(7), event(7, "gate", "ok")]],
     ] as const)("should not read %s as waiting", (_case, events) => {
         // given
         const log = events
@@ -264,11 +273,11 @@ describe("boardOf: a ticket the merge track has not taken yet", () => {
     })
 
     it("should tell three waiting tickets apart in no way at all", () => {
-        // given: three implemented tickets and no merge-side action, which is the whole of the queue
+        // given: three implemented tickets and no merge-side event, which is the whole of the queue
         const events = [...implemented(7), ...implemented(8), ...implemented(9)]
 
         // when
-        const view = boardOf(MANIFEST, events, [])
+        const view = boardOf(MANIFEST, events)
 
         // then
         expect(view.rows.map(row => ({ ...row, ticket: 0, title: "" }))).toEqual([
@@ -329,7 +338,7 @@ describe("boardOf: what a settled step came to", () => {
     })
 
     it("should carry nothing for a step that only ever began", () => {
-        // given: what a killed run leaves behind, with no driver saying the step is happening
+        // given: what a killed run leaves behind
         const events = [event(7, "setup", "running")]
 
         // when
@@ -387,7 +396,7 @@ describe("boardOf: a ticket nothing more will happen to", () => {
         const events = [7, 8, 9].flatMap(number => [...implemented(number), event(number, "gate", "ok")])
 
         // when
-        const view = boardOf(MANIFEST, events, [])
+        const view = boardOf(MANIFEST, events)
 
         // then
         expect(view.rows.map(row => row.ticket)).toEqual([7, 8, 9])
@@ -415,82 +424,27 @@ describe("boardOf: what a ticket came to", () => {
 })
 
 /**
- * A resumed run: the same function against a log a previous process left behind, and an action set
- * that does not hold what that process was doing. There is no mode to assert and nothing to wait
- * for — the first frame of a resumed run is this, and it is the one thing the log alone cannot say.
+ * The view's whole vocabulary, asserted as a shape rather than a field at a time: what a second
+ * process rendering this has to understand, and the list `beyond repair` is no longer on.
  */
-describe("boardOf: a run picked back up", () => {
-    it.each([
-        ["the driver still holds its action", [{ kind: "implement", ticket: 7, attempt: 1 }] as const, "live"],
-        ["the process that began it is gone", [] as const, "interrupted"],
-    ] as const)("should read a step the log left running as %s where %s", (_case, inFlight, expected) => {
+describe("boardOf: what a row is made of", () => {
+    it("should carry exactly the row's fields and nothing beside them", () => {
         // given
-        const events = [event(7, "setup", "ok"), event(7, "implement", "running")]
-
-        // when
-        const weight = weightOf(events, 7, "implement", inFlight)
-
-        // then
-        expect(weight).toBe(expected)
-    })
-
-    it("should never read an interrupted ticket's step as live", () => {
-        // given: a log full of steps a killed run began, and an action set that holds none of them
-        const events = [event(7, "setup", "running"), event(8, "implement", "running")]
-
-        // when
-        const view = boardOf(MANIFEST, events, [])
-
-        // then
-        expect(view.rows.flatMap(row => row.steps).filter(entry => entry.state === "live")).toEqual([])
-    })
-
-    it("should show the step a prepare pass will be sent to", () => {
-        // given: a pass a killed run left behind is still about the squash it was sent to repair
-        const events = [...implemented(7), event(7, "merge", "failed"), event(7, "prepare", "running")]
-
-        // when
-        const weight = weightOf(events, 7, "merge", [])
-
-        // then
-        expect(weight).toBe("interrupted")
-    })
-
-    it("should leave the steps after the repair ahead of it", () => {
-        // given
-        const events = [...implemented(7), event(7, "merge", "failed"), event(7, "prepare", "running")]
-
-        // when
-        const weight = weightOf(events, 7, "gate", [])
-
-        // then
-        expect(weight).toBe("ahead")
-    })
-
-    it("should read a ticket no prepare pass would pick up as beyond repair", () => {
-        // given: a revert is the one step recovery must not undo, so a killed one is the end of it
         const events = [...implemented(7), event(7, "gate", "failed"), event(7, "revert", "running")]
 
         // when
-        const row = rowOf(events, 7, [])
+        const row = rowOf(events, 7)
 
         // then
-        expect(row?.beyondRepair).toBe(true)
-    })
-
-    it.each([
-        ["a ticket a prepare pass would pick up", [event(7, "implement", "running")]],
-        ["a ticket nothing has happened to", []],
-        ["a ticket whose step ended", [...implemented(7)]],
-    ] as const)("should not read %s as beyond repair", (_case, events) => {
-        // given
-        const log = events
-
-        // when
-        const row = rowOf(log, 7, [])
-
-        // then
-        expect(row?.beyondRepair).toBe(false)
+        expect(Object.keys(row ?? {}).sort()).toEqual([
+            "conclusion",
+            "detail",
+            "steps",
+            "ticket",
+            "title",
+            "track",
+            "waiting",
+        ])
     })
 })
 
@@ -532,5 +486,54 @@ describe("boardOf: why a step came to what it did", () => {
 
         // then
         expect(row?.detail).toBe("the budget ran out")
+    })
+})
+
+describe("boardOf: when the last thing happened", () => {
+    /** An event that says when it happened, which is the only thing these cases turn on. */
+    const at = (when: string): LifecycleEvent => ({ ...event(7, "implement", "running"), at: when })
+
+    it("should carry the timestamp of the log's most recent event", () => {
+        // given
+        const events = [at("2026-09-15T11:18:38.314Z"), at("2026-09-15T11:42:07.001Z")]
+
+        // when
+        const view = boardOf(MANIFEST, events)
+
+        // then
+        expect(view.at).toBe("2026-09-15T11:42:07.001Z")
+    })
+
+    it("should carry nothing where the log holds no event", () => {
+        // given
+        const events: readonly LifecycleEvent[] = []
+
+        // when
+        const view = boardOf(MANIFEST, events)
+
+        // then
+        expect(view.at).toBeUndefined()
+    })
+
+    it("should carry the last event's own timestamp rather than a reading of the clock", () => {
+        // given: a log whose last event is an hour old, read now
+        const events = [at("2026-09-15T10:00:00.000Z")]
+
+        // when
+        const view = boardOf(MANIFEST, events)
+
+        // then
+        expect(view.at).toBe("2026-09-15T10:00:00.000Z")
+    })
+
+    it("should say the same thing about the same log however often it is read", () => {
+        // given
+        const events = [at("2026-09-15T10:00:00.000Z"), at("2026-09-15T10:00:04.000Z")]
+
+        // when
+        const views = [boardOf(MANIFEST, events), boardOf(MANIFEST, events)]
+
+        // then
+        expect(views.map(view => view.at)).toEqual(["2026-09-15T10:00:04.000Z", "2026-09-15T10:00:04.000Z"])
     })
 })

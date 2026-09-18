@@ -150,6 +150,19 @@ export type EventLog = {
     /** Every event for this spec, oldest first. A spec with no log has no events. */
     read: (root: string, spec: number) => Promise<readonly LifecycleEvent[]>
     append: (root: string, spec: number, event: LifecycleEvent) => Promise<void>
+    /**
+     * The log as it stands, and the whole log again each time it changes. The first value is what
+     * `read` would have given, so a follower needs no read of its own.
+     *
+     * Reading only, which is what lets a run be watched while it is in flight: the log is appended
+     * to by one process and any number of others may follow it without the writer knowing (ADR-0030).
+     * Changes that land between two looks are one change — the value is the log, never a delta, so
+     * nothing is lost by coalescing them.
+     *
+     * It ends only where nothing more can arrive, which over a file on disk is never: a follower
+     * leaves the loop when it has seen enough, and must be ready for one that goes on indefinitely.
+     */
+    follow: (root: string, spec: number) => AsyncIterable<readonly LifecycleEvent[]>
 }
 
 /**
@@ -258,6 +271,14 @@ export const settled = (events: readonly LifecycleEvent[], ticket: number): bool
  */
 export const running = (events: readonly LifecycleEvent[], ticket: number): boolean =>
     statusOf(events, ticket)?.outcome === "running"
+
+/**
+ * A step about the **run** that the log started and never ended: the run itself is doing something,
+ * as against one of its tickets. Its events carry no ticket, so every per-ticket derivation here is
+ * blind to them and this is the only thing that sees them (ADR-0028).
+ */
+export const runStepRunning = (events: readonly LifecycleEvent[]): boolean =>
+    events.findLast(event => event.ticket === undefined)?.outcome === "running"
 
 /** A ticket the log has never mentioned, which is the only kind a first attempt is handed out for. */
 export const unattempted = (events: readonly LifecycleEvent[], ticket: number): boolean =>
