@@ -7,11 +7,16 @@ import {
     TRACKS,
     type Track,
 } from "../domain/board.ts"
+import { type Line, plain, type Span, widthOf } from "./board-span.ts"
 
 /**
  * The board's frame: a pure mapping from a view and a terminal width to the lines that view is. It
- * holds the layout and nothing else — where the cursor goes is the writer's, and what the run is
- * doing is the domain's.
+ * holds the layout and nothing else — where the cursor goes is the writer's, what the run is doing
+ * is the domain's, and what a line looks like is the colouring's.
+ *
+ * A line is a sequence of spans rather than a string, so that every width here is computed on plain
+ * text before any colour exists. Colour is applied after the layout, never inside it: an escape
+ * sequence is characters to `padEnd` and to a length check (ADR-0031).
  *
  * The height is the row count plus one header per track, whatever the view says, so the block never
  * grows or shrinks while somebody is reading it. That is also why a title is truncated rather than
@@ -33,9 +38,9 @@ const HEADINGS: Record<Track, string> = {
  * `NO_COLOR`: colour may repeat these and may never be the only thing saying them.
  */
 const OUTCOMES: Record<SettledOutcome, string> = {
-    ok: "\u2713",
-    failed: "\u2717",
-    skipped: "\u00b7",
+    ok: "✓",
+    failed: "✗",
+    skipped: "·",
     conflicted: "!",
 }
 
@@ -78,31 +83,74 @@ const WHEN = "last event"
 /** What a cut line ends in, so that a truncated title reads as a truncated title. */
 const ELLIPSIS = "..."
 
-const fitted = (line: string, width: number): string => {
-    if (line.length <= width) {
+/**
+ * A line cut to the width it is read on, span by span. The cut is made on plain text, which is the
+ * only text there is here: a span keeps whatever it said about itself for the part of it that fits.
+ */
+const fitted = (line: Line, width: number): Line => {
+    if (widthOf(line) <= width) {
         return line
     }
-    return width <= ELLIPSIS.length
-        ? ELLIPSIS.slice(0, Math.max(width, 0))
-        : `${line.slice(0, width - ELLIPSIS.length)}${ELLIPSIS}`
+    if (width <= ELLIPSIS.length) {
+        return [plain(ELLIPSIS.slice(0, Math.max(width, 0)))]
+    }
+
+    const room = width - ELLIPSIS.length
+    const kept: Span[] = []
+    let taken = 0
+    for (const span of line) {
+        if (taken >= room) {
+            break
+        }
+        const text = span.text.slice(0, room - taken)
+        if (text !== "") {
+            kept.push({ ...span, text })
+            taken += text.length
+        }
+    }
+
+    return [...kept, plain(ELLIPSIS)]
 }
 
 /** A row's trail, which is what has happened, what is happening and what is next, in that order. */
-const trail = (row: BoardRow): string =>
-    [...row.steps.map(written), ...(row.waiting ? [WAITING] : []), ...(dead(row) ? [DEAD] : [])].join(" ")
+const trail = (row: BoardRow): Line =>
+    [...row.steps.map(written), ...(row.waiting ? [WAITING] : []), ...(dead(row) ? [DEAD] : [])]
+        // A separator of its own between two steps, so that the step spans hold nothing but a step.
+        .flatMap((entry, index): Span[] => (index === 0 ? [plain(entry)] : [plain(" "), plain(entry)]))
+
+/** A column's worth of padding, and no span at all where a column needs none. */
+const padding = (columns: number): Span[] => (columns > 0 ? [plain(" ".repeat(columns))] : [])
 
 /**
  * One ticket's line: its number, its trail, and its title. The title comes last because it is the
  * one part that may be cut — a trail a narrow terminal ate would lose the point of the row.
+ *
+ * Every column of padding is a span of its own, because padding says nothing and a span that says
+ * nothing is what keeps the number, a step and a title each treatable on their own.
  */
-const rowLine = (row: BoardRow, label: number, steps: number, width: number): string =>
-    fitted(`  ${`#${row.ticket}`.padEnd(label)}  ${trail(row).padEnd(steps)}  ${row.title}`, width)
+const rowLine = (row: BoardRow, label: number, steps: number, width: number): Line => {
+    const marked = trail(row)
+
+    return fitted(
+        [
+            plain("  "),
+            plain(`#${row.ticket}`),
+            ...padding(label - `#${row.ticket}`.length),
+            plain("  "),
+            ...marked,
+            ...padding(steps - widthOf(marked)),
+            plain("  "),
+            plain(row.title),
+        ],
+        width,
+    )
+}
 
 /**
  * @param notice What the run has to say about itself, if anything. It is not part of the view
  * because it is not derived from the run's state: it arrives from whoever had something to say.
  */
-export const boardFrame = (view: BoardView, width: number, notice?: string): string[] => {
+export const boardFrame = (view: BoardView, width: number, notice?: string): readonly Line[] => {
     // One label column for the whole frame, so that the rows line up across both blocks.
     const label = Math.max(0, ...view.rows.map(row => `#${row.ticket}`.length))
 
@@ -110,12 +158,12 @@ export const boardFrame = (view: BoardView, width: number, notice?: string): str
         const rows = view.rows.filter(row => row.track === track)
         // A trail column per block, because the two tracks are different lengths and a column wide
         // enough for the merge track would push every implement title off a narrow terminal.
-        const steps = Math.max(0, ...rows.map(row => trail(row).length))
+        const steps = Math.max(0, ...rows.map(row => widthOf(trail(row))))
 
-        return [fitted(HEADINGS[track], width), ...rows.map(row => rowLine(row, label, steps, width))]
+        return [fitted([plain(HEADINGS[track])], width), ...rows.map(row => rowLine(row, label, steps, width))]
     })
 
     const footer = [...(view.at === undefined ? [] : [`${WHEN} ${view.at}`]), ...(notice === undefined ? [] : [notice])]
 
-    return [...blocks, ...footer.map(line => fitted(line, width))]
+    return [...blocks, ...footer.map(line => fitted([plain(line)], width))]
 }

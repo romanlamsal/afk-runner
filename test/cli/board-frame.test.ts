@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { boardFrame } from "../../src/cli/board-frame.ts"
+import { textOf, widthOf } from "../../src/cli/board-span.ts"
 import type { BoardRow, BoardStep, BoardView, SettledOutcome, Track } from "../../src/domain/board.ts"
 import type { Conclusion, Step } from "../../src/domain/events.ts"
 
@@ -60,7 +61,7 @@ describe("boardFrame", () => {
         const view = VIEW
 
         // when
-        const lines = boardFrame(view, WIDE)
+        const lines = boardFrame(view, WIDE).map(textOf)
 
         // then
         expect(lines).toContain(heading)
@@ -71,7 +72,7 @@ describe("boardFrame", () => {
         const view: BoardView = { at: undefined, rows: [row(7, "Implement the slate", "implement", IMPLEMENTING)] }
 
         // when
-        const lines = boardFrame(view, WIDE)
+        const lines = boardFrame(view, WIDE).map(textOf)
 
         // then
         expect(lines).toEqual(["implement track", "  #7  setup\u2713 <implement>  Implement the slate", "merge track"])
@@ -82,7 +83,7 @@ describe("boardFrame", () => {
         const view = VIEW
 
         // when
-        const lines = boardFrame(view, WIDE)
+        const lines = boardFrame(view, WIDE).map(textOf)
 
         // then
         expect(lines).toEqual([
@@ -108,7 +109,7 @@ describe("boardFrame", () => {
         }
 
         // when
-        const lines = boardFrame(view, WIDE)
+        const lines = boardFrame(view, WIDE).map(textOf)
 
         // then
         expect(lines.some(line => line.includes(written))).toBe(true)
@@ -119,7 +120,7 @@ describe("boardFrame", () => {
         const waiting = row(7, "A ticket", "implement", trail({ setup: "ok", implement: "ok" }), { waiting: true })
 
         // when
-        const lines = boardFrame({ at: undefined, rows: [waiting] }, WIDE)
+        const lines = boardFrame({ at: undefined, rows: [waiting] }, WIDE).map(textOf)
 
         // then
         expect(lines).toContain("  #7  setup\u2713 implement\u2713 waiting  A ticket")
@@ -135,7 +136,7 @@ describe("boardFrame", () => {
         const view: BoardView = { at: undefined, rows: [row(7, "A ticket", "implement", trail({ setup: outcome }))] }
 
         // when
-        const lines = boardFrame(view, WIDE)
+        const lines = boardFrame(view, WIDE).map(textOf)
 
         // then
         expect(lines).toContain(`  #7  setup${glyph}  A ticket`)
@@ -159,7 +160,7 @@ describe("boardFrame", () => {
         const view: BoardView = { at: undefined, rows: [dying] }
 
         // when
-        const lines = boardFrame(view, WIDE)
+        const lines = boardFrame(view, WIDE).map(textOf)
 
         // then
         expect(lines).toContain(expected)
@@ -170,7 +171,7 @@ describe("boardFrame", () => {
         const verified = row(7, "A ticket", "merge", trail({ gate: "ok" }), { conclusion: "verified" })
 
         // when
-        const lines = boardFrame({ at: undefined, rows: [verified] }, WIDE)
+        const lines = boardFrame({ at: undefined, rows: [verified] }, WIDE).map(textOf)
 
         // then
         expect(lines).toContain("  #7  gate\u2713  A ticket")
@@ -181,7 +182,7 @@ describe("boardFrame", () => {
         const stuck = row(7, "A ticket", "merge", trail({ rebase: "ok", revert: "running" }))
 
         // when
-        const lines = boardFrame({ at: undefined, rows: [stuck] }, WIDE)
+        const lines = boardFrame({ at: undefined, rows: [stuck] }, WIDE).map(textOf)
 
         // then
         expect(lines).toContain("  #7  rebase\u2713 <revert>  A ticket")
@@ -192,7 +193,7 @@ describe("boardFrame", () => {
         const view = VIEW
 
         // when
-        const lines = boardFrame(view, WIDE)
+        const lines = boardFrame(view, WIDE).map(textOf)
 
         // then
         expect(lines).toHaveLength(VIEW.rows.length + 2)
@@ -209,7 +210,7 @@ describe("boardFrame", () => {
         const lines = boardFrame(view, width)
 
         // then
-        expect(lines.every(line => line.length <= width)).toBe(true)
+        expect(lines.every(line => widthOf(line) <= width)).toBe(true)
     })
 
     it("should mark a truncated title as cut", () => {
@@ -220,7 +221,7 @@ describe("boardFrame", () => {
         }
 
         // when
-        const lines = boardFrame(view, 32)
+        const lines = boardFrame(view, 32).map(textOf)
 
         // then
         expect(lines).toContain("  #7  setup\u2713 <implement>  A t...")
@@ -233,7 +234,7 @@ describe("boardFrame: the run's status line", () => {
         const view: BoardView = { at: undefined, rows: [row(7, "Implement the slate", "implement", IMPLEMENTING)] }
 
         // when
-        const lines = boardFrame(view, WIDE, "afk: interrupted")
+        const lines = boardFrame(view, WIDE, "afk: interrupted").map(textOf)
 
         // then
         expect(lines).toEqual([
@@ -249,7 +250,7 @@ describe("boardFrame: the run's status line", () => {
         const view = VIEW
 
         // when
-        const lines = boardFrame(view, WIDE)
+        const lines = boardFrame(view, WIDE).map(textOf)
 
         // then
         expect(lines).toHaveLength(VIEW.rows.length + 2)
@@ -260,7 +261,7 @@ describe("boardFrame: the run's status line", () => {
         const view = VIEW
 
         // when
-        const lines = boardFrame(view, 20, "afk: interrupted — starting nothing new")
+        const lines = boardFrame(view, 20, "afk: interrupted — starting nothing new").map(textOf)
 
         // then
         expect(lines.at(-1)).toBe("afk: interrupted ...")
@@ -275,7 +276,7 @@ describe("boardFrame: when the last thing happened", () => {
         const view: BoardView = { ...VIEW, at: WHEN }
 
         // when
-        const lines = boardFrame(view, WIDE)
+        const lines = boardFrame(view, WIDE).map(textOf)
 
         // then
         expect(lines.at(-1)).toBe(`last event ${WHEN}`)
@@ -286,7 +287,7 @@ describe("boardFrame: when the last thing happened", () => {
         const view: BoardView = { ...VIEW, at: undefined }
 
         // when
-        const lines = boardFrame(view, WIDE)
+        const lines = boardFrame(view, WIDE).map(textOf)
 
         // then
         expect(lines.some(line => line.includes("last event"))).toBe(false)
@@ -297,7 +298,7 @@ describe("boardFrame: when the last thing happened", () => {
         const view: BoardView = { ...VIEW, at: WHEN }
 
         // when
-        const lines = boardFrame(view, WIDE, "afk: interrupted")
+        const lines = boardFrame(view, WIDE, "afk: interrupted").map(textOf)
 
         // then
         expect(lines.slice(-2)).toEqual([`last event ${WHEN}`, "afk: interrupted"])
@@ -308,9 +309,47 @@ describe("boardFrame: when the last thing happened", () => {
         const view: BoardView = { ...VIEW, at: WHEN }
 
         // when
-        const lines = boardFrame(view, 20)
+        const lines = boardFrame(view, 20).map(textOf)
 
         // then
         expect(lines.at(-1)).toBe("last event 2026-0...")
+    })
+})
+
+/**
+ * The layout hands out spans, and this is the one place that reads them as spans rather than as the
+ * text they carry. No assertion here holds an escape sequence: what colour makes of a span is the
+ * colouring step's, and it is asserted beside it (ADR-0031).
+ */
+describe("boardFrame: the spans a line is made of", () => {
+    it("should hand a row out as the parts it is made of, each in a span of its own", () => {
+        // given
+        const view: BoardView = { at: undefined, rows: [row(7, "A ticket", "implement", IMPLEMENTING)] }
+
+        // when
+        const [, line] = boardFrame(view, WIDE)
+
+        // then
+        expect(line?.map(span => span.text)).toEqual([
+            "  ",
+            "#7",
+            "  ",
+            "setup\u2713",
+            " ",
+            "<implement>",
+            "  ",
+            "A ticket",
+        ])
+    })
+
+    it("should ask for no treatment at all, while the trail's own text carries the state", () => {
+        // given
+        const view = VIEW
+
+        // when
+        const lines = boardFrame(view, WIDE)
+
+        // then
+        expect(lines.flat().every(span => span.tone === "normal" && span.hue === undefined)).toBe(true)
     })
 })

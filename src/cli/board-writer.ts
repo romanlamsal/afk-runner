@@ -1,6 +1,7 @@
 import type { Board, BoardView } from "../domain/board.ts"
 import { boardFrame } from "./board-frame.ts"
 import { boardLines } from "./board-lines.ts"
+import { painted } from "./board-paint.ts"
 
 /**
  * The writer: the impure half of the board, and the only thing that owns the cursor. It redraws the
@@ -29,7 +30,9 @@ export const createTerminalBoard = ({ write, columns }: TerminalBoardDeps): Boar
 
     const draw = (view: BoardView): void => {
         try {
-            const lines = boardFrame(view, columns(), notice)
+            // The frame lays out plain text and says what each part is to be read at; the colour
+            // goes on here, after every width has been computed (ADR-0031).
+            const lines = boardFrame(view, columns(), notice).map(painted)
             const rewound = `${UP}${CLEAR_LINE}`.repeat(drawn)
             write(`${rewound}${lines.map(line => `${line}\n`).join("")}`)
             drawn = lines.length
