@@ -14,12 +14,14 @@ export type ParsedArgs = {
     boardOnly: boolean
     resume: boolean
     forceFresh: boolean
+    branch: string | undefined
     maxParallel: string | undefined
     unknownFlags: string[]
 }
 
 export const USAGE =
-    "afk <spec> [--plan-only | --implement-only | --board-only] [--resume] [--force-fresh] [--max-parallel <n>]"
+    "afk <spec> [--plan-only | --implement-only | --board-only] [--branch <name>] [--resume] " +
+    "[--force-fresh] [--max-parallel <n>]"
 
 /**
  * The spec and the surplus positionals are both declared optional so that cleye never exits on
@@ -56,6 +58,11 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
                     description: "Delete this spec's branches, run directory and pull request, then start over",
                     default: false,
                 },
+                branch: {
+                    type: String,
+                    description: "The local branch this spec is based on, instead of the default one",
+                    placeholder: "<name>",
+                },
                 maxParallel: {
                     type: String,
                     description: "Implementer slots (default 3)",
@@ -78,6 +85,7 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
         boardOnly: parsed.flags.boardOnly,
         resume: parsed.flags.resume,
         forceFresh: parsed.flags.forceFresh,
+        branch: parsed.flags.branch,
         maxParallel: parsed.flags.maxParallel,
         unknownFlags: Object.keys(parsed.unknownFlags),
     }

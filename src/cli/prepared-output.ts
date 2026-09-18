@@ -6,7 +6,7 @@ import type { PreparedRun } from "../domain/run.ts"
  * walks away.
  */
 export const preparedOutput = (run: PreparedRun): string[] => [
-    `spec #${run.spec}: ${run.branch} cut from ${run.trunk}`,
+    `spec #${run.spec}: ${run.branch} cut from ${run.base}`,
     `gate:   ${run.gate}`,
     `setup:  ${run.manifest.setup}`,
     `verify: ${run.manifest.verify}`,

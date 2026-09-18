@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { manifestJsonSchema, readPlannedManifest } from "../../src/domain/manifest.ts"
+import { baseOf, type Manifest, manifestJsonSchema, readPlannedManifest } from "../../src/domain/manifest.ts"
 
 const planned = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
     spec: 4,
@@ -105,5 +105,29 @@ describe("manifestJsonSchema", () => {
 
         // then
         expect(schema).not.toHaveProperty("$schema")
+    })
+})
+
+describe("baseOf", () => {
+    const manifest: Manifest = {
+        spec: 4,
+        setup: "npm ci",
+        verify: "npm run check",
+        tickets: [{ number: 5, title: "Plan a spec", blockedBy: [] }],
+    }
+
+    it.each([
+        [{ base: "release" }, "release"],
+        [{ base: "main" }, "main"],
+        [{}, "main"],
+    ] as const)("should read %o as the branch the spec is based on", (carried, expected) => {
+        // given
+        const read: Manifest = { ...manifest, ...carried }
+
+        // when
+        const base = baseOf(read)
+
+        // then
+        expect(base).toBe(expected)
     })
 })

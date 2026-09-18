@@ -43,6 +43,12 @@ export type RunDeps = {
 export const createRun =
     ({ fresh, showBoard, start, drive, finish, print, printError, boardDrawn }: RunDeps) =>
     async (invocation: Invocation): Promise<ExitCode> => {
+        // Before the first thing that could scroll them away: a flag that was accepted but will not
+        // be acted on is news the operator needs while they can still stop and pass it differently.
+        for (const warning of invocation.warnings) {
+            printError(`afk: ${warning}`)
+        }
+
         // Before the run directory is touched by anything, because it is never touched at all: the
         // viewer reads the manifest and the log and draws what they say (ADR-0030). A spec that was
         // never planned is refused as a run that cannot start is, because the arguments were fine
@@ -73,6 +79,7 @@ export const createRun =
             spec: invocation.spec,
             mode: invocation.mode,
             consented: invocation.consented,
+            base: invocation.base,
         })
 
         switch (started.outcome) {

@@ -4,13 +4,19 @@ import { deadlocked } from "./schedule.ts"
 import { inlineJsonSchema } from "./schema.ts"
 
 /**
- * The manifest is the whole contract between the planner and the run. It carries the spec, the two
- * commands the run needs, and the tickets with their edges — and nothing else. Branch names are
- * derived from the spec and the ticket numbers, so they are not stored; trunk is not stored because
- * the spec branch is cut from the local one at run start.
+ * The manifest is the whole contract a run reads. It carries the spec, the two commands the run
+ * needs, the tickets with their edges, and the branch the spec is based on. Branch names are derived
+ * from the spec and the ticket numbers, so they are not stored.
+ *
+ * Two schemas, because the manifest has two authors. The planner is an agent, so what it returns is
+ * a claim (ADR-0003) — and the base is not its claim to make, so the schema it is handed does not
+ * have the field and afk writes it afterwards (ADR-0032). What is read back off disk has it.
  *
  * The schema is a rule, not a description of one, so it lives here with the functions that read it.
  */
+
+/** What a manifest written before ADR-0032 is based on, and the last fallback for one written after. */
+export const DEFAULT_BASE = "main"
 
 const ticketSchema = z.object({
     /** The issue number of the ticket. */
@@ -21,7 +27,8 @@ const ticketSchema = z.object({
     blockedBy: z.array(z.int().positive()),
 })
 
-const manifestSchema = z.object({
+/** Everything the planner is asked for, and the whole of what it is trusted to have an opinion on. */
+const plannedManifestSchema = z.object({
     /** The issue number of the spec whose tickets these are. */
     spec: z.int().positive(),
     /** The command that prepares a checkout for use. */
@@ -31,10 +38,26 @@ const manifestSchema = z.object({
     tickets: z.array(ticketSchema).min(1),
 })
 
+const manifestSchema = plannedManifestSchema.extend({
+    /**
+     * The local branch this spec is based on, as afk resolved it when the spec was planned. Optional
+     * because a manifest written before ADR-0032 has none, and one without it reads as
+     * `DEFAULT_BASE` — never absent, so that nothing downstream has to ask twice.
+     */
+    base: z.string().min(1).optional(),
+})
+
 export type Ticket = z.infer<typeof ticketSchema>
+export type PlannedManifest = z.infer<typeof plannedManifestSchema>
 export type Manifest = z.infer<typeof manifestSchema>
 
+/** What a manifest is based on. The one reader of the optional field, so the fallback lives once. */
+export const baseOf = (manifest: Manifest): string => manifest.base ?? DEFAULT_BASE
+
 export type ManifestRead = { ok: true; manifest: Manifest } | { ok: false; reason: string }
+
+/** What the planner's output came to. The base is not on it yet: afk puts it there (ADR-0032). */
+export type PlannedManifestRead = { ok: true; manifest: PlannedManifest } | { ok: false; reason: string }
 
 /** Where afk keeps the manifest. A driven port: the domain says what it needs, never how. */
 export type ManifestStore = {
@@ -43,9 +66,11 @@ export type ManifestStore = {
     write: (root: string, spec: number, manifest: Manifest) => Promise<void>
 }
 
-export const manifestJsonSchema = (): z.core.JSONSchema.BaseSchema => inlineJsonSchema(manifestSchema)
-
-const refuse = (reason: string): ManifestRead => ({ ok: false, reason })
+/**
+ * What the planner is asked to return, which is the manifest without the base: the field afk fills
+ * in is not one the agent is shown, so there is nothing for it to invent (ADR-0032).
+ */
+export const manifestJsonSchema = (): z.core.JSONSchema.BaseSchema => inlineJsonSchema(plannedManifestSchema)
 
 const duplicate = (tickets: readonly Ticket[]): Ticket | undefined =>
     tickets.find((ticket, index) => tickets.findIndex(other => other.number === ticket.number) !== index)
@@ -53,9 +78,19 @@ const duplicate = (tickets: readonly Ticket[]): Ticket | undefined =>
 /**
  * Everything afk knows about a manifest being usable, in one pass: the shape, that it answers the
  * question that was asked, and that it is a schedule rather than a knot.
+ *
+ * The schema is a parameter because the planner's manifest and the stored one differ by one field
+ * and by nothing else that these rules care about.
  */
-const readManifest = (raw: unknown, spec: number, source: string): ManifestRead => {
-    const parsed = manifestSchema.safeParse(raw)
+const readManifest = <T extends PlannedManifest>(
+    schema: z.ZodType<T>,
+    raw: unknown,
+    spec: number,
+    source: string,
+): { ok: true; manifest: T } | { ok: false; reason: string } => {
+    const refuse = (reason: string): { ok: false; reason: string } => ({ ok: false, reason })
+
+    const parsed = schema.safeParse(raw)
     if (!parsed.success) {
         return refuse(`${source} does not match the schema: ${z.prettifyError(parsed.error)}`)
     }
@@ -80,15 +115,15 @@ const readManifest = (raw: unknown, spec: number, source: string): ManifestRead 
 }
 
 /** A planner is an agent, so its output is read as a claim and never as a fact (ADR-0003). */
-export const readPlannedManifest = (raw: unknown, spec: number): ManifestRead =>
-    readManifest(raw, spec, "the planner's manifest")
+export const readPlannedManifest = (raw: unknown, spec: number): PlannedManifestRead =>
+    readManifest(plannedManifestSchema, raw, spec, "the planner's manifest")
 
 /**
  * A manifest afk wrote itself is read back through the same rules: it was edited by hand, or written
  * by a version of afk that is no longer this one, as readily as not.
  */
 export const readStoredManifest = (raw: unknown, spec: number): ManifestRead =>
-    readManifest(raw, spec, `the manifest in ${manifestPath(spec)}`)
+    readManifest(manifestSchema, raw, spec, `the manifest in ${manifestPath(spec)}`)
 
 export type TicketLookup = { ok: true; ticket: Ticket } | { ok: false; reason: string }
 

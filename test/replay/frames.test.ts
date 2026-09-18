@@ -29,7 +29,7 @@ const stateAt = (events: readonly LifecycleEvent[], number: number, step: Step):
 }
 
 const frame = (minute: number | undefined): ReplayFrame => ({
-    view: { rows: [] },
+    view: { rows: [], at: undefined },
     event: undefined,
     at: minute === undefined ? undefined : new Date(at(minute)),
 })
@@ -110,7 +110,7 @@ describe("replayFrames", () => {
         expect(frames.map(one => one.event)).toEqual([undefined, ...log, undefined])
     })
 
-    it("should read a step the log left running as live while the log goes on", () => {
+    it("should read a step the log left running as running while the log goes on", () => {
         // given
         const log = [event(7, "implement", "running")]
 
@@ -118,10 +118,10 @@ describe("replayFrames", () => {
         const state = stateAt(log, 7, "implement")
 
         // then
-        expect(state).toBe("live")
+        expect(state).toBe("running")
     })
 
-    it("should close on the frame a resume would open on, so a log that ends mid-step ends interrupted", () => {
+    it("should close on the board the whole log comes to", () => {
         // given
         const log = [event(7, "implement", "running")]
 
@@ -129,10 +129,7 @@ describe("replayFrames", () => {
         const frames = replayFrames(MANIFEST, log)
 
         // then
-        expect(frames.at(-1)?.view.rows.find(row => row.ticket === 7)?.steps).toContainEqual({
-            step: "implement",
-            state: "interrupted",
-        })
+        expect(frames.at(-1)?.view).toEqual(frames.at(-2)?.view)
     })
 
     it("should carry the instant each event was appended at", () => {

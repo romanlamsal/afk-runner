@@ -56,6 +56,7 @@ const harness = (reply: { structuredOutput: unknown } = { structuredOutput: MANI
         plan: createPlanService({
             events: events.log,
             agent: agent.run,
+            git: git.git,
             manifests: manifests.store,
             now: () => new Date("2026-09-15T11:18:38.314Z"),
         }),
@@ -87,7 +88,7 @@ describe("afk <spec> --plan-only", () => {
         await cli(["4", "--plan-only"])
 
         // then
-        expect(manifests.written).toEqual([{ root: "/repo", spec: 4, manifest: MANIFEST }])
+        expect(manifests.written).toEqual([{ root: "/repo", spec: 4, manifest: { ...MANIFEST, base: "main" } }])
     })
 
     it("should print the execution order", async () => {

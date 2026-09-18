@@ -1,4 +1,4 @@
-import type { Git, GitResult, RebaseRequest, TrunkState, WorktreeRequest } from "../../src/domain/git.ts"
+import type { BaseState, Git, GitResult, RebaseRequest, WorktreeRequest } from "../../src/domain/git.ts"
 
 /**
  * The git port's fake, and it is allowed to be fat: it models a branch as the commits on it, so
@@ -43,11 +43,14 @@ export type FakeGit = {
     checkedOut: () => readonly string[]
 }
 
-export const TRUNK: TrunkState = { branch: "main", ahead: 0, behind: 0, compared: true, dirty: false }
+export const BASE: BaseState = { branch: "main", ahead: 0, behind: 0, compared: true, dirty: false }
 
 export type FakeRepository = {
     root?: string | undefined
-    trunk?: TrunkState | undefined
+    /** The base as it stands, for a scenario about the notices. Undefined models a deleted branch. */
+    base?: BaseState | undefined
+    /** What `origin/HEAD` and the usual name come to, for a repository that has neither. */
+    defaultBase?: string | undefined
     checkout?: GitResult
     /** What a revert comes to, for a repository where git refuses one. */
     revert?: GitResult
@@ -157,7 +160,14 @@ export const createFakeGit = (repository: FakeRepository = {}): FakeGit => {
         },
         git: {
             topLevel: async () => ("root" in repository ? repository.root : "/repo"),
-            inspectTrunk: async () => ("trunk" in repository ? repository.trunk : TRUNK),
+            hasLocalBranch: async (_root, branch) => branches.has(branch),
+            defaultBase: async () => ("defaultBase" in repository ? repository.defaultBase : BASE.branch),
+            // The state a scenario declared, under the name it was asked about: `base: undefined`
+            // is the repository that no longer has the branch its manifest names.
+            inspectBase: async (_root, branch) => {
+                const state = "base" in repository ? repository.base : BASE
+                return state === undefined ? undefined : { ...state, branch }
+            },
             checkoutWorktree: async (_root, request) => {
                 worktrees.push(request)
                 if (repository.checkout !== undefined && !repository.checkout.ok) {

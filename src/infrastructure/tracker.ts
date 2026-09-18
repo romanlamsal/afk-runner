@@ -31,8 +31,8 @@ export const createGitHubTracker = (): Tracker => ({
 
     openPullRequest: async (root, { head, base, title, body, draft }): Promise<OpenResult> => {
         // The base is named rather than left to gh to guess, so that the pull request is opened
-        // against the very branch the spec branch was cut from. Trunk is what `origin/HEAD` names,
-        // which is the repository's default branch (ADR-0018).
+        // against the very branch the spec branch was cut from. What that is the manifest records,
+        // and it is the repository's default branch only where nobody said otherwise (ADR-0032).
         const created = await run(
             "gh",
             [

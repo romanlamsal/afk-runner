@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
-import type { TrunkState } from "../../src/domain/git.ts"
-import { trunkNotices } from "../../src/domain/preflight.ts"
+import type { BaseState } from "../../src/domain/git.ts"
+import { baseNotices } from "../../src/domain/preflight.ts"
 
-const trunk = (overrides: Partial<TrunkState> = {}): TrunkState => ({
+const base = (overrides: Partial<BaseState> = {}): BaseState => ({
     branch: "main",
     ahead: 0,
     behind: 0,
@@ -11,13 +11,13 @@ const trunk = (overrides: Partial<TrunkState> = {}): TrunkState => ({
     ...overrides,
 })
 
-describe("trunkNotices", () => {
-    it("should say nothing about a trunk that matches its remote in a clean tree", () => {
+describe("baseNotices", () => {
+    it("should say nothing about a base that matches its remote in a clean tree", () => {
         // given
-        const clean = trunk()
+        const clean = base()
 
         // when
-        const notices = trunkNotices(clean)
+        const notices = baseNotices(clean)
 
         // then
         expect(notices).toEqual([])
@@ -25,10 +25,10 @@ describe("trunkNotices", () => {
 
     it("should warn that being behind is not pulled away", () => {
         // given
-        const behind = trunk({ behind: 2 })
+        const behind = base({ behind: 2 })
 
         // when
-        const notices = trunkNotices(behind)
+        const notices = baseNotices(behind)
 
         // then
         expect(notices).toEqual([{ kind: "warning", message: expect.stringContaining("2 commits behind origin/main") }])
@@ -36,10 +36,10 @@ describe("trunkNotices", () => {
 
     it("should warn that uncommitted changes are not part of the run", () => {
         // given
-        const dirty = trunk({ dirty: true })
+        const dirty = base({ dirty: true })
 
         // when
-        const notices = trunkNotices(dirty)
+        const notices = baseNotices(dirty)
 
         // then
         expect(notices).toEqual([
@@ -49,10 +49,10 @@ describe("trunkNotices", () => {
 
     it("should note being ahead rather than warn about it, the commits being part of the run", () => {
         // given
-        const ahead = trunk({ ahead: 1 })
+        const ahead = base({ ahead: 1 })
 
         // when
-        const notices = trunkNotices(ahead)
+        const notices = baseNotices(ahead)
 
         // then
         expect(notices).toEqual([{ kind: "note", message: expect.stringContaining("1 commit ahead of origin/main") }])
@@ -60,10 +60,10 @@ describe("trunkNotices", () => {
 
     it("should note that a repository with no remote was not compared", () => {
         // given
-        const alone = trunk({ compared: false })
+        const alone = base({ compared: false })
 
         // when
-        const notices = trunkNotices(alone)
+        const notices = baseNotices(alone)
 
         // then
         expect(notices).toEqual([{ kind: "note", message: expect.stringContaining("no remote to compare main with") }])
@@ -71,10 +71,10 @@ describe("trunkNotices", () => {
 
     it("should put the warnings before the notes, so the screen reads top to bottom", () => {
         // given
-        const everything = trunk({ ahead: 1, behind: 2, dirty: true })
+        const everything = base({ ahead: 1, behind: 2, dirty: true })
 
         // when
-        const notices = trunkNotices(everything)
+        const notices = baseNotices(everything)
 
         // then
         expect(notices.map(notice => notice.kind)).toEqual(["warning", "warning", "note"])

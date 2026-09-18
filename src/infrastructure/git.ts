@@ -1,6 +1,7 @@
 import { access, rm } from "node:fs/promises"
 import { isAbsolute, join, resolve, sep } from "node:path"
-import type { Git, GitResult, RebaseResult, TrunkState } from "../domain/git.ts"
+import type { BaseState, Git, GitResult, RebaseResult } from "../domain/git.ts"
+import { DEFAULT_BASE } from "../domain/manifest.ts"
 import { INVOCATION_TIMEOUT_MS } from "../domain/timeout.ts"
 import { complaint, type Ran, run } from "./process.ts"
 
@@ -9,15 +10,12 @@ import { complaint, type Ran, run } from "./process.ts"
  *
  * Every command here either reads, or writes the one branch afk owns through the one worktree that
  * owns it. The fetch is the only thing that reaches the network, and it moves nothing the operator
- * can see: it updates `FETCH_HEAD`, which is what the comparison reads, and leaves the local trunk
+ * can see: it updates `FETCH_HEAD`, which is what the comparison reads, and leaves the local base
  * and the working tree exactly where they were (ADR-0018).
  */
 
 /** afk compares against one remote. A repository with none is simply not compared. */
 const REMOTE = "origin"
-
-/** Where a repository with no `origin/HEAD` is looked for, in the order git itself would guess. */
-const TRUNK_CANDIDATES = ["main", "master"] as const
 
 /** What `worktree list --porcelain` puts in front of every path it lists. */
 const WORKTREE_LINE = "worktree "
@@ -31,26 +29,23 @@ const hasBranch = async (root: string, branch: string): Promise<boolean> =>
     (await git(root, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`)).ok
 
 /**
- * What the repository itself says its trunk is, and only then what it is usually called. Nothing is
- * asked of the tracker: the branch afk cuts from is a local one, and a repository that has no remote
- * still has a trunk.
+ * What the repository itself says its default branch is, and only then what one is usually called.
+ * Nothing is asked of the tracker: the branch afk cuts from is a local one, and a repository that
+ * has no remote still has a default branch.
  */
-const trunkBranch = async (root: string): Promise<string | undefined> => {
+const defaultBaseBranch = async (root: string): Promise<string | undefined> => {
     const head = await git(root, "symbolic-ref", "--short", `refs/remotes/${REMOTE}/HEAD`)
     const named = head.ok && head.stdout.startsWith(`${REMOTE}/`) ? head.stdout.slice(REMOTE.length + 1) : undefined
-    // What the remote calls trunk is only trunk here if this checkout has it: the spec branch is cut
-    // from a local commit, so a name with no local branch behind it is not one afk can cut from.
+    // What the remote calls its default branch is only a base here if this checkout has it: the spec
+    // branch is cut from a local commit, so a name with no local branch behind it is not one afk can
+    // cut from.
     if (named !== undefined && (await hasBranch(root, named))) {
         return named
     }
 
-    for (const candidate of TRUNK_CANDIDATES) {
-        if (await hasBranch(root, candidate)) {
-            return candidate
-        }
-    }
-
-    return undefined
+    // The same name a manifest written before ADR-0032 reads as, because they are the same guess:
+    // what a default branch is called where nothing in the repository says otherwise.
+    return (await hasBranch(root, DEFAULT_BASE)) ? DEFAULT_BASE : undefined
 }
 
 const exists = async (path: string): Promise<boolean> => {
@@ -86,16 +81,16 @@ const rebasing = async (cwd: string): Promise<boolean> => {
     return false
 }
 
-/** The comparison against the remote trunk, or nothing to compare with. */
-const compare = async (root: string, trunk: string): Promise<{ ahead: number; behind: number; compared: boolean }> => {
+/** The comparison against the remote base, or nothing to compare with. */
+const compare = async (root: string, base: string): Promise<{ ahead: number; behind: number; compared: boolean }> => {
     const nothing = { ahead: 0, behind: 0, compared: false }
 
-    const fetched = await git(root, "fetch", "--no-tags", "--quiet", REMOTE, trunk)
+    const fetched = await git(root, "fetch", "--no-tags", "--quiet", REMOTE, base)
     if (!fetched.ok) {
         return nothing
     }
 
-    const counted = await git(root, "rev-list", "--left-right", "--count", `refs/heads/${trunk}...FETCH_HEAD`)
+    const counted = await git(root, "rev-list", "--left-right", "--count", `refs/heads/${base}...FETCH_HEAD`)
     const [ahead, behind] = counted.stdout.split(/\s+/).map(Number)
     if (!counted.ok || ahead === undefined || behind === undefined || !Number.isInteger(ahead + behind)) {
         return nothing
@@ -110,14 +105,17 @@ export const createGit = (): Git => ({
         return top.ok && top.stdout !== "" ? top.stdout : undefined
     },
 
-    inspectTrunk: async root => {
-        const branch = await trunkBranch(root)
-        if (branch === undefined) {
+    hasLocalBranch: hasBranch,
+
+    defaultBase: defaultBaseBranch,
+
+    inspectBase: async (root, branch) => {
+        if (!(await hasBranch(root, branch))) {
             return undefined
         }
 
         const status = await git(root, "status", "--porcelain")
-        const state: TrunkState = { branch, dirty: status.stdout !== "", ...(await compare(root, branch)) }
+        const state: BaseState = { branch, dirty: status.stdout !== "", ...(await compare(root, branch)) }
         return state
     },
 

@@ -119,20 +119,18 @@ export const liveActions = (manifest: Manifest, events: readonly LifecycleEvent[
  * view is the baseline and news for nothing, so starting anywhere else would swallow whatever had
  * already happened by then.
  *
- * The closing frame is where the reconstruction stops claiming: it is drawn with no live actions,
- * so a log that ends mid-step ends showing that step interrupted — which is what it is, and what a
- * resume would say about it. On a log that ends with nothing running it is the frame before it
- * again, and says nothing new.
+ * The closing frame is the whole log's board, held once more with no event beside it: the replay
+ * ends on what a resume would open on rather than on the last line's own news.
  */
 export const replayFrames = (manifest: Manifest, events: readonly LifecycleEvent[]): readonly ReplayFrame[] => [
-    { view: boardOf(manifest, [], []), event: undefined, at: undefined },
+    { view: boardOf(manifest, []), event: undefined, at: undefined },
     // Each frame derives from the whole prefix rather than from the one before it, because that is
-    // what the board is: a function of the log, never of the last thing drawn.
+    // what the board is: a function of the log, never of the last thing drawn (ADR-0030).
     ...events.map((event, index): ReplayFrame => {
         const soFar = events.slice(0, index + 1)
-        return { view: boardOf(manifest, soFar, liveActions(manifest, soFar)), event, at: instantOf(event) }
+        return { view: boardOf(manifest, soFar), event, at: instantOf(event) }
     }),
-    { view: boardOf(manifest, events, []), event: undefined, at: undefined },
+    { view: boardOf(manifest, events), event: undefined, at: undefined },
 ]
 
 /**

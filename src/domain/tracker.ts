@@ -14,7 +14,7 @@ export type ClaimResult = { ok: true } | { ok: false; reason: string }
 export type PullRequestRequest = PullRequest & {
     /** The branch the pull request carries: the spec branch, already pushed. */
     head: string
-    /** What it is opened against: the trunk the spec branch was cut from (ADR-0018). */
+    /** What it is opened against: the branch the spec branch was cut from (ADR-0018, ADR-0032). */
     base: string
 }
 

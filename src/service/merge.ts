@@ -52,7 +52,7 @@ export const createMergeService =
         // on the branch, and squashing it a second time would replay it. It is a cross-check and
         // not a dispatcher: it says whether this ticket's work is there, never which ticket to take
         // (ADR-0011).
-        const onSpecBranch = await git.log(root, { rev: run.branch, notIn: run.trunk })
+        const onSpecBranch = await git.log(root, { rev: run.branch, notIn: run.base })
 
         await record("running")
 

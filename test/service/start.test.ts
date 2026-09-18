@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { TrunkState } from "../../src/domain/git.ts"
+import type { BaseState } from "../../src/domain/git.ts"
 import type { Manifest } from "../../src/domain/manifest.ts"
 import type { StartMode } from "../../src/domain/mode.ts"
 import type { Commands } from "../../src/domain/operator.ts"
@@ -21,7 +21,7 @@ const MANIFEST: Manifest = {
 type Setup = {
     mode?: StartMode
     consented?: boolean
-    /** What the repository looks like: its root, its trunk, whether a worktree can be checked out. */
+    /** What the repository looks like: its root, its base, whether a worktree can be checked out. */
     repository?: Parameters<typeof createFakeGit>[0]
     /** The manifest already on disk. */
     stored?: Manifest
@@ -32,6 +32,8 @@ type Setup = {
     aborts?: boolean
     /** What the planner produced, when the mode plans. */
     planned?: Manifest
+    /** `--branch`, as an accepted invocation carries it. */
+    base?: string
 }
 
 type Harness = {
@@ -40,8 +42,8 @@ type Harness = {
     manifests: FakeManifestStore
     operator: FakeOperator
     records: FakeRunRecords
-    /** The repositories and specs the planner was asked about. */
-    planned: { root: string; spec: number }[]
+    /** The repositories and specs the planner was asked about, and what it was asked to base them on. */
+    planned: { root: string; spec: number; base: string | undefined }[]
 }
 
 const harness = (setup: Setup = {}): Harness => {
@@ -57,7 +59,7 @@ const harness = (setup: Setup = {}): Harness => {
             ? [{ ticket: 10, step: "implement", outcome: "running", at: "2026-09-15T11:18:38.314Z" }]
             : [],
     )
-    const planned: { root: string; spec: number }[] = []
+    const planned: { root: string; spec: number; base: string | undefined }[] = []
 
     const service = createStartService({
         cwd: "/repo/packages/thing",
@@ -66,8 +68,8 @@ const harness = (setup: Setup = {}): Harness => {
         git: git.git,
         manifests: manifests.store,
         operator: operator.operator,
-        plan: async (root, spec) => {
-            planned.push({ root, spec })
+        plan: async (root, spec, asked) => {
+            planned.push({ root, spec, base: asked.base })
             return { ok: true, manifest: setup.planned ?? MANIFEST }
         },
         records: records.records,
@@ -80,7 +82,12 @@ const harness = (setup: Setup = {}): Harness => {
         records,
         planned,
         start: () =>
-            service({ spec: 4, mode: setup.mode ?? "plan-and-implement", consented: setup.consented ?? false }),
+            service({
+                spec: 4,
+                mode: setup.mode ?? "plan-and-implement",
+                consented: setup.consented ?? false,
+                base: setup.base,
+            }),
     }
 }
 
@@ -186,8 +193,8 @@ describe("createStartService", () => {
 
     it("should still report the state of the repository under --implement-only", async () => {
         // given
-        const behind: TrunkState = { branch: "main", ahead: 0, behind: 2, compared: true, dirty: false }
-        const { start, operator } = harness({ mode: "implement-only", stored: MANIFEST, repository: { trunk: behind } })
+        const behind: BaseState = { branch: "main", ahead: 0, behind: 2, compared: true, dirty: false }
+        const { start, operator } = harness({ mode: "implement-only", stored: MANIFEST, repository: { base: behind } })
 
         // when
         await start()
@@ -256,7 +263,7 @@ describe("createStartService", () => {
         expect(git.worktrees).toEqual([])
     })
 
-    it("should cut the spec branch from the local trunk into the gate worktree", async () => {
+    it("should cut the spec branch from the local base into the gate worktree", async () => {
         // given
         const { start, git } = harness()
 
@@ -280,7 +287,7 @@ describe("createStartService", () => {
             run: {
                 root: "/repo",
                 spec: 4,
-                trunk: "main",
+                base: "main",
                 branch: "afk/4/spec",
                 gate: ".afk/4/gate",
                 manifest: MANIFEST,
@@ -288,15 +295,15 @@ describe("createStartService", () => {
         })
     })
 
-    it("should refuse when the repository names no trunk to cut from", async () => {
+    it("should refuse when the repository no longer has the branch the manifest names", async () => {
         // given
-        const { start } = harness({ repository: { trunk: undefined } })
+        const { start } = harness({ repository: { base: undefined } })
 
         // when
         const result = await start()
 
         // then
-        expect(result).toEqual({ outcome: "refused", reason: expect.stringContaining("no trunk") })
+        expect(result).toEqual({ outcome: "refused", reason: expect.stringContaining("no longer has") })
     })
 
     it("should refuse when the gate worktree could not be created", async () => {
@@ -308,5 +315,115 @@ describe("createStartService", () => {
 
         // then
         expect(result).toEqual({ outcome: "refused", reason: expect.stringContaining("already checked out") })
+    })
+
+    it("should refuse a --branch this repository has no local branch for", async () => {
+        // given
+        const { start } = harness({ base: "release", repository: { branches: { main: ["tip"] } } })
+
+        // when
+        const result = await start()
+
+        // then
+        expect(result).toEqual({
+            outcome: "refused",
+            reason: "--branch release: this repository has no local branch by that name",
+        })
+    })
+
+    it("should lay no run directory down for a --branch it refuses", async () => {
+        // given
+        const { start, records } = harness({ base: "release", repository: { branches: { main: ["tip"] } } })
+
+        // when
+        await start()
+
+        // then
+        expect(records.created).toEqual([])
+    })
+
+    it("should refuse a --branch that disagrees with the base already recorded", async () => {
+        // given
+        const stored: Manifest = { ...MANIFEST, base: "release" }
+        const { start } = harness({
+            mode: "plan-only",
+            base: "other",
+            stored,
+            repository: { branches: { other: ["tip"] } },
+        })
+
+        // when
+        const result = await start()
+
+        // then
+        expect(result).toEqual({
+            outcome: "refused",
+            reason:
+                "spec #4 is already based on release, so --branch other cannot be honoured. " +
+                "Pass --force-fresh to plan it afresh",
+        })
+    })
+
+    it("should hand the planner the branch it was asked to base the spec on", async () => {
+        // given
+        const { start, planned } = harness({ base: "release", repository: { branches: { release: ["tip"] } } })
+
+        // when
+        await start()
+
+        // then
+        expect(planned).toEqual([{ root: "/repo", spec: 4, base: "release" }])
+    })
+
+    it("should cut the spec branch from the base the manifest records", async () => {
+        // given
+        const stored: Manifest = { ...MANIFEST, base: "release" }
+        const { start, git } = harness({ mode: "implement-only", stored })
+
+        // when
+        await start()
+
+        // then
+        expect(git.worktrees).toEqual([{ path: ".afk/4/gate", branch: "afk/4/spec", startPoint: "release" }])
+    })
+
+    it("should open the run on the base the manifest records", async () => {
+        // given
+        const stored: Manifest = { ...MANIFEST, base: "release" }
+        const { start } = harness({ mode: "implement-only", stored })
+
+        // when
+        const result = await start()
+
+        // then
+        expect(result).toEqual(expect.objectContaining({ run: expect.objectContaining({ base: "release" }) }))
+    })
+
+    it("should refuse a --branch against a manifest written before the base was recorded", async () => {
+        // given — no base on it, which reads as main, so release is a different branch
+        const { start } = harness({
+            mode: "plan-only",
+            base: "release",
+            stored: MANIFEST,
+            repository: { branches: { release: ["tip"] } },
+        })
+
+        // when
+        const result = await start()
+
+        // then
+        expect(result).toEqual({ outcome: "refused", reason: expect.stringContaining("already based on main") })
+    })
+
+    it("should re-plan on the base already recorded when no --branch repeats it", async () => {
+        // given
+        const stored: Manifest = { ...MANIFEST, base: "release" }
+        const { start, planned } = harness({ mode: "plan-only", stored })
+
+        // when
+        await start()
+
+        // then
+        expect(planned).toEqual([{ root: "/repo", spec: 4, base: "release" }])
     })
 })

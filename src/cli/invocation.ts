@@ -7,7 +7,15 @@ export type Invocation = {
     /** `--resume`: consent to continuing an existing run. It acknowledges, it never dispatches. */
     consented: boolean
     forceFresh: boolean
+    /**
+     * `--branch`: the branch this spec is based on, where the operator named one that could be a
+     * local branch. Undefined where none was passed, and where one was passed to a mode that does
+     * not plan — a warning says so rather than a refusal (ADR-0032).
+     */
+    base: string | undefined
     maxParallel: number
+    /** What the invocation was accepted *despite*. Printed before anything runs, and never fatal. */
+    warnings: readonly string[]
 }
 
 export type Resolution = { kind: "invocation"; invocation: Invocation } | { kind: "refusal"; message: string }
@@ -96,6 +104,24 @@ export const resolveInvocation = (args: ParsedArgs, env: { interactive: boolean 
         )
     }
 
+    // Trimmed once, here, so that every rule below and every reader after them sees the same name:
+    // a branch whose surrounding whitespace survived this far would fail `show-ref` as a typo.
+    const branch = args.branch?.trim()
+
+    if (branch !== undefined && branch === "") {
+        return refuse("--branch needs a branch name")
+    }
+
+    // afk cuts from a local commit, so a remote-tracking name is not something it can honour — and
+    // fetching one would put a base on screen that the operator never saw (ADR-0018, ADR-0032). The
+    // instruction is worth more here than "no such branch" would be downstream.
+    if (branch !== undefined && branch.startsWith("origin/")) {
+        return refuse(
+            `--branch ${branch}: afk cuts from a local branch. ` +
+                `Check ${branch} out yourself first, then pass the local name`,
+        )
+    }
+
     const asked = mode(args)
     if (!env.interactive && asked === "plan-and-implement") {
         return refuse(
@@ -104,8 +130,25 @@ export const resolveInvocation = (args: ParsedArgs, env: { interactive: boolean 
         )
     }
 
+    // The base is decided when a spec is planned, so a mode that does not plan has nothing to do
+    // with the flag. Ignoring it loudly beats refusing an invocation that is otherwise exactly
+    // right, and beats silence, which would let an operator believe they had moved the base.
+    const plans = asked !== "implement-only" && asked !== "board-only"
+    const warnings =
+        branch !== undefined && !plans
+            ? [`--branch ${branch} is ignored by --${asked}: the base is decided when a spec is planned`]
+            : []
+
     return {
         kind: "invocation",
-        invocation: { spec, mode: asked, consented: args.resume, forceFresh: args.forceFresh, maxParallel },
+        invocation: {
+            spec,
+            mode: asked,
+            consented: args.resume,
+            forceFresh: args.forceFresh,
+            base: plans ? branch : undefined,
+            maxParallel,
+            warnings,
+        },
     }
 }

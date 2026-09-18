@@ -264,19 +264,19 @@ const outcomeLine = (label: string, tickets: readonly number[]): readonly string
 export const pullRequestWriterPrompt = ({
     spec,
     branch,
-    trunk,
+    base,
     progress,
 }: {
     spec: number
     branch: string
     /** What the pull request is opened against, and the other half of the range to read. */
-    trunk: string
+    base: string
     progress: Progress
 }): string =>
     [
         `Write the title and the summary of the pull request for spec issue #${spec}.`,
         "",
-        `It is opened from ${branch} against ${trunk}. You are in that branch's own worktree. What`,
+        `It is opened from ${branch} against ${base}. You are in that branch's own worktree. What`,
         "afk made of the spec's tickets:",
         ...outcomeLine("verified", progress.verified),
         ...outcomeLine("not proven by the gate", progress.unverified),
@@ -284,7 +284,7 @@ export const pullRequestWriterPrompt = ({
         ...outcomeLine("skipped", progress.skipped),
         "",
         "Steps:",
-        `1. Read spec issue #${spec} and the commits on this branch — \`git log ${trunk}..${branch}\`.`,
+        `1. Read spec issue #${spec} and the commits on this branch — \`git log ${base}..${branch}\`.`,
         "   There is one commit per ticket that landed, and its body is that ticket's own commit",
         "   messages, plus a conflict resolution note where an agent had to make a judgement call.",
         "2. Write a title: one line, the change itself rather than the process that produced it.",

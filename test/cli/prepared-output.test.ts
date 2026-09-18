@@ -5,7 +5,7 @@ import type { PreparedRun } from "../../src/domain/run.ts"
 const RUN: PreparedRun = {
     root: "/repo",
     spec: 4,
-    trunk: "main",
+    base: "main",
     branch: "afk/4/spec",
     gate: ".afk/4/gate",
     manifest: {

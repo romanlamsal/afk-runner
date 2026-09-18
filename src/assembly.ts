@@ -92,7 +92,7 @@ export const assembleCli = (): Cli => {
         git,
         manifests,
         operator: createTerminalOperator({ input: process.stdin, output: process.stdout, print }),
-        plan: createPlanService({ agent, events, manifests, now }),
+        plan: createPlanService({ agent, events, git, manifests, now }),
         records,
     })
 

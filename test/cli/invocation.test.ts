@@ -11,6 +11,7 @@ const args = (overrides: Partial<ParsedArgs> = {}): ParsedArgs => ({
     boardOnly: false,
     resume: false,
     forceFresh: false,
+    branch: undefined,
     maxParallel: undefined,
     unknownFlags: [],
     ...overrides,
@@ -57,7 +58,15 @@ describe("resolveInvocation", () => {
         // then
         expect(resolution).toEqual({
             kind: "invocation",
-            invocation: { spec: 42, mode: "plan-only", consented: true, forceFresh: true, maxParallel: 5 },
+            invocation: {
+                spec: 42,
+                mode: "plan-only",
+                consented: true,
+                forceFresh: true,
+                base: undefined,
+                maxParallel: 5,
+                warnings: [],
+            },
         })
     })
 
@@ -136,6 +145,65 @@ describe("resolveInvocation", () => {
 
             // then
             expect(resolution).toEqual({ kind: "refusal", message })
+        },
+    )
+
+    it.each([
+        [
+            "origin/main",
+            "--branch origin/main: afk cuts from a local branch. Check origin/main out yourself first, then pass the local name",
+        ],
+        [
+            "origin/release",
+            "--branch origin/release: afk cuts from a local branch. Check origin/release out yourself first, then pass the local name",
+        ],
+        ["", "--branch needs a branch name"],
+        ["   ", "--branch needs a branch name"],
+    ] as const)("should refuse --branch %s", (branch, message) => {
+        // given
+        const parsed = args({ branch })
+
+        // when
+        const resolution = resolveInvocation(parsed, { interactive: true })
+
+        // then
+        expect(resolution).toEqual({ kind: "refusal", message })
+    })
+
+    it("should carry --branch into an invocation that plans", () => {
+        // given
+        const parsed = args({ branch: "release", planOnly: true })
+
+        // when
+        const resolution = resolveInvocation(parsed, { interactive: true })
+
+        // then
+        expect(resolution).toEqual({
+            kind: "invocation",
+            invocation: expect.objectContaining({ base: "release", warnings: [] }),
+        })
+    })
+
+    it.each([
+        [{ implementOnly: true }, "implement-only"],
+        [{ boardOnly: true }, "board-only"],
+    ] as const satisfies readonly (readonly [Partial<ParsedArgs>, Mode])[])(
+        "should drop --branch from %o, which does not plan",
+        (overrides, mode) => {
+            // given
+            const parsed = args({ ...overrides, branch: "release" })
+
+            // when
+            const resolution = resolveInvocation(parsed, { interactive: true })
+
+            // then
+            expect(resolution).toEqual({
+                kind: "invocation",
+                invocation: expect.objectContaining({
+                    base: undefined,
+                    warnings: [`--branch release is ignored by --${mode}: the base is decided when a spec is planned`],
+                }),
+            })
         },
     )
 })

@@ -73,27 +73,81 @@ describe("createGit().topLevel", () => {
     })
 })
 
-describe("createGit().inspectTrunk", () => {
-    it("should take the branch a repository with no origin/HEAD is usually trunked on", async () => {
+describe("createGit().defaultBase", () => {
+    it("should take the branch a repository with no origin/HEAD is usually on", async () => {
         // given
         const root = await repository()
 
         // when
-        const trunk = await git.inspectTrunk(root)
+        const base = await git.defaultBase(root)
 
         // then
-        expect(trunk?.branch).toBe("main")
+        expect(base).toBe("main")
     })
 
+    it("should take the base from origin/HEAD when the repository names one", async () => {
+        // given
+        const { root } = await cloned()
+
+        // when
+        const base = await git.defaultBase(root)
+
+        // then
+        expect(base).toBe("main")
+    })
+
+    it("should find no base when the branch origin names is not in this checkout", async () => {
+        // given
+        const { root } = await cloned()
+        await sh(root, "checkout", "-q", "-b", "feature")
+        await sh(root, "branch", "-q", "-D", "main")
+
+        // when
+        const base = await git.defaultBase(root)
+
+        // then
+        expect(base).toBeUndefined()
+    })
+
+    it("should find no base in a repository whose only branch is named something else", async () => {
+        // given
+        const root = await repository()
+        await sh(root, "branch", "-q", "-m", "trunk")
+
+        // when
+        const base = await git.defaultBase(root)
+
+        // then
+        expect(base).toBeUndefined()
+    })
+})
+
+describe("createGit().hasLocalBranch", () => {
+    it.each([
+        ["main", true],
+        ["release", false],
+    ] as const)("should say whether this checkout has %s", async (branch, expected) => {
+        // given
+        const root = await repository()
+
+        // when
+        const has = await git.hasLocalBranch(root, branch)
+
+        // then
+        expect(has).toBe(expected)
+    })
+})
+
+describe("createGit().inspectBase", () => {
     it("should report a repository with no remote as uncompared rather than behind", async () => {
         // given
         const root = await repository()
 
         // when
-        const trunk = await git.inspectTrunk(root)
+        const base = await git.inspectBase(root, "main")
 
         // then
-        expect(trunk).toEqual(expect.objectContaining({ compared: false, ahead: 0, behind: 0 }))
+        expect(base).toEqual(expect.objectContaining({ compared: false, ahead: 0, behind: 0 }))
     })
 
     it("should report a working tree with an uncommitted file as dirty", async () => {
@@ -102,21 +156,10 @@ describe("createGit().inspectTrunk", () => {
         await writeFile(join(root, "scratch.txt"), "in progress\n", "utf8")
 
         // when
-        const trunk = await git.inspectTrunk(root)
+        const base = await git.inspectBase(root, "main")
 
         // then
-        expect(trunk?.dirty).toBe(true)
-    })
-
-    it("should take trunk from origin/HEAD when the repository names one", async () => {
-        // given
-        const { root } = await cloned()
-
-        // when
-        const trunk = await git.inspectTrunk(root)
-
-        // then
-        expect(trunk?.branch).toBe("main")
+        expect(base?.dirty).toBe(true)
     })
 
     it("should count an unpushed commit as ahead", async () => {
@@ -125,10 +168,10 @@ describe("createGit().inspectTrunk", () => {
         await commit(root, "unpushed")
 
         // when
-        const trunk = await git.inspectTrunk(root)
+        const base = await git.inspectBase(root, "main")
 
         // then
-        expect(trunk).toEqual(expect.objectContaining({ ahead: 1, behind: 0, compared: true }))
+        expect(base).toEqual(expect.objectContaining({ ahead: 1, behind: 0, compared: true }))
     })
 
     it("should count a commit pushed by someone else as behind", async () => {
@@ -138,13 +181,13 @@ describe("createGit().inspectTrunk", () => {
         await sh(origin, "push", "origin", "main")
 
         // when
-        const trunk = await git.inspectTrunk(root)
+        const base = await git.inspectBase(root, "main")
 
         // then
-        expect(trunk).toEqual(expect.objectContaining({ ahead: 0, behind: 1, compared: true }))
+        expect(base).toEqual(expect.objectContaining({ ahead: 0, behind: 1, compared: true }))
     })
 
-    it("should leave the local trunk where it was, having fetched only to compare", async () => {
+    it("should leave the local base where it was, having fetched only to compare", async () => {
         // given
         const { root, origin } = await cloned()
         const before = await sh(root, "rev-parse", "main")
@@ -152,23 +195,33 @@ describe("createGit().inspectTrunk", () => {
         await sh(origin, "push", "origin", "main")
 
         // when
-        await git.inspectTrunk(root)
+        await git.inspectBase(root, "main")
 
         // then
         expect(await sh(root, "rev-parse", "main")).toBe(before)
     })
 
-    it("should find no trunk when the branch origin names is not in this checkout", async () => {
+    it("should report nothing for a branch this checkout does not have", async () => {
         // given
-        const { root } = await cloned()
-        await sh(root, "checkout", "-q", "-b", "feature")
-        await sh(root, "branch", "-q", "-D", "main")
+        const root = await repository()
 
         // when
-        const trunk = await git.inspectTrunk(root)
+        const base = await git.inspectBase(root, "release")
 
         // then
-        expect(trunk).toBeUndefined()
+        expect(base).toBeUndefined()
+    })
+
+    it("should compare a branch that is not the default one", async () => {
+        // given
+        const { root } = await cloned()
+        await sh(root, "branch", "-q", "release", "main")
+
+        // when
+        const base = await git.inspectBase(root, "release")
+
+        // then
+        expect(base?.branch).toBe("release")
     })
 })
 

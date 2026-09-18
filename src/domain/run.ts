@@ -8,8 +8,8 @@ export type PreparedRun = {
     /** The target repository's top level. */
     root: string
     spec: number
-    /** The local branch the spec branch was cut from. */
-    trunk: string
+    /** The local branch the spec branch was cut from, as the manifest records it (ADR-0032). */
+    base: string
     /** The spec branch. */
     branch: string
     /** The gate worktree, relative to the root: the spec branch's sole writer (ADR-0006). */

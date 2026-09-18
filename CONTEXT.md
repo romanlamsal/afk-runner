@@ -25,10 +25,11 @@ _Avoid_: frontier, ready queue, wave, batch
 
 ## Git
 
-**Trunk**:
-The local branch a spec branch is cut from — what `origin/HEAD` names, else `main`, else `master`.
-afk reads it, compares it against its remote, and never moves it (ADR-0018).
-_Avoid_: default branch, base branch, main, master
+**Spec base**:
+The local branch a spec branch is cut from, and the branch its pull request is opened against.
+Decided once, when the spec is planned, and recorded in the manifest. afk reads it, compares it
+against its remote, and never moves it (ADR-0018, ADR-0032).
+_Avoid_: trunk, base branch, main, master
 
 **Spec branch**:
 `afk/<spec>/spec` — the single branch every ticket lands on, and the only branch a run writes to.
@@ -62,8 +63,8 @@ branch. The last trailer naming a ticket is the one that says where it stands, w
 _Avoid_: rollback marker, undo tag
 
 **Spec PR**:
-The one pull request a run opens — spec branch into the repository's default branch, squash-merged.
-Opening it is the last thing a run does, and merging it is the operator's (ADR-0007).
+The one pull request a run opens — spec branch into the spec base, squash-merged. Opening it is the
+last thing a run does, and merging it is the operator's (ADR-0007).
 _Avoid_: layer PR, ticket PR, stack
 
 **The push**:

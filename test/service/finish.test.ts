@@ -19,7 +19,7 @@ import { manifestOf, ticket } from "../fixtures/manifest.ts"
 const RUN: PreparedRun = {
     root: "/repo",
     spec: 4,
-    trunk: "main",
+    base: "main",
     branch: "afk/4/spec",
     gate: ".afk/4/gate",
     manifest: manifestOf([ticket(5), ticket(6)]),
@@ -83,7 +83,7 @@ describe("the finish service: a run that verified something", () => {
         expect(git.pushed).toEqual(["afk/4/spec"])
     })
 
-    it("should open the pull request from the spec branch onto the trunk it was cut from", async () => {
+    it("should open the pull request from the spec branch onto the branch it was cut from", async () => {
         // given
         const { finish, tracker } = harness()
 

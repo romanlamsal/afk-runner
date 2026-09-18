@@ -28,7 +28,8 @@ node ~/code/afk/src/main.ts 42
 `package.json` declares an `afk` bin, so `npm link` or a shell alias gets you:
 
 ```
-afk <spec> [--plan-only | --implement-only | --board-only] [--resume] [--force-fresh] [--max-parallel <n>]
+afk <spec> [--plan-only | --implement-only | --board-only] [--branch <name>] [--resume]
+    [--force-fresh] [--max-parallel <n>]
 ```
 
 | invocation | |
@@ -37,6 +38,7 @@ afk <spec> [--plan-only | --implement-only | --board-only] [--resume] [--force-f
 | `--plan-only` | plan the spec, write the manifest, print the execution order, exit |
 | `--implement-only` | implement an existing manifest without planning again. Refuses an existing run unless `--resume` consents |
 | `--board-only` | draw this spec's board from its run directory, redraw it every time the log changes, and exit once the log says the run is over. It reads and never writes, so it can be pointed at a run in flight. Refuses a spec that has never been planned: the rows and the frame's height come from the manifest |
+| `--branch <name>` | the local branch this spec is based on, instead of the repository's default branch. Decided when the spec is planned and recorded in the manifest, so it is warned about and ignored under `--implement-only` and `--board-only` |
 | `--resume` | consent to continuing an existing run. It changes no behaviour — a resumed run is the ordinary loop against a log that is not empty |
 | `--force-fresh` | delete this spec's branches local and remote, its run directory and its pull request, then start over. No prompt: the flag is the consent |
 | `--max-parallel <n>` | implementer slots, default 3 |
@@ -46,6 +48,12 @@ can `--force-fresh` and `--implement-only`, because starting over deletes the ma
 one requires. `--board-only` starts nothing, so it combines with neither mode flag, nor with
 `--force-fresh`, which deletes the run it would draw. Any of these pairs exits `2`.
 
+`--branch` takes a branch this checkout already has. It creates nothing, and it does not take a
+remote branch: check one out yourself first, and afk will say so if you pass `origin/…`. Those
+two are argument faults and exit `2`. A name that disagrees with the base already in the manifest
+exits `3`, because afk had to read the manifest to find out — the spec branch was cut from the
+recorded one, and only `--force-fresh` re-plans.
+
 A bare invocation needs a terminal: with nobody there to answer the confirmation, afk refuses rather
 than continuing unsupervised. With no TTY, pass `--plan-only` or `--implement-only`.
 
@@ -54,10 +62,12 @@ than continuing unsupervised. With no TTY, pass `--plan-only` or `--implement-on
 1. **Plan.** An agent reads the repository's own documentation to work out which issues are the
    spec's tickets, how they block each other, and what this repository's `setup` and `verify`
    commands are. The result is the manifest.
-2. **Confirm.** One screen, one decision: anything worth knowing about your trunk and working tree,
-   then `setup` and then `verify`, pre-filled and editable in place. Empty input keeps the proposal.
-3. **Cut the spec branch.** `afk/<spec>/spec`, from your *local* trunk, into the gate worktree —
-   the one long-lived worktree that holds it and its only writer.
+2. **Confirm.** One screen, one decision: anything worth knowing about the branch this spec is
+   based on and about your working tree, then `setup` and then `verify`, pre-filled and editable
+   in place. Empty input keeps the proposal.
+3. **Cut the spec branch.** `afk/<spec>/spec`, from your *local* base — the repository's default
+   branch, or whatever `--branch` named — into the gate worktree, the one long-lived worktree
+   that holds it and its only writer.
 4. **Set up, then implement.** A rolling pool of slots draws from the slate: the tickets whose every
    blocker is verified, most-dependents-first. Setting one up claims it, cuts it its own worktree on
    `afk/<spec>/t<n>`, copies the repository's ignored environment files in and runs `setup` there —
@@ -114,13 +124,13 @@ is the undoing of one of the two writes, not a third.
 
 ## What afk never touches
 
-It never pulls, never moves trunk, and never modifies your working tree. It fetches the remote
-trunk read-only to compare, and says what it found: being behind or dirty is a warning on the
+It never pulls, never moves the branch your spec is based on, and never modifies your working
+tree. It fetches that branch's remote read-only to compare, and says what it found: being behind or dirty is a warning on the
 confirmation screen, being ahead is a note, and all three are yours to decide on. Under
 `--implement-only` they print and the run proceeds.
 
 Uncommitted changes are not part of a run and cannot become part of one. Commits you have not
-pushed *are*: the spec branch is cut from your local trunk on purpose, so a refactor or an ADR you
+pushed *are*: the spec branch is cut from your local base on purpose, so a refactor or an ADR you
 committed first is visible to every implementer.
 
 ## Records

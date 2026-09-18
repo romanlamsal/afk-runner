@@ -6,6 +6,7 @@ import { PROFILES } from "../../src/domain/profiles.ts"
 import { createPlanService, type PlanSpec } from "../../src/service/plan.ts"
 import { createFakeAgent, type FakeAgent } from "../fakes/agent.ts"
 import { createFakeEventLog } from "../fakes/event-log.ts"
+import { createFakeGit } from "../fakes/git.ts"
 import { createFakeManifestStore, type FakeManifestStore } from "../fakes/manifest-store.ts"
 
 const MANIFEST: Manifest = {
@@ -29,7 +30,10 @@ type Harness = {
     events: ReturnType<typeof createFakeEventLog>
 }
 
-const harness = (reply: Partial<AgentResult> = { structuredOutput: MANIFEST }): Harness => {
+const harness = (
+    reply: Partial<AgentResult> = { structuredOutput: MANIFEST },
+    repository: Parameters<typeof createFakeGit>[0] = {},
+): Harness => {
     const agent = createFakeAgent(reply)
     const manifests = createFakeManifestStore()
     const events = createFakeEventLog()
@@ -37,7 +41,13 @@ const harness = (reply: Partial<AgentResult> = { structuredOutput: MANIFEST }): 
         agent,
         manifests,
         events,
-        plan: createPlanService({ agent: agent.run, events: events.log, manifests: manifests.store, now: () => AT }),
+        plan: createPlanService({
+            agent: agent.run,
+            events: events.log,
+            git: createFakeGit(repository).git,
+            manifests: manifests.store,
+            now: () => AT,
+        }),
     }
 }
 
@@ -47,10 +57,10 @@ describe("createPlanService", () => {
         const { plan } = harness()
 
         // when
-        const result = await plan(ROOT, 4)
+        const result = await plan(ROOT, 4, { base: undefined })
 
         // then
-        expect(result).toEqual({ ok: true, manifest: MANIFEST })
+        expect(result).toEqual({ ok: true, manifest: { ...MANIFEST, base: "main" } })
     })
 
     it("should write the manifest it accepted", async () => {
@@ -58,10 +68,10 @@ describe("createPlanService", () => {
         const { plan, manifests } = harness()
 
         // when
-        await plan(ROOT, 4)
+        await plan(ROOT, 4, { base: undefined })
 
         // then
-        expect(manifests.written).toEqual([{ root: ROOT, spec: 4, manifest: MANIFEST }])
+        expect(manifests.written).toEqual([{ root: ROOT, spec: 4, manifest: { ...MANIFEST, base: "main" } }])
     })
 
     it("should hand the planner the manifest schema, generated at runtime", async () => {
@@ -69,7 +79,7 @@ describe("createPlanService", () => {
         const { plan, agent } = harness()
 
         // when
-        await plan(ROOT, 4)
+        await plan(ROOT, 4, { base: undefined })
 
         // then
         expect(agent.invocations[0]?.outputSchema).toEqual(manifestJsonSchema())
@@ -80,7 +90,7 @@ describe("createPlanService", () => {
         const { plan, agent } = harness()
 
         // when
-        await plan(ROOT, 4)
+        await plan(ROOT, 4, { base: undefined })
 
         // then
         expect(agent.invocations[0]?.root).toBe(ROOT)
@@ -91,7 +101,7 @@ describe("createPlanService", () => {
         const { plan, agent } = harness()
 
         // when
-        await plan(ROOT, 4)
+        await plan(ROOT, 4, { base: undefined })
 
         // then
         expect(agent.invocations[0]?.transcriptPath).toBe(".afk/4/transcripts/20260915T111838314Z-planner.jsonl")
@@ -102,7 +112,7 @@ describe("createPlanService", () => {
         const { plan, agent } = harness()
 
         // when
-        await plan(ROOT, 4)
+        await plan(ROOT, 4, { base: undefined })
 
         // then
         expect(agent.invocations[0]?.resumeSessionId).toBeUndefined()
@@ -113,7 +123,7 @@ describe("createPlanService", () => {
         const { plan } = harness({ outcome: "failed", detail: "timed out after 60m" })
 
         // when
-        const result = await plan(ROOT, 4)
+        const result = await plan(ROOT, 4, { base: undefined })
 
         // then
         expect(result).toEqual({ ok: false, reason: expect.stringContaining("timed out after 60m") })
@@ -124,7 +134,7 @@ describe("createPlanService", () => {
         const { plan } = harness({ structuredOutput: { spec: 4 } })
 
         // when
-        const result = await plan(ROOT, 4)
+        const result = await plan(ROOT, 4, { base: undefined })
 
         // then
         expect(result).toEqual({ ok: false, reason: expect.stringContaining("manifest") })
@@ -135,7 +145,7 @@ describe("createPlanService", () => {
         const { plan, manifests } = harness({ structuredOutput: { spec: 4 } })
 
         // when
-        await plan(ROOT, 4)
+        await plan(ROOT, 4, { base: undefined })
 
         // then
         expect(manifests.written).toEqual([])
@@ -146,7 +156,7 @@ describe("createPlanService", () => {
         const { plan, agent } = harness()
 
         // when
-        await plan(ROOT, 4)
+        await plan(ROOT, 4, { base: undefined })
 
         // then
         expect(agent.invocations.at(0)?.profile).toBe(PROFILES.planner)
@@ -164,7 +174,7 @@ describe("createPlanService: the plan step", () => {
         const { plan, events } = harness()
 
         // when
-        await plan(ROOT, 4)
+        await plan(ROOT, 4, { base: undefined })
 
         // then
         expect(events.appended.map(event => `${event.step} ${event.outcome}`)).toEqual(["plan running", "plan ok"])
@@ -175,7 +185,7 @@ describe("createPlanService: the plan step", () => {
         const { plan, events } = harness()
 
         // when
-        await plan(ROOT, 4)
+        await plan(ROOT, 4, { base: undefined })
 
         // then
         expect(events.appended.every(event => event.ticket === undefined)).toBe(true)
@@ -186,7 +196,7 @@ describe("createPlanService: the plan step", () => {
         const { plan, events } = harness()
 
         // when
-        await plan(ROOT, 4)
+        await plan(ROOT, 4, { base: undefined })
 
         // then
         expect(started(events.appended)).toBe(false)
@@ -198,7 +208,7 @@ describe("createPlanService: the plan step", () => {
         const { plan, events } = harness({ structuredOutput: MANIFEST, usage })
 
         // when
-        await plan(ROOT, 4)
+        await plan(ROOT, 4, { base: undefined })
 
         // then
         expect(events.appended.at(-1)?.usage).toEqual(usage)
@@ -209,7 +219,7 @@ describe("createPlanService: the plan step", () => {
         const { plan, events } = harness({ outcome: "failed", detail: "the session died" })
 
         // when
-        await plan(ROOT, 4)
+        await plan(ROOT, 4, { base: undefined })
 
         // then
         expect(events.appended.at(-1)).toMatchObject({
@@ -223,9 +233,64 @@ describe("createPlanService: the plan step", () => {
         const { plan, events } = harness({ structuredOutput: { nonsense: true } })
 
         // when
-        await plan(ROOT, 4)
+        await plan(ROOT, 4, { base: undefined })
 
         // then
         expect(events.appended.at(-1)?.outcome).toBe("failed")
+    })
+
+    it("should record the branch it was asked to base the spec on", async () => {
+        // given
+        const { plan, manifests } = harness()
+
+        // when
+        await plan(ROOT, 4, { base: "release" })
+
+        // then
+        expect(manifests.written[0]?.manifest.base).toBe("release")
+    })
+
+    it("should record the repository's default branch where it was asked for none", async () => {
+        // given
+        const { plan, manifests } = harness()
+
+        // when
+        await plan(ROOT, 4, { base: undefined })
+
+        // then
+        expect(manifests.written[0]?.manifest.base).toBe("main")
+    })
+
+    it("should refuse when nothing was named and the repository has no default branch", async () => {
+        // given
+        const { plan } = harness({ structuredOutput: MANIFEST }, { defaultBase: undefined })
+
+        // when
+        const result = await plan(ROOT, 4, { base: undefined })
+
+        // then
+        expect(result).toEqual({ ok: false, reason: expect.stringContaining("no branch to base this spec on") })
+    })
+
+    it("should spawn no planner where there is no branch to base the spec on", async () => {
+        // given
+        const { plan, agent } = harness({ structuredOutput: MANIFEST }, { defaultBase: undefined })
+
+        // when
+        await plan(ROOT, 4, { base: undefined })
+
+        // then
+        expect(agent.invocations).toEqual([])
+    })
+
+    it("should overwrite a base the planner put in its own output", async () => {
+        // given
+        const { plan, manifests } = harness({ structuredOutput: { ...MANIFEST, base: "whatever-it-claimed" } })
+
+        // when
+        await plan(ROOT, 4, { base: "release" })
+
+        // then
+        expect(manifests.written[0]?.manifest.base).toBe("release")
     })
 })

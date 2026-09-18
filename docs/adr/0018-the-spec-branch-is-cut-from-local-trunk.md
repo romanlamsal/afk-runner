@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded in part by ADR-0032
 ---
 
 # The spec branch is cut from local trunk, and the preflight tells rather than refuses
@@ -15,7 +15,8 @@ check for; and merging is entirely local, so the base a ticket is built on is a 
 machine rather than something GitHub has to already know about.
 
 **Decision: the spec branch is cut from the operator's local trunk, and the preflight refuses
-nothing about the state of that trunk.** afk never pulls, never moves trunk, and never touches the
+nothing about the state of that trunk.** (ADR-0032 makes trunk the *default* rather than the only
+answer: `--branch` names another local branch, and the choice is recorded in the manifest.) afk never pulls, never moves trunk, and never touches the
 working tree.
 
 What runs before a run instead:

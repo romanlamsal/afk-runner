@@ -77,6 +77,7 @@ const harness = () => {
                 plan: createPlanService({
                     agent: agent.run,
                     events: events.log,
+                    git: git.git,
                     manifests: manifests.store,
                     now: () => new Date(),
                 }),

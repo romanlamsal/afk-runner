@@ -22,18 +22,21 @@ const MANIFEST: Manifest = {
 const PREPARED: PreparedRun = {
     root: "/repo",
     spec: 4,
-    trunk: "main",
+    base: "main",
     branch: "afk/4/spec",
     gate: ".afk/4/gate",
     manifest: MANIFEST,
 }
 
-const invocation = (mode: Mode): Invocation => ({
+const invocation = (mode: Mode, overrides: Partial<Invocation> = {}): Invocation => ({
     spec: 4,
     mode,
     consented: false,
     forceFresh: false,
+    base: undefined,
     maxParallel: 3,
+    warnings: [],
+    ...overrides,
 })
 
 const NOTHING: Progress = { verified: [], unverified: [], failed: [], skipped: [] }
@@ -86,6 +89,39 @@ const worked = (
 ) => harness({ outcome: "prepared", run: prepared }, options)
 
 describe("createRun", () => {
+    it("should print what the invocation was accepted despite", async () => {
+        // given
+        const { run, errors } = harness()
+
+        // when
+        await run(invocation("plan-only", { warnings: ["--branch release is ignored"] }))
+
+        // then
+        expect(errors).toEqual(["afk: --branch release is ignored"])
+    })
+
+    it("should run on past a warning, which is never fatal", async () => {
+        // given
+        const { run, started } = harness()
+
+        // when
+        await run(invocation("plan-only", { warnings: ["--branch release is ignored"] }))
+
+        // then
+        expect(started).toHaveLength(1)
+    })
+
+    it("should carry the base an invocation named into the start request", async () => {
+        // given
+        const { run, started } = harness()
+
+        // when
+        await run(invocation("plan-only", { base: "release" }))
+
+        // then
+        expect(started[0]?.base).toBe("release")
+    })
+
     it("should start the spec it was invoked for, in the mode it was invoked in", async () => {
         // given
         const { run, started } = harness()

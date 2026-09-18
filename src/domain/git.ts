@@ -1,14 +1,14 @@
 /**
  * The git port. afk reads the operator's repository and writes one branch through one worktree: it
- * never pulls, never moves trunk, and never touches the working tree (ADR-0018).
+ * never pulls, never moves the base, and never touches the working tree (ADR-0018).
  */
 
-export type TrunkState = {
+export type BaseState = {
     /** The local branch a spec branch is cut from. */
     branch: string
-    /** Commits the local trunk has that its remote does not. */
+    /** Commits the local base has that its remote does not. */
     ahead: number
-    /** Commits the remote trunk has that the local one does not. */
+    /** Commits the remote base has that the local one does not. */
     behind: number
     /** Whether there was a remote to compare against at all. Without one, nothing is behind anything. */
     compared: boolean
@@ -67,10 +67,23 @@ export type Git = {
     /** The git top level of `cwd`, or undefined when `cwd` is not inside a worktree. */
     topLevel: (cwd: string) => Promise<string | undefined>
     /**
-     * Trunk as it stands: its name, a read-only fetch of its remote, the comparison against it, and
-     * whether the working tree is dirty. Undefined when the repository names no trunk to cut from.
+     * Whether this checkout has `branch` locally. The one question `--branch` is validated against,
+     * and it is asked before the planner is spawned so that a typo costs a `show-ref` and not an
+     * agent (ADR-0032).
      */
-    inspectTrunk: (root: string) => Promise<TrunkState | undefined>
+    hasLocalBranch: (root: string, branch: string) => Promise<boolean>
+    /**
+     * What a spec is based on when nobody named a branch: what `origin/HEAD` says, and only then
+     * what a default branch is usually called. Undefined where this checkout has neither, which is
+     * the one case the operator has to answer with `--branch` (ADR-0032).
+     */
+    defaultBase: (root: string) => Promise<string | undefined>
+    /**
+     * The base as it stands: a read-only fetch of its remote, the comparison against it, and whether
+     * the working tree is dirty. Undefined where the repository no longer has `branch` at all — a
+     * manifest naming one that has since been deleted.
+     */
+    inspectBase: (root: string, branch: string) => Promise<BaseState | undefined>
     /**
      * Check `branch` out at `path`, creating the branch from `startPoint` when it does not exist and
      * replacing whatever is at `path` — the gate worktree is re-created at every process start.
@@ -160,7 +173,7 @@ export type Git = {
      * all. The last thing a run does to git, and the one write besides the tracker's two that leaves
      * the machine (ADR-0013).
      *
-     * It moves no branch and touches no working tree — not trunk's, not the operator's. The only
+     * It moves no branch and touches no working tree — not the base's, not the operator's. The only
      * local mark it leaves is the upstream it records for the branch it pushed.
      */
     push: (root: string, branch: string) => Promise<GitResult>

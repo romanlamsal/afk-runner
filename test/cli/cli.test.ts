@@ -38,7 +38,15 @@ describe("createCli", () => {
 
         // then
         expect(started).toEqual([
-            { spec: 4, mode: "implement-only", consented: true, forceFresh: false, maxParallel: 5 },
+            {
+                spec: 4,
+                mode: "implement-only",
+                consented: true,
+                forceFresh: false,
+                base: undefined,
+                maxParallel: 5,
+                warnings: [],
+            },
         ])
     })
 

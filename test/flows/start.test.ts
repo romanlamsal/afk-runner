@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { createCli } from "../../src/cli/cli.ts"
 import { EXIT } from "../../src/cli/exit-codes.ts"
 import { createRun } from "../../src/cli/run.ts"
-import type { TrunkState } from "../../src/domain/git.ts"
+import type { BaseState } from "../../src/domain/git.ts"
 import type { Manifest } from "../../src/domain/manifest.ts"
 import type { Commands } from "../../src/domain/operator.ts"
 import { createPlanService } from "../../src/service/plan.ts"
@@ -30,11 +30,11 @@ const MANIFEST: Manifest = {
     tickets: [{ number: 5, title: "Plan a spec", blockedBy: [] }],
 }
 
-const harness = ({ trunk, answer }: { trunk?: TrunkState; answer?: Commands } = {}) => {
+const harness = ({ base, answer }: { base?: BaseState; answer?: Commands } = {}) => {
     const agent = createFakeAgent({ structuredOutput: MANIFEST })
     const manifests = createFakeManifestStore()
     const environment = createFakeEnvironment()
-    const git = createFakeGit(trunk === undefined ? {} : { trunk })
+    const git = createFakeGit(base === undefined ? {} : { base })
     const operator = createFakeOperator(answer)
     const records = createFakeRunRecords()
     const events = createFakeEventLog()
@@ -58,6 +58,7 @@ const harness = ({ trunk, answer }: { trunk?: TrunkState; answer?: Commands } = 
                 plan: createPlanService({
                     agent: agent.run,
                     events: events.log,
+                    git: git.git,
                     manifests: manifests.store,
                     now: () => new Date(),
                 }),
@@ -94,10 +95,10 @@ describe("afk <spec>", () => {
         expect(operator.screens[0]?.commands).toEqual({ setup: "npm ci", verify: "npm run check" })
     })
 
-    it("should carry the state of trunk into the confirmation screen", async () => {
+    it("should carry the state of the base into the confirmation screen", async () => {
         // given
         const { cli, operator } = harness({
-            trunk: { branch: "main", ahead: 0, behind: 0, compared: true, dirty: true },
+            base: { branch: "main", ahead: 0, behind: 0, compared: true, dirty: true },
         })
 
         // when

@@ -76,7 +76,7 @@ export const createFinishService =
         const written = await attemptWithAgent(
             agent,
             {
-                prompt: pullRequestWriterPrompt({ spec, branch: run.branch, trunk: run.trunk, progress }),
+                prompt: pullRequestWriterPrompt({ spec, branch: run.branch, base: run.base, progress }),
                 root,
                 cwd: run.gate,
                 transcriptPath: transcript,
@@ -105,7 +105,7 @@ export const createFinishService =
         const opened = await tracker.openPullRequest(root, {
             ...pullRequest,
             head: run.branch,
-            base: run.trunk,
+            base: run.base,
         })
         if (!opened.ok) {
             return failed(`the pull request for ${run.branch} could not be opened: ${opened.reason}`)
