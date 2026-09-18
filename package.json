@@ -12,6 +12,7 @@
   },
   "scripts": {
     "afk": "node src/main.ts",
+    "replay": "node src/replay/replay-board.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
