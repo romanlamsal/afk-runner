@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { boardFrame } from "../../src/cli/board-frame.ts"
-import { textOf, widthOf } from "../../src/cli/board-span.ts"
+import { type Line, type Span, textOf, widthOf } from "../../src/cli/board-span.ts"
 import {
     type BoardRow,
     type BoardStep,
@@ -10,6 +10,12 @@ import {
     type Track,
 } from "../../src/domain/board.ts"
 import type { Conclusion, Step } from "../../src/domain/events.ts"
+
+/**
+ * The layout, and no palette: every assertion here is either the plain text of a line or what a
+ * span asks to be read at, and none of them holds an escape sequence. What a terminal makes of a
+ * tone or a hue is the colouring step's, and it is asserted beside it (ADR-0031).
+ */
 
 /** The weight one step of a trail is read at: what it came to, or where it stands. */
 type Weight = SettledOutcome | "running" | "ahead"
@@ -39,7 +45,7 @@ const row = (
     steps,
     waiting: rest.waiting ?? false,
     conclusion: rest.conclusion,
-    // Why a step came to what it did is the line adapter's to say: a frame has a glyph for it.
+    // Why a step came to what it did is the line adapter's to say: a row says it in a hue.
     detail: undefined,
 })
 
@@ -58,6 +64,12 @@ const VIEW: BoardView = {
 
 const WIDE = 120
 
+/** The one text a trail ever has, which is what every row of every frame reads as. */
+const TRAIL = "setup implement rebase resolve merge gate fix revert"
+
+/** What a span of a given text asks to be read at, where the line carries one. */
+const spanFor = (line: Line | undefined, text: string): Span | undefined => line?.find(span => span.text === text)
+
 describe("boardFrame", () => {
     it("should hold every row in one block, with no headings", () => {
         // given
@@ -67,10 +79,7 @@ describe("boardFrame", () => {
         const lines = boardFrame(view, WIDE).map(textOf)
 
         // then
-        expect(lines).toEqual([
-            "    7  setup✓ implement✓ rebase✓ (resolve) <merge> (gate) (fix) (revert)",
-            "  108  setup✓ <implement> (rebase) (resolve) (merge) (gate) (fix) (revert)",
-        ])
+        expect(lines).toEqual([`    7  ${TRAIL}`, `  108  ${TRAIL}`])
     })
 
     it.each([
@@ -84,7 +93,23 @@ describe("boardFrame", () => {
         const [line] = boardFrame(view, WIDE).map(textOf)
 
         // then
-        expect(TRAIL_STEPS.every(step => line?.includes(step))).toBe(true)
+        expect(line).toBe(`    7  ${TRAIL}`)
+    })
+
+    it.each([
+        ["a settled step", trail({ setup: "ok" })],
+        ["a step the log has not ended", trail({ setup: "running" })],
+        ["a step still ahead", trail({})],
+        ["a step that failed", trail({ setup: "failed" })],
+    ] as const)("should write the same trail whatever %s is read at", (_case, steps) => {
+        // given
+        const view: BoardView = { at: undefined, rows: [row(7, "A ticket", "implement", steps)] }
+
+        // when
+        const [line] = boardFrame(view, WIDE).map(textOf)
+
+        // then
+        expect(line).toBe(`    7  ${TRAIL}`)
     })
 
     it("should keep a ticket that reached the merge track in the row it has always had", () => {
@@ -104,24 +129,6 @@ describe("boardFrame", () => {
         expect(now).toBe(was)
     })
 
-    it.each([
-        ["a settled step", "setup✓"],
-        ["a step the log has not ended", "<implement>"],
-        ["a step still ahead", "(rebase)"],
-    ] as const)("should write %s as %s", (_case, written) => {
-        // given
-        const view: BoardView = {
-            at: undefined,
-            rows: [row(7, "A ticket", "implement", IMPLEMENTING), row(8, "Another ticket", "merge", MERGING)],
-        }
-
-        // when
-        const lines = boardFrame(view, WIDE).map(textOf)
-
-        // then
-        expect(lines.some(line => line.includes(written))).toBe(true)
-    })
-
     it("should say that a ticket the merge track has not taken yet is waiting", () => {
         // given
         const waiting = row(7, "A ticket", "implement", trail({ setup: "ok", implement: "ok" }), { waiting: true })
@@ -130,45 +137,21 @@ describe("boardFrame", () => {
         const lines = boardFrame({ at: undefined, rows: [waiting] }, WIDE).map(textOf)
 
         // then
-        expect(lines).toContain("    7  setup✓ implement✓ (rebase) (resolve) (merge) (gate) (fix) (revert) waiting")
+        expect(lines).toContain(`    7  ${TRAIL} waiting`)
     })
 
     it.each([
-        ["ok", "✓"],
-        ["failed", "✗"],
-        ["skipped", "·"],
-        ["conflicted", "!"],
-    ] as const)("should write a step that came to %s with the glyph %s", (outcome, glyph) => {
+        ["a ticket whose implementer failed", trail({ setup: "ok", implement: "failed" }), "failed"],
+        ["a ticket blocked by one that will not land", trail({ implement: "skipped" }), "skipped"],
+    ] as const)("should mark %s dead where it died", (_case, steps, conclusion) => {
         // given
-        const view: BoardView = { at: undefined, rows: [row(7, "A ticket", "implement", trail({ setup: outcome }))] }
+        const view: BoardView = { at: undefined, rows: [row(7, "A ticket", "implement", steps, { conclusion })] }
 
         // when
         const lines = boardFrame(view, WIDE).map(textOf)
 
         // then
-        expect(lines).toContain(`    7  setup${glyph} (implement) (rebase) (resolve) (merge) (gate) (fix) (revert)`)
-    })
-
-    it.each([
-        [
-            "a ticket whose implementer failed",
-            row(7, "A ticket", "implement", trail({ setup: "ok", implement: "failed" }), { conclusion: "failed" }),
-            "    7  setup✓ implement✗ (rebase) (resolve) (merge) (gate) (fix) (revert) dead",
-        ],
-        [
-            "a ticket blocked by one that will not land",
-            row(7, "A ticket", "implement", trail({ implement: "skipped" }), { conclusion: "skipped" }),
-            "    7  (setup) implement· (rebase) (resolve) (merge) (gate) (fix) (revert) dead",
-        ],
-    ] as const)("should mark %s dead where it died", (_case, dying, expected) => {
-        // given
-        const view: BoardView = { at: undefined, rows: [dying] }
-
-        // when
-        const lines = boardFrame(view, WIDE).map(textOf)
-
-        // then
-        expect(lines).toContain(expected)
+        expect(lines).toContain(`    7  ${TRAIL} dead`)
     })
 
     it("should not mark a verified ticket dead", () => {
@@ -179,7 +162,7 @@ describe("boardFrame", () => {
         const lines = boardFrame({ at: undefined, rows: [verified] }, WIDE).map(textOf)
 
         // then
-        expect(lines).toContain("    7  (setup) (implement) (rebase) (resolve) (merge) gate✓ (fix) (revert)")
+        expect(lines).toContain(`    7  ${TRAIL}`)
     })
 
     it("should say nothing about repair beside a step the log left running", () => {
@@ -190,7 +173,7 @@ describe("boardFrame", () => {
         const lines = boardFrame({ at: undefined, rows: [stuck] }, WIDE).map(textOf)
 
         // then
-        expect(lines).toContain("    7  (setup) (implement) rebase✓ (resolve) (merge) (gate) (fix) <revert>")
+        expect(lines).toContain(`    7  ${TRAIL}`)
     })
 
     it.each([
@@ -284,7 +267,7 @@ describe("boardFrame", () => {
         const lines = boardFrame(view, 32).map(textOf)
 
         // then
-        expect(lines).toContain("    7  setup✓ <implement> (re...")
+        expect(lines).toContain("    7  setup implement rebase...")
     })
 })
 
@@ -304,10 +287,7 @@ describe("boardFrame: the footer", () => {
         const lines = boardFrame(view, WIDE, "afk: interrupted").map(textOf)
 
         // then
-        expect(lines).toEqual([
-            "    7  setup✓ <implement> (rebase) (resolve) (merge) (gate) (fix) (revert)",
-            "afk: interrupted",
-        ])
+        expect(lines).toEqual([`    7  ${TRAIL}`, "afk: interrupted"])
     })
 
     it("should carry the last event's timestamp under every row", () => {
@@ -390,11 +370,12 @@ describe("boardFrame: the footer", () => {
 })
 
 /**
- * The layout hands out spans, and this is the one place that reads them as spans rather than as the
- * text they carry. No assertion here holds an escape sequence: what colour makes of a span is the
- * colouring step's, and it is asserted beside it (ADR-0031).
+ * The layout hands out spans, and this is where they are read as spans rather than as the text they
+ * carry: where a step stands in the run is a tone, and an outcome worth noticing is a hue. No
+ * assertion here holds an escape sequence — what colour makes of a tone is the colouring step's
+ * (ADR-0031).
  */
-describe("boardFrame: the spans a line is made of", () => {
+describe("boardFrame: what a row asks to be read at", () => {
     it("should hand a row out as the parts it is made of, each in a span of its own", () => {
         // given
         const view: BoardView = { at: undefined, rows: [row(7, "A ticket", "implement", IMPLEMENTING)] }
@@ -407,32 +388,87 @@ describe("boardFrame: the spans a line is made of", () => {
             "    ",
             "7",
             "  ",
-            "setup✓",
+            "setup",
             " ",
-            "<implement>",
+            "implement",
             " ",
-            "(rebase)",
+            "rebase",
             " ",
-            "(resolve)",
+            "resolve",
             " ",
-            "(merge)",
+            "merge",
             " ",
-            "(gate)",
+            "gate",
             " ",
-            "(fix)",
+            "fix",
             " ",
-            "(revert)",
+            "revert",
         ])
     })
 
-    it("should ask for no treatment at all, while the trail's own text carries the state", () => {
+    it.each([
+        ["a step still ahead", "ahead", "dim"],
+        ["a settled step", "ok", "normal"],
+        ["a step the log started and has not ended", "running", "bright"],
+    ] as const)("should read %s at its own weight", (_case, weight, tone) => {
         // given
-        const view = VIEW
+        const view: BoardView = {
+            at: undefined,
+            rows: [row(7, "A ticket", "implement", trail({ setup: weight }))],
+        }
 
         // when
-        const lines = boardFrame(view, WIDE)
+        const [line] = boardFrame(view, WIDE)
 
         // then
-        expect(lines.flat().every(span => span.tone === "normal" && span.hue === undefined)).toBe(true)
+        expect(spanFor(line, "setup")?.tone).toBe(tone)
+    })
+
+    it.each([
+        ["a settled conflicted step", "conflicted", "amber"],
+        ["a settled failed step", "failed", "red"],
+        ["a settled step that went well", "ok", undefined],
+        ["a settled skipped step", "skipped", undefined],
+    ] as const)("should give %s its hue", (_case, outcome, hue) => {
+        // given
+        const view: BoardView = {
+            at: undefined,
+            rows: [row(7, "A ticket", "implement", trail({ resolve: outcome }))],
+        }
+
+        // when
+        const [line] = boardFrame(view, WIDE)
+
+        // then
+        expect(spanFor(line, "resolve")?.hue).toBe(hue)
+    })
+
+    it("should turn a verified ticket's number green", () => {
+        // given
+        const verified = row(7, "A ticket", "merge", trail({ gate: "ok" }), { conclusion: "verified" })
+
+        // when
+        const [line] = boardFrame({ at: undefined, rows: [verified] }, WIDE)
+
+        // then
+        expect(spanFor(line, "7")?.hue).toBe("green")
+    })
+
+    it("should give green to nothing but a verified ticket's number", () => {
+        // given: every row a run has, verified and unverified, alongside every settled outcome
+        const view: BoardView = {
+            at: undefined,
+            rows: [
+                row(7, "A ticket", "merge", trail({ gate: "ok" }), { conclusion: "verified" }),
+                row(108, "Another", "merge", trail({ resolve: "conflicted", merge: "failed", fix: "skipped" })),
+                row(12345, "A third", "implement", IMPLEMENTING),
+            ],
+        }
+
+        // when
+        const green = boardFrame(view, WIDE).flatMap(line => line.filter(span => span.hue === "green"))
+
+        // then
+        expect(green.map(span => span.text)).toEqual(["7"])
     })
 })
