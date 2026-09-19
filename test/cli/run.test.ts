@@ -61,6 +61,7 @@ const harness = (
     const started: StartRequest[] = []
     const ended: Progress[] = []
     const freshened: number[] = []
+    const released: number[] = []
     const run = createRun({
         showBoard: createStubShowBoard(),
         fresh: async spec => {
@@ -76,11 +77,14 @@ const harness = (
             ended.push(progress)
             return finished
         },
+        release: async spec => {
+            released.push(spec)
+        },
         print: line => printed.push(line),
         printError: line => errors.push(line),
         boardDrawn,
     })
-    return { run, printed, errors, started, ended, freshened }
+    return { run, printed, errors, started, ended, freshened, released }
 }
 
 const worked = (
@@ -472,5 +476,45 @@ describe("createRun: the summary of what the slate came to", () => {
 
         // then
         expect(printed.some(line => line.startsWith("verified:"))).toBe(false)
+    })
+})
+
+describe("createRun: the run lock", () => {
+    it.each([
+        ["a plan", { outcome: "planned", manifest: MANIFEST }],
+        ["a refusal", { outcome: "refused", reason: "spec #4 is already being run by afk process 7" }],
+        ["an aborted confirmation", { outcome: "aborted" }],
+        ["a whole run", { outcome: "prepared", run: PREPARED }],
+    ] as const)("should give the lock back after %s", async (_, result) => {
+        // given
+        const { run, released } = harness(result)
+
+        // when
+        await run(invocation("plan-and-implement"))
+
+        // then
+        expect(released).toEqual([4])
+    })
+
+    it("should give the lock back when starting over failed", async () => {
+        // given
+        const { run, released } = harness(undefined, { cleared: { outcome: "failed", reason: "held" } })
+
+        // when
+        await run({ ...invocation("plan-and-implement"), forceFresh: true })
+
+        // then
+        expect(released).toEqual([4])
+    })
+
+    it("should have no lock to give back for a board it only drew", async () => {
+        // given
+        const { run, released } = harness()
+
+        // when
+        await run(invocation("board-only"))
+
+        // then
+        expect(released).toEqual([])
     })
 })

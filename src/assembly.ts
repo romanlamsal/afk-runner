@@ -12,6 +12,7 @@ import { killEveryChild } from "./infrastructure/process.ts"
 import { createGitHubTracker } from "./infrastructure/tracker.ts"
 import { createFileEventLog } from "./repository/event-log.ts"
 import { createFileManifestStore } from "./repository/manifest-store.ts"
+import { createFileRunLock } from "./repository/run-lock.ts"
 import { createFileRunRecordStore } from "./repository/run-records.ts"
 import { createShowBoardService } from "./service/board.ts"
 import { createDriveService } from "./service/drive.ts"
@@ -24,6 +25,7 @@ import { createMergeService } from "./service/merge.ts"
 import { createPlanService } from "./service/plan.ts"
 import { createPrepareService } from "./service/prepare.ts"
 import { createRebaseService } from "./service/rebase.ts"
+import { createReleaseService } from "./service/release.ts"
 import { createResolveService } from "./service/resolve.ts"
 import { createRevertService } from "./service/revert.ts"
 import { createSetupService } from "./service/setup.ts"
@@ -48,6 +50,9 @@ export const assembleCli = (): Cli => {
     const environment = createEnvironmentFiles()
     const events = createFileEventLog()
     const git = createGit()
+    // One afk per spec, and this process is the one the lock names while it holds it (ADR-0034).
+    const lock = createFileRunLock()
+    const self = { pid: process.pid }
     // Selection is TTY detection and there is no flag: the board is simply what a run looks like,
     // redrawn where there is a terminal to draw it on and a line per change where there is not
     // (ADR-0029).
@@ -90,6 +95,8 @@ export const assembleCli = (): Cli => {
         environment,
         events,
         git,
+        lock,
+        self,
         manifests,
         operator: createTerminalOperator({ input: process.stdin, output: process.stdout, print }),
         plan: createPlanService({ agent, events, git, manifests, now }),
@@ -120,11 +127,12 @@ export const assembleCli = (): Cli => {
         isInteractive: () => process.stdin.isTTY === true,
         printError,
         run: createRun({
-            fresh: createFreshService({ cwd, git, records, tracker }),
+            fresh: createFreshService({ cwd, git, lock, self, records, tracker }),
             showBoard: createShowBoardService({ board, cwd, events, git, manifests, now }),
             start,
             drive,
             finish: createFinishService({ agent, events, git, now, tracker }),
+            release: createReleaseService({ cwd, git, lock, self }),
             print,
             printError,
             boardDrawn: drawing,

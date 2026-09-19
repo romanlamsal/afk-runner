@@ -2,6 +2,7 @@ import { specBranch } from "../domain/branches.ts"
 import type { CopyEnvironmentFiles } from "../domain/environment.ts"
 import { type EventLog, started } from "../domain/events.ts"
 import type { Git, ResetRequest } from "../domain/git.ts"
+import { type Holder, heldByAnother, type RunLock, refusalToShare } from "../domain/lock.ts"
 import { baseOf, type Manifest, type ManifestStore } from "../domain/manifest.ts"
 import type { StartMode } from "../domain/mode.ts"
 import type { Commands, ConfirmationScreen, Operator } from "../domain/operator.ts"
@@ -35,6 +36,10 @@ export type StartDeps = {
     /** The gate runs the operator's own commands, so it needs the operator's own environment. */
     environment: CopyEnvironmentFiles
     git: Git
+    /** One afk per spec: every starting mode takes it (ADR-0034). */
+    lock: RunLock
+    /** This process, as the lock names it. */
+    self: Holder
     manifests: ManifestStore
     operator: Operator
     /** Read to tell a spec with a run from one with only a manifest (ADR-0028). */
@@ -81,11 +86,18 @@ const reuseWorktree = async (git: Git, root: string, request: ResetRequest): Pro
  * run forbids, what being behind means. What is left here is the order the ports are called in.
  */
 export const createStartService =
-    ({ cwd, environment, events, git, manifests, operator, plan, records }: StartDeps): StartRun =>
+    ({ cwd, environment, events, git, lock, self, manifests, operator, plan, records }: StartDeps): StartRun =>
     async ({ spec, mode, consented, base: asked }) => {
         const root = await git.topLevel(cwd)
         if (root === undefined) {
             return refused("this is not a git worktree: run afk from inside the repository whose spec this is")
+        }
+
+        // Before any other refusal, because every other one would send the operator after the wrong
+        // thing: a spec somebody is running is not a spec with the wrong flags (ADR-0034).
+        const holder = await lock.holder(root, spec)
+        if (heldByAnother(holder, self)) {
+            return refused(refusalToShare(spec, holder))
         }
 
         const stored = await manifests.read(root, spec)
@@ -127,6 +139,13 @@ export const createStartService =
         // Before anything is written: the directory ignores itself, so no transcript of the planner's
         // was ever visible in the repository's status.
         await records.create(root, spec)
+
+        // Taken, not just looked at: two starts that both read no holder above race here, and only
+        // one of them wins.
+        const acquired = await lock.acquire(root, spec, self)
+        if (!acquired.ok) {
+            return refused(refusalToShare(spec, acquired.holder))
+        }
 
         // Planning a spec that was planned before keeps the base it was planned on: `--plan-only` is
         // the one mode an existing manifest does not stop, and resolving afresh there would rewrite

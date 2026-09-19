@@ -16,6 +16,8 @@ import { createStubFresh } from "../fakes/fresh.ts"
 import { createFakeGit } from "../fakes/git.ts"
 import { createFakeManifestStore } from "../fakes/manifest-store.ts"
 import { createFakeOperator } from "../fakes/operator.ts"
+import { createStubRelease } from "../fakes/release.ts"
+import { createFakeRunLock } from "../fakes/run-lock.ts"
 import { createFakeRunRecords } from "../fakes/run-records.ts"
 import { createStubShowBoard } from "../fakes/show-board.ts"
 
@@ -37,6 +39,7 @@ const harness = ({ base, answer }: { base?: BaseState; answer?: Commands } = {})
     const git = createFakeGit(base === undefined ? {} : { base })
     const operator = createFakeOperator(answer)
     const records = createFakeRunRecords()
+    const lock = createFakeRunLock()
     const events = createFakeEventLog()
     const printed: string[] = []
     const errors: string[] = []
@@ -44,6 +47,7 @@ const harness = ({ base, answer }: { base?: BaseState; answer?: Commands } = {})
         isInteractive: () => true,
         printError: line => errors.push(line),
         run: createRun({
+            release: createStubRelease(),
             showBoard: createStubShowBoard(),
             fresh: createStubFresh(),
             drive: createStubDrive(),
@@ -62,6 +66,8 @@ const harness = ({ base, answer }: { base?: BaseState; answer?: Commands } = {})
                     manifests: manifests.store,
                     now: () => new Date(),
                 }),
+                lock: lock.lock,
+                self: { pid: 1 },
                 records: records.records,
             }),
             print: line => printed.push(line),

@@ -15,6 +15,8 @@ import { createStubFresh } from "../fakes/fresh.ts"
 import { createFakeGit } from "../fakes/git.ts"
 import { createFakeManifestStore } from "../fakes/manifest-store.ts"
 import { createFakeOperator } from "../fakes/operator.ts"
+import { createStubRelease } from "../fakes/release.ts"
+import { createFakeRunLock } from "../fakes/run-lock.ts"
 import { createFakeRunRecords } from "../fakes/run-records.ts"
 import { createStubShowBoard } from "../fakes/show-board.ts"
 
@@ -43,6 +45,7 @@ const harness = (reply: { structuredOutput: unknown } = { structuredOutput: MANI
     const git = createFakeGit()
     const operator = createFakeOperator()
     const records = createFakeRunRecords()
+    const lock = createFakeRunLock()
     const events = createFakeEventLog()
     const printed: string[] = []
     const errors: string[] = []
@@ -60,12 +63,15 @@ const harness = (reply: { structuredOutput: unknown } = { structuredOutput: MANI
             manifests: manifests.store,
             now: () => new Date("2026-09-15T11:18:38.314Z"),
         }),
+        lock: lock.lock,
+        self: { pid: 1 },
         records: records.records,
     })
     const cli = createCli({
         isInteractive: () => true,
         printError: line => errors.push(line),
         run: createRun({
+            release: createStubRelease(),
             showBoard: createStubShowBoard(),
             start,
             fresh: createStubFresh(),

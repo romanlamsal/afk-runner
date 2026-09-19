@@ -1,5 +1,6 @@
 import { specBranch, specBranchPrefix } from "../domain/branches.ts"
 import type { Git } from "../domain/git.ts"
+import { type Holder, type RunLock, refusalToShare } from "../domain/lock.ts"
 import { runDirectory } from "../domain/paths.ts"
 import type { RunRecordStore } from "../domain/records.ts"
 import type { Tracker } from "../domain/tracker.ts"
@@ -17,6 +18,10 @@ export type FreshDeps = {
     /** Where afk was invoked. The target repository is this directory's git top level. */
     cwd: string
     git: Git
+    /** Starting over is the most destructive thing afk does, so it never happens under a live run. */
+    lock: RunLock
+    /** This process, as the lock names it. */
+    self: Holder
     records: RunRecordStore
     tracker: Tracker
 }
@@ -43,11 +48,18 @@ const failed = (reason: string): FreshResult => ({ outcome: "failed", reason })
  * wants to find afterwards is the record that it was tried (ADR-0013).
  */
 export const createFreshService =
-    ({ cwd, git, records, tracker }: FreshDeps): StartFresh =>
+    ({ cwd, git, lock, self, records, tracker }: FreshDeps): StartFresh =>
     async spec => {
         const root = await git.topLevel(cwd)
         if (root === undefined) {
             return failed("this is not a git worktree: run afk from inside the repository whose spec this is")
+        }
+
+        // Taken before the first thing goes, and gone with the run directory at the end: what starts
+        // next in this process takes it again (ADR-0034).
+        const acquired = await lock.acquire(root, spec, self)
+        if (!acquired.ok) {
+            return failed(refusalToShare(spec, acquired.holder))
         }
 
         const worktrees = await git.removeWorktreesUnder(root, runDirectory(spec))

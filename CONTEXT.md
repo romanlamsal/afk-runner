@@ -254,6 +254,12 @@ The run directory — the event log, worktrees, agent transcripts. Machine-local
 expected to exist on another machine.
 _Avoid_: cache, workspace, scratch
 
+**Run lock**:
+The run directory's claim that one afk process is running this spec, naming that process. A second
+start refuses while its holder is live; a lock whose holder no longer exists is absent. Drawing the
+board takes none (ADR-0034).
+_Avoid_: mutex, pidfile, session
+
 **Starting over**:
 Taking a spec back to nothing: its worktrees, its branches local and remote, its pull request and
 its run directory, all away in one act and without a prompt. It takes nothing back off the tracker —

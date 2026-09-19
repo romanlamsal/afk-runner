@@ -14,6 +14,8 @@ import { createStubFinish } from "../fakes/finish.ts"
 import { createFakeGit, type FakeRepository } from "../fakes/git.ts"
 import { createFakeManifestStore } from "../fakes/manifest-store.ts"
 import { createFakeOperator } from "../fakes/operator.ts"
+import { createStubRelease } from "../fakes/release.ts"
+import { createFakeRunLock } from "../fakes/run-lock.ts"
 import { createFakeRunRecords } from "../fakes/run-records.ts"
 import { createStubShowBoard } from "../fakes/show-board.ts"
 import { createFakeTracker } from "../fakes/tracker.ts"
@@ -52,6 +54,7 @@ const harness = () => {
         { ticket: 10, step: "implement", outcome: "running", at: "2026-09-15T11:18:38.314Z" },
     ])
     const records = createFakeRunRecords({ log: events })
+    const lock = createFakeRunLock()
     const tracker = createFakeTracker({ openFor: ["afk/4/spec"] })
     const printed: string[] = []
     const errors: string[] = []
@@ -60,10 +63,13 @@ const harness = () => {
         isInteractive: () => true,
         printError: line => errors.push(line),
         run: createRun({
+            release: createStubRelease(),
             showBoard: createStubShowBoard(),
             fresh: createFreshService({
                 cwd: "/repo",
                 git: git.git,
+                lock: lock.lock,
+                self: { pid: 1 },
                 records: records.records,
                 tracker: tracker.tracker,
             }),
@@ -81,6 +87,8 @@ const harness = () => {
                     manifests: manifests.store,
                     now: () => new Date(),
                 }),
+                lock: lock.lock,
+                self: { pid: 1 },
                 records: records.records,
             }),
             drive: createStubDrive(),

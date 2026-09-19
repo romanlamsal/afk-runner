@@ -31,6 +31,8 @@ import { createFakeGit } from "../fakes/git.ts"
 import { createFakeInterrupts } from "../fakes/interrupts.ts"
 import { createFakeManifestStore } from "../fakes/manifest-store.ts"
 import { createFakeOperator } from "../fakes/operator.ts"
+import { createStubRelease } from "../fakes/release.ts"
+import { createFakeRunLock } from "../fakes/run-lock.ts"
 import { createFakeRunRecords } from "../fakes/run-records.ts"
 import { createStubShowBoard } from "../fakes/show-board.ts"
 import { createFakeTracker, type FakeTrackerSetup } from "../fakes/tracker.ts"
@@ -118,6 +120,7 @@ const harness = ({
     const manifests = createFakeManifestStore({ ok: true, manifest })
     const operator = createFakeOperator()
     const records = createFakeRunRecords()
+    const lock = createFakeRunLock()
     const tracker = createFakeTracker(trackerSetup)
     const printed: string[] = []
     const errors: string[] = []
@@ -226,6 +229,7 @@ const harness = ({
         isInteractive: () => true,
         printError: line => errors.push(line),
         run: createRun({
+            release: createStubRelease(),
             showBoard: createStubShowBoard(),
             fresh: createStubFresh(),
             start: createStartService({
@@ -236,6 +240,8 @@ const harness = ({
                 manifests: manifests.store,
                 operator: operator.operator,
                 plan: async () => ({ ok: true, manifest }),
+                lock: lock.lock,
+                self: { pid: 1 },
                 records: records.records,
             }),
             drive: createDriveService({

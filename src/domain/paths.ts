@@ -47,3 +47,9 @@ export const transcriptPath = (spec: number, label: string, at: Date): string =>
  */
 export const commandLogPath = (spec: number, label: string, at: Date): string =>
     `${runDirectory(spec)}/commands/${stamp(at)}-${label}.log`
+
+/**
+ * Who holds the run: the one afk process allowed to write this run directory (ADR-0034). Inside it,
+ * so the directory's own ignore file covers it and starting over takes it away with everything else.
+ */
+export const runLockPath = (spec: number): string => `${runDirectory(spec)}/lock`

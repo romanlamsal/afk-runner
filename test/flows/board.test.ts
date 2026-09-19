@@ -13,6 +13,7 @@ import { createStubFinish } from "../fakes/finish.ts"
 import { createStubFresh } from "../fakes/fresh.ts"
 import { createFakeGit } from "../fakes/git.ts"
 import { createFakeManifestStore } from "../fakes/manifest-store.ts"
+import { createStubRelease } from "../fakes/release.ts"
 import { manifestOf, ticket } from "../fixtures/manifest.ts"
 
 /**
@@ -57,6 +58,7 @@ const harness = ({
         isInteractive: () => false,
         printError: line => errors.push(line),
         run: createRun({
+            release: createStubRelease(),
             fresh: createStubFresh(),
             showBoard: createShowBoardService({
                 board: board.board,

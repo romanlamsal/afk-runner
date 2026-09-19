@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest"
+import type { Holder } from "../../src/domain/lock.ts"
 import { createFreshService, type FreshResult } from "../../src/service/fresh.ts"
 import { createFakeGit, type FakeGit, type FakeRepository } from "../fakes/git.ts"
+import { createFakeRunLock, type FakeRunLock } from "../fakes/run-lock.ts"
 import { createFakeRunRecords, type FakeRunRecords } from "../fakes/run-records.ts"
 import { createFakeTracker, type FakeTracker, type FakeTrackerSetup } from "../fakes/tracker.ts"
 
@@ -27,29 +29,36 @@ type Harness = {
     git: FakeGit
     records: FakeRunRecords
     tracker: FakeTracker
+    lock: FakeRunLock
 }
 
 const harness = ({
     repository = RAN,
     tracker: setup = { openFor: ["afk/4/spec"] },
     unremovable,
+    heldBy,
 }: {
     repository?: FakeRepository
     tracker?: FakeTrackerSetup
     /** Why the run directory will not go, for a machine that holds on to it. */
     unremovable?: string
+    /** Who holds the run lock already, if anybody (ADR-0034). */
+    heldBy?: Holder
 } = {}): Harness => {
     const git = createFakeGit(repository)
     const records = createFakeRunRecords({ unremovable })
     const tracker = createFakeTracker(setup)
+    const lock = createFakeRunLock({ heldBy })
     const service = createFreshService({
         cwd: "/repo/packages/thing",
         git: git.git,
+        lock: lock.lock,
+        self: { pid: 1 },
         records: records.records,
         tracker: tracker.tracker,
     })
 
-    return { git, records, tracker, fresh: () => service(4) }
+    return { git, records, tracker, lock, fresh: () => service(4) }
 }
 
 describe("the fresh service: a run thrown away", () => {
@@ -250,5 +259,41 @@ describe("the fresh service: what it will not do", () => {
 
         // then
         expect(git.localBranches()).toContain("afk/4/spec")
+    })
+})
+
+describe("the fresh service: the run lock", () => {
+    it("should throw nothing away while another afk holds the run, naming it", async () => {
+        // given
+        const { fresh } = harness({ heldBy: { pid: 7 } })
+
+        // when
+        const result = await fresh()
+
+        // then
+        expect(result).toEqual({ outcome: "failed", reason: expect.stringContaining("afk process 7") })
+    })
+
+    it("should leave the run's worktrees alone while another afk holds the run", async () => {
+        // given
+        const { fresh, git } = harness({ heldBy: { pid: 7 } })
+
+        // when
+        await fresh()
+
+        // then
+        expect(git.checkedOut()).toContain(".afk/4/gate")
+    })
+
+    it("should throw away a run whose lock names a process that no longer exists", async () => {
+        // given
+        const harnessed = harness({ heldBy: { pid: 7 } })
+        harnessed.lock.die(7)
+
+        // when
+        const result = await harnessed.fresh()
+
+        // then
+        expect(result.outcome).toBe("cleared")
     })
 })
