@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { boardFrame } from "../../src/cli/board-frame.ts"
+import { boardFrame, elapsedText } from "../../src/cli/board-frame.ts"
 import { type Line, type Span, textOf, widthOf } from "../../src/cli/board-span.ts"
 import {
     type BoardRow,
@@ -42,7 +42,7 @@ const row = (
     title: string,
     track: Track,
     steps: readonly BoardStep[],
-    rest: { waiting?: boolean; conclusion?: Conclusion } = {},
+    rest: { waiting?: boolean; conclusion?: Conclusion; elapsed?: number } = {},
 ): BoardRow => ({
     ticket,
     title,
@@ -52,6 +52,7 @@ const row = (
     conclusion: rest.conclusion,
     // Why a step came to what it did is the line adapter's to say: a row says it in a colour.
     detail: undefined,
+    elapsed: rest.elapsed,
 })
 
 const IMPLEMENTING = trail({ setup: "ok", implement: "running" })
@@ -253,6 +254,81 @@ describe("boardFrame", () => {
  * may grow — a notice arrives, and a long one takes several lines — and growing moves nothing above
  * it, because the writer rewinds over the lines it last drew (ADR-0029).
  */
+/** How long a running step has been going, at the end of its row and nowhere else (ADR-0034). */
+describe("boardFrame: the elapsed figure", () => {
+    it("should end a row with a running step in how long it has been going", () => {
+        // given
+        const busy = row(7, "A ticket", "implement", IMPLEMENTING, { elapsed: 58_000 })
+
+        // when
+        const [line] = boardFrame({ at: undefined, rows: [busy] }, WIDE).map(textOf)
+
+        // then
+        expect(line).toBe(`    7  ${TRAIL} | 58s`)
+    })
+
+    it("should end a row with nothing running in its trail", () => {
+        // given
+        const settled = row(7, "A ticket", "implement", trail({ setup: "ok", implement: "ok" }))
+
+        // when
+        const [line] = boardFrame({ at: undefined, rows: [settled] }, WIDE).map(textOf)
+
+        // then
+        expect(line).toBe(`    7  ${TRAIL}`)
+    })
+
+    it("should leave the trail's words where they were", () => {
+        // given
+        const busy = row(7, "A ticket", "implement", IMPLEMENTING, { elapsed: 3_600_000 })
+        const idle = row(8, "A ticket", "implement", IMPLEMENTING)
+
+        // when
+        const lines = boardFrame({ at: undefined, rows: [busy, idle] }, WIDE).map(textOf)
+
+        // then
+        expect(lines.map(line => line.slice(0, 7 + TRAIL.length))).toEqual([`    7  ${TRAIL}`, `    8  ${TRAIL}`])
+    })
+
+    it.each([[0], [59_000], [3_600_000]] as const)(
+        "should keep the frame's height the ticket count at %i ms",
+        elapsed => {
+            // given
+            const rows = [7, 8, 9].map(ticket => row(ticket, "A ticket", "implement", IMPLEMENTING, { elapsed }))
+
+            // when
+            const lines = boardFrame({ at: undefined, rows }, WIDE)
+
+            // then
+            expect(lines).toHaveLength(3)
+        },
+    )
+})
+
+describe("elapsedText", () => {
+    it.each([
+        [0, "0s"],
+        [999, "0s"],
+        [58_000, "58s"],
+        [59_999, "59s"],
+        [60_000, "1m00s"],
+        [245_000, "4m05s"],
+        [3_599_000, "59m59s"],
+        [3_600_000, "1h00m"],
+        [3_720_000, "1h02m"],
+        [90_000_000, "25h00m"],
+    ] as const)("should write %i ms as %s", (ms, written) => {
+        // given
+        const elapsed = ms
+
+        // when
+        const text = elapsedText(elapsed)
+
+        // then
+        expect(text).toBe(written)
+    })
+})
+
 describe("boardFrame: the footer", () => {
     const AT = "2026-09-15T11:18:38.314Z"
 

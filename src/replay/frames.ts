@@ -112,6 +112,15 @@ export const liveActions = (manifest: Manifest, events: readonly LifecycleEvent[
     })
 
 /**
+ * The instant a prefix of the log was drawn at: the last instant it carries a clock can read. A
+ * replay has no time now of its own, so the replayed instant is what a row's elapsed figure counts
+ * to, which is what makes the figure the one the live board showed as that line was written
+ * (ADR-0034). A prefix with no readable instant has nothing running to count, so the epoch serves.
+ */
+const drawnAt = (events: readonly LifecycleEvent[]): Date =>
+    events.map(instantOf).findLast(at => at !== undefined) ?? new Date(0)
+
+/**
  * Every frame a log is, in order: the empty board the run opened on, one frame per line, and the
  * board the next process would open on.
  *
@@ -123,14 +132,14 @@ export const liveActions = (manifest: Manifest, events: readonly LifecycleEvent[
  * ends on what a resume would open on rather than on the last line's own news.
  */
 export const replayFrames = (manifest: Manifest, events: readonly LifecycleEvent[]): readonly ReplayFrame[] => [
-    { view: boardOf(manifest, []), event: undefined, at: undefined },
+    { view: boardOf(manifest, [], drawnAt([])), event: undefined, at: undefined },
     // Each frame derives from the whole prefix rather than from the one before it, because that is
     // what the board is: a function of the log, never of the last thing drawn (ADR-0030).
     ...events.map((event, index): ReplayFrame => {
         const soFar = events.slice(0, index + 1)
-        return { view: boardOf(manifest, soFar), event, at: instantOf(event) }
+        return { view: boardOf(manifest, soFar, drawnAt(soFar)), event, at: instantOf(event) }
     }),
-    { view: boardOf(manifest, events), event: undefined, at: undefined },
+    { view: boardOf(manifest, events, drawnAt(events)), event: undefined, at: undefined },
 ]
 
 /**

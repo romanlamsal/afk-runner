@@ -64,6 +64,7 @@ const harness = ({
                 events: events.log,
                 git: git.git,
                 manifests: manifests.store,
+                now: () => new Date(at(9)),
             }),
             start: refusingStart,
             drive: createStubDrive(),

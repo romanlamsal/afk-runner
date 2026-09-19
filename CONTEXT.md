@@ -226,17 +226,20 @@ come to none.
 _Avoid_: result, final status, verdict
 
 **Board**:
-What a run shows while it runs: every ticket of the spec at once, one row each. Derived from the
-manifest and the event log and from nothing else: it says what the log says, and claims nothing
-about liveness, because a step the log left `running` is one whose end event is not written rather
-than one that is certainly happening (ADR-0030). Nothing about it is written
-down, and `afk <spec> --board-only` draws the same board from the run directory.
+What a run shows while it runs: every ticket of the spec at once, one row each, so its height is the
+ticket count. A row is the ticket's number, its trail, and — where a step is running — how long that
+step has been going (`| 58s`); a row with nothing running ends at its trail. Derived from the run
+directory and an instant handed in, never from the driver's in-flight set: a step the log left
+`running` is one whose end event is not written rather than one that is certainly happening, and the
+elapsed figure counts up either way (ADR-0030, ADR-0034). Nothing about it is written down, and
+`afk <spec> --board-only` and a replay draw the same board from the same run directory.
 _Avoid_: dashboard, monitor, progress view, TUI
 
 **Trail**:
 The steps on a board's row: every step of the run, in the order a ticket takes them, and the same on
-every row whatever track the ticket is on. What has happened, what was begun and what is still
-ahead, on one line.
+every row whatever track the ticket is on. Its words never change; colour carries what has happened,
+what was begun and what is still ahead, and may carry whether a running step is still writing
+(ADR-0031). How long a step has run is not part of it: that figure comes after it, at the row's end.
 _Avoid_: progress bar, timeline, breadcrumb
 
 **Interrupted**:

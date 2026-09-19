@@ -132,6 +132,17 @@ describe("replayFrames", () => {
         expect(frames.at(-1)?.view).toEqual(frames.at(-2)?.view)
     })
 
+    it("should count a running step's elapsed time to the instant each line was written", () => {
+        // given
+        const log = [event(7, "implement", "running", 1), event(8, "setup", "running", 4)]
+
+        // when
+        const frames = replayFrames(MANIFEST, log)
+
+        // then
+        expect(frames.at(2)?.view.rows.map(row => row.elapsed)).toEqual([3 * 60_000, 0])
+    })
+
     it("should carry the instant each event was appended at", () => {
         // given
         const log = [event(7, "setup", "running", 3)]

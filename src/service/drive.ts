@@ -97,7 +97,7 @@ export const createDriveService =
             // Drawn from the same bytes the decision is about to be given, and from nothing the
             // driver holds: the board says what the log says, so a frame is drawn on every pass of
             // the loop and the last of them is what stays on screen when the run ends (ADR-0030).
-            board.show(boardOf(manifest, log))
+            board.show(boardOf(manifest, log, now()))
 
             const actions = nextActions(manifest, log, {
                 inFlight: live,

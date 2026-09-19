@@ -27,11 +27,14 @@ const event = (ticket: number, step: Step, outcome: Outcome): LifecycleEvent => 
     at: "2026-09-15T11:18:38.314Z",
 })
 
+/** The instant every view here is derived at, unless a test is about the instant. */
+const NOW = new Date("2026-09-15T11:19:36.314Z")
+
 const MANIFEST = manifestOf([ticket(7), ticket(8, [7]), ticket(9, [7])])
 
 /** The track a ticket's row sits in, which is the whole of what a row says about it for now. */
 const trackOf = (events: readonly LifecycleEvent[], number: number): Track | undefined =>
-    boardOf(MANIFEST, events).rows.find(row => row.ticket === number)?.track
+    boardOf(MANIFEST, events, NOW).rows.find(row => row.ticket === number)?.track
 
 /** A ticket whose implementer reported back: everything the merge track draws from starts here. */
 const implemented = (number: number): readonly LifecycleEvent[] => [
@@ -45,7 +48,7 @@ describe("boardOf: the rows", () => {
         const events = [...implemented(7), event(7, "rebase", "running")]
 
         // when
-        const view = boardOf(MANIFEST, events)
+        const view = boardOf(MANIFEST, events, NOW)
 
         // then
         expect(view.rows.map(row => row.ticket)).toEqual([7, 8, 9])
@@ -56,7 +59,7 @@ describe("boardOf: the rows", () => {
         const events: readonly LifecycleEvent[] = []
 
         // when
-        const view = boardOf(MANIFEST, events)
+        const view = boardOf(MANIFEST, events, NOW)
 
         // then
         expect(view.rows.map(row => row.title)).toEqual(["ticket 7", "ticket 8", "ticket 9"])
@@ -73,7 +76,7 @@ describe("boardOf: the rows", () => {
         const log = events
 
         // when
-        const view = boardOf(MANIFEST, log)
+        const view = boardOf(MANIFEST, log, NOW)
 
         // then
         expect(view.rows).toHaveLength(MANIFEST.tickets.length)
@@ -129,12 +132,12 @@ describe("boardOf: which track a ticket is on", () => {
 
 /** The weight one step of a ticket's trail is read at, which is the whole of what a trail says. */
 const weightOf = (events: readonly LifecycleEvent[], number: number, step: Step): StepState | undefined =>
-    boardOf(MANIFEST, events)
+    boardOf(MANIFEST, events, NOW)
         .rows.find(row => row.ticket === number)
         ?.steps.find(entry => entry.step === step)?.state
 
 const rowOf = (events: readonly LifecycleEvent[], number: number) =>
-    boardOf(MANIFEST, events).rows.find(row => row.ticket === number)
+    boardOf(MANIFEST, events, NOW).rows.find(row => row.ticket === number)
 
 describe("boardOf: the steps a row covers", () => {
     const EVERY_STEP = ["setup", "implement", "rebase", "resolve", "merge", "gate", "fix", "revert"]
@@ -221,7 +224,7 @@ describe("boardOf: what a step is read at", () => {
         const events = [event(7, "setup", "running"), event(8, "implement", "running")]
 
         // when
-        const view = boardOf(MANIFEST, events)
+        const view = boardOf(MANIFEST, events, NOW)
 
         // then
         expect(view.rows.flatMap(row => row.steps).filter(entry => entry.state === "running")).toHaveLength(2)
@@ -272,7 +275,7 @@ describe("boardOf: a ticket the merge track has not taken yet", () => {
         const events = [...implemented(7), ...implemented(8), ...implemented(9)]
 
         // when
-        const view = boardOf(MANIFEST, events)
+        const view = boardOf(MANIFEST, events, NOW)
 
         // then
         expect(view.rows.map(row => ({ ...row, ticket: 0, title: "" }))).toEqual([
@@ -391,7 +394,7 @@ describe("boardOf: a ticket nothing more will happen to", () => {
         const events = [7, 8, 9].flatMap(number => [...implemented(number), event(number, "gate", "ok")])
 
         // when
-        const view = boardOf(MANIFEST, events)
+        const view = boardOf(MANIFEST, events, NOW)
 
         // then
         expect(view.rows.map(row => row.ticket)).toEqual([7, 8, 9])
@@ -434,6 +437,7 @@ describe("boardOf: what a row is made of", () => {
         expect(Object.keys(row ?? {}).sort()).toEqual([
             "conclusion",
             "detail",
+            "elapsed",
             "steps",
             "ticket",
             "title",
@@ -485,8 +489,67 @@ describe("boardOf: why a step came to what it did", () => {
 })
 
 /**
- * When the last thing happened is read off the log's last event rather than from a clock, which is
- * what keeps the board without one: the same view is the same frame whenever it is drawn.
+ * How long a row's running step has been going: from its start event to the instant the view is
+ * derived at, and nothing on a row with nothing running (ADR-0034).
+ */
+describe("boardOf: how long the running step has been going", () => {
+    const started = (step: Step, when: string): LifecycleEvent => ({ ...event(7, step, "running"), at: when })
+
+    it.each([
+        ["an implementer started 58 seconds ago", [started("implement", "2026-09-15T11:18:38.314Z")], 58_000],
+        [
+            "a fix started after its gate went red",
+            [...implemented(7), event(7, "gate", "failed"), started("fix", "2026-09-15T11:19:26.314Z")],
+            10_000,
+        ],
+        [
+            "a prepare pass, timed from its own start",
+            [event(7, "implement", "failed"), started("prepare", "2026-09-15T11:19:35.314Z")],
+            1_000,
+        ],
+        ["a start the clock reads as later than now", [started("implement", "2026-09-15T12:00:00.000Z")], 0],
+    ] as const)("should count %s", (_case, events, elapsed) => {
+        // given
+        const log = events
+
+        // when
+        const row = rowOf(log, 7)
+
+        // then
+        expect(row?.elapsed).toBe(elapsed)
+    })
+
+    it.each([
+        ["nothing has happened to", []],
+        ["settled its last step", implemented(7)],
+        ["concluded", [...implemented(7), event(7, "gate", "ok")]],
+        ["started at an instant no clock reads", [started("implement", "not a time")]],
+    ] as const)("should count nothing for a ticket that %s", (_case, events) => {
+        // given
+        const log = events
+
+        // when
+        const row = rowOf(log, 7)
+
+        // then
+        expect(row?.elapsed).toBeUndefined()
+    })
+
+    it("should count to the instant it is handed rather than to a clock", () => {
+        // given
+        const events = [started("implement", "2026-09-15T10:00:00.000Z")]
+
+        // when
+        const view = boardOf(MANIFEST, events, new Date("2026-09-15T10:20:00.000Z"))
+
+        // then
+        expect(view.rows[0]?.elapsed).toBe(20 * 60_000)
+    })
+})
+
+/**
+ * When the last thing happened is read off the log's last event rather than from the instant the
+ * view is derived at: it is the log's time, never the time now.
  */
 describe("boardOf: when the last thing happened", () => {
     /** An event that says when it happened, which is the only thing these cases turn on. */
@@ -497,7 +560,7 @@ describe("boardOf: when the last thing happened", () => {
         const events = [at("2026-09-15T11:18:38.314Z"), at("2026-09-15T11:42:07.001Z")]
 
         // when
-        const view = boardOf(MANIFEST, events)
+        const view = boardOf(MANIFEST, events, NOW)
 
         // then
         expect(view.at).toBe("2026-09-15T11:42:07.001Z")
@@ -508,7 +571,7 @@ describe("boardOf: when the last thing happened", () => {
         const events: readonly LifecycleEvent[] = []
 
         // when
-        const view = boardOf(MANIFEST, events)
+        const view = boardOf(MANIFEST, events, NOW)
 
         // then
         expect(view.at).toBeUndefined()
@@ -519,7 +582,7 @@ describe("boardOf: when the last thing happened", () => {
         const events = [at("2026-09-15T10:00:00.000Z")]
 
         // when
-        const view = boardOf(MANIFEST, events)
+        const view = boardOf(MANIFEST, events, NOW)
 
         // then
         expect(view.at).toBe("2026-09-15T10:00:00.000Z")
@@ -530,7 +593,7 @@ describe("boardOf: when the last thing happened", () => {
         const events = [at("2026-09-15T10:00:00.000Z"), at("2026-09-15T10:00:04.000Z")]
 
         // when
-        const views = [boardOf(MANIFEST, events), boardOf(MANIFEST, events)]
+        const views = [boardOf(MANIFEST, events, NOW), boardOf(MANIFEST, events, NOW)]
 
         // then
         expect(views.map(view => view.at)).toEqual(["2026-09-15T10:00:04.000Z", "2026-09-15T10:00:04.000Z"])

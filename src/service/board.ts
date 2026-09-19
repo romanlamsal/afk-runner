@@ -1,4 +1,5 @@
 import { type Board, boardOf } from "../domain/board.ts"
+import type { Clock } from "../domain/clock.ts"
 import { concluded } from "../domain/decide.ts"
 import { type EventLog, type LifecycleEvent, progressOf } from "../domain/events.ts"
 import type { Git } from "../domain/git.ts"
@@ -32,6 +33,8 @@ export type ShowBoardDeps = {
     events: EventLog
     git: Git
     manifests: ManifestStore
+    /** The instant each view is derived at, which is what a row's elapsed figure counts to. */
+    now: Clock
 }
 
 /**
@@ -50,7 +53,7 @@ export type ShowBoardDeps = {
  * identical from the outside and only one of them is finished (ADR-0030).
  */
 export const createShowBoardService =
-    ({ board, cwd, events, git, manifests }: ShowBoardDeps): ShowBoard =>
+    ({ board, cwd, events, git, manifests, now }: ShowBoardDeps): ShowBoard =>
     async spec => {
         const root = await git.topLevel(cwd)
         if (root === undefined) {
@@ -76,7 +79,7 @@ export const createShowBoardService =
         let last: readonly LifecycleEvent[] = []
         for await (const log of events.follow(root, spec)) {
             last = log
-            board.show(boardOf(manifest, log))
+            board.show(boardOf(manifest, log, now()))
             if (concluded(manifest, log)) {
                 break
             }

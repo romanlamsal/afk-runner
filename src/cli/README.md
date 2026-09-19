@@ -12,7 +12,8 @@ three pieces with one seam between each (ADR-0031).
 
 - **The frame** (`board-frame.ts`) holds the layout and nothing else: a pure mapping from a view
   and a terminal width to lines of spans. The trail, the ticket number's padding, one block in
-  manifest order, the markers at the end of a row, cutting a row too wide for the terminal, and
+  manifest order, the markers at the end of a row, the running step's elapsed figure after them
+  (ADR-0034), cutting a row too wide for the terminal, and
   the footer under the rows with its own wrapping. It says what each span is — a role — and never
   what that looks like, so every width it computes is computed on plain text.
 - **The colouring** (`board-paint.ts`) holds the palette and no layout: a pure mapping from a line

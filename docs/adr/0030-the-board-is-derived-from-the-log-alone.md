@@ -1,8 +1,12 @@
 ---
-status: accepted
+status: superseded by ADR-0034
 ---
 
 # The board is derived from the log alone
+
+> **Superseded by ADR-0034.** The board now reads the run directory rather than the log alone, and is
+> handed an instant to count a running step's elapsed time to. The principle stands: anything able to
+> read the run directory draws the same board, and the driver's in-flight set is not part of it.
 
 ADR-0029 gave the board three inputs: the manifest, the event log and the driver's live action set.
 The third was not optional. A `running` event whose action the driver holds is a step that is

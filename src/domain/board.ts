@@ -9,13 +9,15 @@ import {
     type Outcome,
     running,
     type Step,
+    statusOf,
 } from "./events.ts"
 import type { Manifest } from "./manifest.ts"
 
 /**
- * The board: the view of a run, derived from the manifest and the event log and from nothing else
- * (ADR-0030). It claims nothing about liveness, so it says what the log says — which is what lets it
- * be drawn by anything that can read the run directory rather than only by the process running it.
+ * The board: the view of a run, derived from what the run directory holds — the manifest and the
+ * event log — and an instant handed in (ADR-0034). It claims nothing about liveness, so it says what
+ * the log says — which is what lets it be drawn by anything that can read the run directory rather
+ * than only by the process running it.
  *
  * Nothing here is written down. What the driver holds and the log does not — which of its steps has
  * a process behind it — stays the driver's, because scheduling needs it and a view does not.
@@ -108,6 +110,16 @@ export type BoardRow = {
      * able to say why on it.
      */
     detail: string | undefined
+    /**
+     * How long the step the log left running has been going, in milliseconds: from its start event
+     * to the instant the view was derived at. Nothing where no step is running, so that a settled
+     * row does not look busy — and nothing where the start event carried no instant a clock reads.
+     *
+     * It is read off the log and a clock handed in, never off a process, so a replay handed the
+     * replayed instant reproduces it exactly. It says how long, not whether: a step whose process is
+     * gone counts up like one that is working (ADR-0034).
+     */
+    elapsed: number | undefined
 }
 
 /**
@@ -132,9 +144,9 @@ export type BoardView = {
      * log holds no event at all — a run that has not started has no last thing, and a placeholder
      * for one would be the board claiming something the log does not say.
      *
-     * It is read off the event rather than from a clock, which is what keeps the board without one:
-     * the same view is the same frame whenever it is drawn, on screen and in a scrollback alike, and
-     * a run that is only thinking still redraws nothing until it moves (ADR-0030).
+     * It is read off the event rather than from the instant the view is derived at, which is what
+     * makes it the log's time and not the time now (ADR-0030). A row's elapsed figure is the only
+     * thing the instant is used for (ADR-0034).
      */
     at: string | undefined
 }
@@ -199,6 +211,21 @@ const runningStep = (events: readonly LifecycleEvent[], ticket: number): Step | 
  * than the last event that carried a detail: a reason belongs to the step it was written about, so
  * a step that ended saying nothing says nothing rather than inheriting an older step's words.
  */
+/**
+ * How long the ticket's running step has been going at `now`, or nothing where it has none. The
+ * start is the ticket's last event, because a ticket with a step running is one whose last word is
+ * that step's start; a prepare pass is timed from its own start, since the pass is what is running.
+ */
+const elapsedOf = (events: readonly LifecycleEvent[], ticket: number, now: Date): number | undefined => {
+    const last = statusOf(events, ticket)
+    if (last?.outcome !== "running") {
+        return undefined
+    }
+    const started = new Date(last.at).getTime()
+    // An unreadable instant is no instant rather than time zero; a clock behind the log is no time.
+    return Number.isNaN(started) ? undefined : Math.max(0, now.getTime() - started)
+}
+
 const detailOf = (events: readonly LifecycleEvent[], ticket: number): string | undefined =>
     events.findLast(event => event.ticket === ticket && event.outcome !== "running")?.detail
 
@@ -219,8 +246,12 @@ const trailOf = (events: readonly LifecycleEvent[], ticket: number, open: Step |
         return outcome === undefined ? { step, state: "ahead" } : { step, state: "settled", outcome }
     })
 
-/** The whole view, as a pure function of the manifest and the log. */
-export const boardOf = (manifest: Manifest, events: readonly LifecycleEvent[]): BoardView => ({
+/**
+ * The whole view, as a pure function of the manifest, the log and the instant it is derived at. The
+ * instant is handed in rather than read, so the same three inputs are the same view wherever they
+ * are drawn — a live run passes the time now, a replay the replayed instant (ADR-0034).
+ */
+export const boardOf = (manifest: Manifest, events: readonly LifecycleEvent[], now: Date): BoardView => ({
     // The log is append-only, so its last line is the last thing that happened: the order it was
     // written in is the order it happened in, and no event is ever rewritten (ADR-0011).
     at: events.at(-1)?.at,
@@ -236,6 +267,7 @@ export const boardOf = (manifest: Manifest, events: readonly LifecycleEvent[]): 
             waiting: track === "implement" && implemented(events, ticket.number) && open === undefined,
             conclusion: cameTo(events, ticket.number),
             detail: detailOf(events, ticket.number),
+            elapsed: elapsedOf(events, ticket.number, now),
         }
     }),
 })

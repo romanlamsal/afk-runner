@@ -121,7 +121,7 @@ export const assembleCli = (): Cli => {
         printError,
         run: createRun({
             fresh: createFreshService({ cwd, git, records, tracker }),
-            showBoard: createShowBoardService({ board, cwd, events, git, manifests }),
+            showBoard: createShowBoardService({ board, cwd, events, git, manifests, now }),
             start,
             drive,
             finish: createFinishService({ agent, events, git, now, tracker }),
