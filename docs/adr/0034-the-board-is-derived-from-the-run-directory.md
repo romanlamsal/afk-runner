@@ -55,3 +55,8 @@ is a separate question, answered from what the step itself wrote and carried by 
 - **The board's inputs grow one file at a time.** Transcripts and command logs for silence, and the
   lock for whether the run is alive at all, arrive with the tickets that need them; each is read off
   the run directory, and none is the driver's.
+- **One watch owns redrawing.** A figure that only updates when something settles is not a figure,
+  so the runner no longer draws once per pass of its loop. A single watch service wakes on a change
+  to the log and on a one-second tick, derives the view afresh and draws it; the runner and
+  `--board-only` both drive through it, so two terminals showing one run redraw on the same terms.
+  A tick appends nothing: the log stays a record of what was attempted (ADR-0011).

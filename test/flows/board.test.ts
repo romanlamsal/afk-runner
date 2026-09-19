@@ -6,6 +6,7 @@ import { type BoardStep, TRAIL_STEPS } from "../../src/domain/board.ts"
 import type { LifecycleEvent, Step } from "../../src/domain/events.ts"
 import { createShowBoardService } from "../../src/service/board.ts"
 import type { StartRun } from "../../src/service/start.ts"
+import { createWatchBoardService } from "../../src/service/watch.ts"
 import { createFakeBoard } from "../fakes/board.ts"
 import { createStubDrive } from "../fakes/drive.ts"
 import { createFakeEventLog } from "../fakes/event-log.ts"
@@ -14,6 +15,7 @@ import { createStubFresh } from "../fakes/fresh.ts"
 import { createFakeGit } from "../fakes/git.ts"
 import { createFakeManifestStore } from "../fakes/manifest-store.ts"
 import { createStubRelease } from "../fakes/release.ts"
+import { createFakeTicker } from "../fakes/ticker.ts"
 import { manifestOf, ticket } from "../fixtures/manifest.ts"
 
 /**
@@ -61,12 +63,15 @@ const harness = ({
             release: createStubRelease(),
             fresh: createStubFresh(),
             showBoard: createShowBoardService({
-                board: board.board,
                 cwd: "/repo",
-                events: events.log,
                 git: git.git,
                 manifests: manifests.store,
-                now: () => new Date(at(9)),
+                watch: createWatchBoardService({
+                    board: board.board,
+                    events: events.log,
+                    now: () => new Date(at(9)),
+                    ticker: createFakeTicker(),
+                }),
             }),
             start: refusingStart,
             drive: createStubDrive(),

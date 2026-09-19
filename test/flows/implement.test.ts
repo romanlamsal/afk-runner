@@ -22,7 +22,6 @@ import { createRevertService, type RevertTicket } from "../../src/service/revert
 import { createSetupService, type SetupTicket } from "../../src/service/setup.ts"
 import { createStartService } from "../../src/service/start.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
-import { createFakeBoard } from "../fakes/board.ts"
 import { createFakeCommands } from "../fakes/commands.ts"
 import { createFakeEnvironment } from "../fakes/environment.ts"
 import { createFakeEventLog } from "../fakes/event-log.ts"
@@ -36,6 +35,7 @@ import { createFakeRunLock } from "../fakes/run-lock.ts"
 import { createFakeRunRecords } from "../fakes/run-records.ts"
 import { createStubShowBoard } from "../fakes/show-board.ts"
 import { createFakeTracker, type FakeTrackerSetup } from "../fakes/tracker.ts"
+import { createFakeWatch } from "../fakes/watch.ts"
 import { manifestOf, ticket } from "../fixtures/manifest.ts"
 
 /**
@@ -245,7 +245,6 @@ const harness = ({
                 records: records.records,
             }),
             drive: createDriveService({
-                board: createFakeBoard().board,
                 events: events.log,
                 interrupts: interrupts.interrupts,
                 implement: createImplementService({
@@ -285,6 +284,7 @@ const harness = ({
                 revert,
                 prepare: createPrepareService({ agent: preparer.run, events: events.log, git: git.git, now }),
                 now,
+                watch: createFakeWatch().watch,
             }),
             finish: createFinishService({
                 agent: writer.run,

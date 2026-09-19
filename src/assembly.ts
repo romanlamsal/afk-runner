@@ -9,6 +9,7 @@ import { createEnvironmentFiles } from "./infrastructure/environment-files.ts"
 import { createGit } from "./infrastructure/git.ts"
 import { createSignalInterrupts } from "./infrastructure/interrupts.ts"
 import { killEveryChild } from "./infrastructure/process.ts"
+import { createIntervalTicker } from "./infrastructure/ticker.ts"
 import { createGitHubTracker } from "./infrastructure/tracker.ts"
 import { createFileEventLog } from "./repository/event-log.ts"
 import { createFileManifestStore } from "./repository/manifest-store.ts"
@@ -30,6 +31,7 @@ import { createResolveService } from "./service/resolve.ts"
 import { createRevertService } from "./service/revert.ts"
 import { createSetupService } from "./service/setup.ts"
 import { createStartService } from "./service/start.ts"
+import { createWatchBoardService } from "./service/watch.ts"
 
 /**
  * Assembly is not a layer. It is the only module that knows both a port and its implementation:
@@ -107,8 +109,11 @@ export const assembleCli = (): Cli => {
     // branch that ticket was taken back off (ADR-0009).
     const prove = createProveBranch({ commands })
 
+    // The one thing that redraws the board, handed to the runner and the viewer alike so that both
+    // redraw on the same terms: a change to the log, and a tick while nothing settles.
+    const watch = createWatchBoardService({ board, events, now, ticker: createIntervalTicker() })
+
     const drive = createDriveService({
-        board,
         events,
         interrupts,
         implement: createImplementService({ agent, events, git, now }),
@@ -121,6 +126,7 @@ export const assembleCli = (): Cli => {
         revert: createRevertService({ events, git, now, prove }),
         prepare: createPrepareService({ agent, events, git, now }),
         now,
+        watch,
     })
 
     return createCli({
@@ -128,7 +134,7 @@ export const assembleCli = (): Cli => {
         printError,
         run: createRun({
             fresh: createFreshService({ cwd, git, lock, self, records, tracker }),
-            showBoard: createShowBoardService({ board, cwd, events, git, manifests, now }),
+            showBoard: createShowBoardService({ cwd, git, manifests, watch }),
             start,
             drive,
             finish: createFinishService({ agent, events, git, now, tracker }),

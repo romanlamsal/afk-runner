@@ -4,9 +4,9 @@ import type { Manifest } from "../../src/domain/manifest.ts"
 import type { PreparedRun } from "../../src/domain/run.ts"
 import type { StepResult } from "../../src/service/attempt.ts"
 import { createDriveService } from "../../src/service/drive.ts"
-import { createFakeBoard } from "../fakes/board.ts"
 import { createFakeEventLog, type FakeEventLog } from "../fakes/event-log.ts"
 import { createFakeInterrupts } from "../fakes/interrupts.ts"
+import { createFakeWatch, type FakeWatch } from "../fakes/watch.ts"
 
 /**
  * The loop, and deliberately nothing else. Which action follows which is the decision function's,
@@ -76,7 +76,7 @@ type Setup = {
     /** What the gate comes to, which is what puts a ticket into the gate-red sequence or not. */
     gating?: "ok" | "failed"
     /** Called as each implementer settles, which is the only moment an interrupt is worth aiming at. */
-    duringImplement?: (interrupt: () => void) => void
+    duringImplement?: (interrupt: () => void, watch: FakeWatch) => void
 }
 
 const harness = ({
@@ -88,16 +88,16 @@ const harness = ({
     duringImplement,
 }: Setup = {}) => {
     const events = createFakeEventLog(log)
-    const board = createFakeBoard()
+    const watch = createFakeWatch()
     const { interrupts, interrupt } = createFakeInterrupts()
     /** Every action the loop handed out, as `<kind>:<ticket>`: which service got what, and nothing else. */
     const dispatched: string[] = []
 
     const drive = createDriveService({
-        board: board.board,
         events: events.log,
         interrupts,
         now: () => new Date(AT),
+        watch: watch.watch,
         setup: async (_run, action) => {
             dispatched.push(`setup:${action.ticket}`)
             await settle(events, action.ticket, "setup", settingUp.outcome)
@@ -106,7 +106,7 @@ const harness = ({
         implement: async (_run, action) => {
             dispatched.push(`implement:${action.ticket}`)
             await settle(events, action.ticket, "implement", implementing.outcome)
-            duringImplement?.(interrupt)
+            duringImplement?.(interrupt, watch)
             return implementing
         },
         rebase: async (_run, action) => {
@@ -146,7 +146,7 @@ const harness = ({
         },
     })
 
-    return { drive, events, dispatched, interrupt, board }
+    return { drive, events, dispatched, interrupt, watch }
 }
 
 describe("createDriveService: the service an action reaches", () => {
@@ -246,43 +246,42 @@ describe("createDriveService: what the run comes to", () => {
     })
 })
 
-describe("createDriveService: what the board is shown", () => {
-    it("should show every ticket of the spec from the first frame", async () => {
+describe("createDriveService: the board's watch", () => {
+    it("should watch the board of the run it drives", async () => {
         // given
-        const { drive, board } = harness()
+        const { drive, watch } = harness()
 
         // when
         await drive(RUN, { maxParallel: 2 })
 
         // then
-        expect(board.shown[0]?.rows.map(row => row.ticket)).toEqual([7, 8])
+        expect(watch.watched).toEqual([{ root: RUN.root, spec: RUN.spec, manifest: MANIFEST }])
     })
 
-    it("should keep drawing the board while the run drains", async () => {
-        // given: the frame count at the moment the operator interrupted, mid-implementer
-        let atInterrupt = 0
-        const run = harness({
-            duringImplement: interrupt => {
-                interrupt()
-                atInterrupt = run.board.shown.length
+    it("should keep the board watched while a step is in flight", async () => {
+        // given: how many watches had been stopped at the moment an implementer settled
+        let stoppedMidRun: number | undefined
+        const { drive } = harness({
+            duringImplement: (_interrupt, watch) => {
+                stoppedMidRun = watch.stopped.length
             },
         })
 
         // when
-        await run.drive(RUN, { maxParallel: 1 })
+        await drive(RUN, { maxParallel: 1 })
 
         // then
-        expect(run.board.shown.length).toBeGreaterThan(atInterrupt)
+        expect(stoppedMidRun).toEqual(0)
     })
 
-    it("should show what the run came to as its last frame", async () => {
-        // given: a run that gets both tickets through, so both end on the merge track
-        const { drive, board } = harness()
+    it("should stop watching the board once the run is over", async () => {
+        // given
+        const { drive, watch } = harness()
 
         // when
         await drive(RUN, { maxParallel: 2 })
 
         // then
-        expect(board.shown.at(-1)?.rows.map(row => row.track)).toEqual(["merge", "merge"])
+        expect(watch.stopped).toHaveLength(1)
     })
 })

@@ -166,8 +166,10 @@ export type EventLog = {
      *
      * It ends only where nothing more can arrive, which over a file on disk is never: a follower
      * leaves the loop when it has seen enough, and must be ready for one that goes on indefinitely.
+     * Aborting `signal` ends it too, even while it is waiting on a change that may never come —
+     * which is what lets a follower stop without a look left pending behind it.
      */
-    follow: (root: string, spec: number) => AsyncIterable<readonly LifecycleEvent[]>
+    follow: (root: string, spec: number, signal?: AbortSignal) => AsyncIterable<readonly LifecycleEvent[]>
 }
 
 /**

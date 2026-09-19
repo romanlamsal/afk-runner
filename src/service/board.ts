@@ -1,10 +1,9 @@
-import { type Board, boardOf } from "../domain/board.ts"
-import type { Clock } from "../domain/clock.ts"
 import { concluded } from "../domain/decide.ts"
-import { type EventLog, type LifecycleEvent, progressOf } from "../domain/events.ts"
+import { progressOf } from "../domain/events.ts"
 import type { Git } from "../domain/git.ts"
 import type { ManifestStore } from "../domain/manifest.ts"
 import { wholeSpec } from "../domain/pull-request.ts"
+import type { WatchBoard } from "./watch.ts"
 
 /**
  * What showing a run's board came to. `shown` carries what the log says the run came to, so that
@@ -26,21 +25,18 @@ export type ShowBoardResult =
 export type ShowBoard = (spec: number) => Promise<ShowBoardResult>
 
 export type ShowBoardDeps = {
-    /** Where the view is shown. The same driven port the runner draws through (ADR-0029). */
-    board: Board
     /** Where afk was invoked. The run directory is this directory's git top level. */
     cwd: string
-    events: EventLog
     git: Git
     manifests: ManifestStore
-    /** The instant each view is derived at, which is what a row's elapsed figure counts to. */
-    now: Clock
+    /** What draws the board. The same watch the runner draws through, so both redraw alike. */
+    watch: WatchBoard
 }
 
 /**
  * The viewer: the manifest and the event log, turned into the view the runner draws and handed to
- * the board — once for the log as it stands, and again every time the log changes, until the log
- * says the run is over.
+ * the board — through the same watch the runner draws through, so on a change to the log and on a
+ * tick alike — until the log says the run is over.
  *
  * It writes nothing — no run directory, no event, no branch — which is what lets it be pointed at a
  * run in flight without disturbing it, and what makes a second viewer cost that run nothing
@@ -53,7 +49,7 @@ export type ShowBoardDeps = {
  * identical from the outside and only one of them is finished (ADR-0030).
  */
 export const createShowBoardService =
-    ({ board, cwd, events, git, manifests, now }: ShowBoardDeps): ShowBoard =>
+    ({ cwd, git, manifests, watch }: ShowBoardDeps): ShowBoard =>
     async spec => {
         const root = await git.topLevel(cwd)
         if (root === undefined) {
@@ -74,16 +70,8 @@ export const createShowBoardService =
         }
         const manifest = stored.manifest
 
-        // Every state of the log, starting with the one it is in: a frame per change, and the last
-        // of them is the frame that stays on screen.
-        let last: readonly LifecycleEvent[] = []
-        for await (const log of events.follow(root, spec)) {
-            last = log
-            board.show(boardOf(manifest, log, now()))
-            if (concluded(manifest, log)) {
-                break
-            }
-        }
+        // The last frame drawn is the frame that stays on screen, and its log is the run's verdict.
+        const last = await watch({ root, spec, manifest }, { until: log => concluded(manifest, log) })
 
         const tickets = manifest.tickets.map(ticket => ticket.number)
         return { outcome: "shown", whole: wholeSpec(tickets, progressOf(tickets, last)) }
