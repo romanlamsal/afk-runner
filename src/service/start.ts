@@ -1,7 +1,7 @@
 import { specBranch } from "../domain/branches.ts"
 import type { CopyEnvironmentFiles } from "../domain/environment.ts"
 import { type EventLog, started } from "../domain/events.ts"
-import type { Git } from "../domain/git.ts"
+import type { Git, ResetRequest } from "../domain/git.ts"
 import { baseOf, type Manifest, type ManifestStore } from "../domain/manifest.ts"
 import type { StartMode } from "../domain/mode.ts"
 import type { Commands, ConfirmationScreen, Operator } from "../domain/operator.ts"
@@ -62,6 +62,15 @@ const confirmOrReport = async (
     await operator.report(screen.notices)
     return screen.commands
 }
+
+/**
+ * Put a gate worktree an earlier process left back to the spec branch's tip, rather than throw away
+ * the tree an install put there. Whatever it was left holding goes — uncommitted edits and untracked
+ * files — so that nothing left behind changes what the gate proves; what is ignored stays. False
+ * where there is nothing to reuse: no worktree, or one on another branch.
+ */
+const reuseWorktree = async (git: Git, root: string, request: ResetRequest): Promise<boolean> =>
+    (await git.resetWorktree(root, request)).ok && (await git.cleanWorktree(root, request.path)).ok
 
 /**
  * Starting a run: resolve the repository, refuse what must not continue, lay the run directory down,
@@ -158,9 +167,11 @@ export const createStartService =
 
         const branch = specBranch(spec)
         const gate = gateWorktree(spec)
-        const checkout = await git.checkoutWorktree(root, { path: gate, branch, startPoint: base.branch })
-        if (!checkout.ok) {
-            return refused(`the gate worktree could not be created: ${checkout.reason}`)
+        if (!(await reuseWorktree(git, root, { path: gate, branch }))) {
+            const checkout = await git.checkoutWorktree(root, { path: gate, branch, startPoint: base.branch })
+            if (!checkout.ok) {
+                return refused(`the gate worktree could not be created: ${checkout.reason}`)
+            }
         }
         await environment(root, gate)
 

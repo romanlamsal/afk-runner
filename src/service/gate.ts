@@ -48,7 +48,7 @@ export const createProveBranch =
     }
 
 /**
- * The gate, in the gate worktree — long-lived, re-created at process start, and the spec branch's
+ * The gate, in the gate worktree — long-lived, reused across process starts, and the spec branch's
  * sole writer, so it already stands on the commit that just landed (ADR-0006).
  *
  * What it asserts is the integrity of **everything merged so far**, which every other check in the

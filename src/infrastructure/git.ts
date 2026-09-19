@@ -134,6 +134,31 @@ export const createGit = (): Git => ({
         return added.ok ? { ok: true } : { ok: false, reason: complaint(added) }
     },
 
+    resetWorktree: async (root, { path, branch }): Promise<GitResult> => {
+        // Asked of git's own list rather than inside the directory: a directory git no longer
+        // administers is still inside the repository, and would answer for the root's checkout.
+        const absolute = join(root, path)
+        const listed = await git(root, "worktree", "list", "--porcelain")
+        if (!listed.ok || !lines(listed.stdout).includes(`${WORKTREE_LINE}${absolute}`)) {
+            return { ok: false, reason: `no worktree is registered at ${path}` }
+        }
+
+        // A rebase git stopped in has a detached head, and so holds no branch to put back.
+        const head = await git(absolute, "symbolic-ref", "--quiet", "--short", "HEAD")
+        if (!head.ok || head.stdout !== branch) {
+            return { ok: false, reason: `the worktree at ${path} does not hold ${branch}` }
+        }
+
+        const reset = await git(absolute, "reset", "--hard", "--quiet", "HEAD")
+        return reset.ok ? { ok: true } : { ok: false, reason: complaint(reset) }
+    },
+
+    // No `-x`: what the repository ignores is what an install put there, and keeping it is the point.
+    cleanWorktree: async (root, path): Promise<GitResult> => {
+        const cleaned = await git(join(root, path), "clean", "-d", "--force", "--quiet")
+        return cleaned.ok ? { ok: true } : { ok: false, reason: complaint(cleaned) }
+    },
+
     removeWorktree: async (root, path): Promise<GitResult> => {
         const absolute = join(root, path)
         const removed = await git(root, "worktree", "remove", "--force", absolute)

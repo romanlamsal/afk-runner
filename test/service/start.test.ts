@@ -18,6 +18,12 @@ const MANIFEST: Manifest = {
     tickets: [{ number: 5, title: "Plan a spec", blockedBy: [] }],
 }
 
+/** A repository an earlier process left its gate worktree in, on the spec branch. */
+const GATE_ON_SPEC_BRANCH = {
+    branches: { main: ["trunk-tip"], "afk/4/spec": ["trunk-tip", "landed-5"] },
+    checkouts: { ".afk/4/gate": "afk/4/spec" },
+}
+
 type Setup = {
     mode?: StartMode
     consented?: boolean
@@ -266,6 +272,60 @@ describe("createStartService", () => {
     it("should cut the spec branch from the local base into the gate worktree", async () => {
         // given
         const { start, git } = harness()
+
+        // when
+        await start()
+
+        // then
+        expect(git.worktrees).toEqual([{ path: ".afk/4/gate", branch: "afk/4/spec", startPoint: "main" }])
+    })
+
+    it("should reuse a gate worktree that holds the spec branch rather than re-create it", async () => {
+        // given
+        const { start, git } = harness({ repository: GATE_ON_SPEC_BRANCH })
+
+        // when
+        await start()
+
+        // then
+        expect(git.worktrees).toEqual([])
+    })
+
+    it.each([["soil"], ["edit"]] as const)(
+        "should start a reused gate worktree clean of what %s left in it",
+        async leave => {
+            // given
+            const { start, git } = harness({ repository: GATE_ON_SPEC_BRANCH })
+            git[leave](".afk/4/gate")
+
+            // when
+            await start()
+
+            // then
+            expect(await git.git.isClean("/repo", ".afk/4/gate")).toBe(true)
+        },
+    )
+
+    it("should keep the ignored files in a reused gate worktree, which are the installed tree", async () => {
+        // given
+        const { start, git } = harness({ repository: GATE_ON_SPEC_BRANCH })
+        git.ignore(".afk/4/gate")
+
+        // when
+        await start()
+
+        // then
+        expect(git.ignores(".afk/4/gate")).toBe(true)
+    })
+
+    it.each([
+        ["missing", {}],
+        ["on another branch", { ".afk/4/gate": "afk/4/t5" }],
+    ] as const)("should re-create a gate worktree that is %s", async (_, checkouts) => {
+        // given
+        const { start, git } = harness({
+            repository: { branches: { main: ["trunk-tip"], "afk/4/spec": ["trunk-tip"] }, checkouts },
+        })
 
         // when
         await start()

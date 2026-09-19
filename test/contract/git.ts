@@ -25,8 +25,14 @@ export type GitWorld = {
     worktree: (branch: string) => Promise<string>
     /** Commit on `branch` and on `onto` in a way that the two cannot both apply. */
     collide: (branch: string, onto: string) => Promise<void>
-    /** Leave something uncommitted in the worktree at `path`. */
+    /** Leave something uncommitted in the worktree at `path`: a file git does not track. */
     soil: (path: string) => Promise<void>
+    /** Change a file git tracks in the worktree at `path`, without committing it. */
+    edit: (path: string) => Promise<void>
+    /** Leave a file the repository ignores in the worktree at `path`, as an install does. */
+    ignore: (path: string) => Promise<void>
+    /** Whether what `ignore` left in the worktree at `path` is still there. */
+    ignores: (path: string) => Promise<boolean>
 }
 
 export const describeGitContract = (name: string, create: () => Promise<GitWorld>): void => {
@@ -504,6 +510,108 @@ export const describeGitContract = (name: string, create: () => Promise<GitWorld
 
             // then
             expect(added.ok).toBe(false)
+        })
+    })
+
+    describe(`${name}: resetWorktree`, () => {
+        it("should put back a tracked file changed in the worktree", async () => {
+            // given
+            const world = await create()
+            await world.commit("afk/4/spec")
+            const path = await world.worktree("afk/4/spec")
+            await world.edit(path)
+
+            // when
+            await world.git.resetWorktree(world.root, { path, branch: "afk/4/spec" })
+
+            // then
+            expect(await world.git.isClean(world.root, path)).toBe(true)
+        })
+
+        it("should leave the branch on the tip it was at", async () => {
+            // given
+            const world = await create()
+            const tip = await world.commit("afk/4/spec")
+            const path = await world.worktree("afk/4/spec")
+            await world.edit(path)
+
+            // when
+            await world.git.resetWorktree(world.root, { path, branch: "afk/4/spec" })
+
+            // then
+            expect(await world.git.revision(world.root, "afk/4/spec")).toBe(tip)
+        })
+
+        it("should refuse a worktree that holds another branch, so that it is re-created instead", async () => {
+            // given
+            const world = await create()
+            await world.commit("afk/4/t7")
+
+            // when
+            const reset = await world.git.resetWorktree(world.root, {
+                path: await world.worktree("afk/4/t7"),
+                branch: "afk/4/spec",
+            })
+
+            // then
+            expect(reset.ok).toBe(false)
+        })
+
+        it("should refuse a path no worktree is registered at", async () => {
+            // given
+            const world = await create()
+
+            // when
+            const reset = await world.git.resetWorktree(world.root, { path: ".afk/4/gate", branch: "afk/4/spec" })
+
+            // then
+            expect(reset.ok).toBe(false)
+        })
+
+        it("should refuse a worktree stopped in a rebase, which holds no branch", async () => {
+            // given
+            const world = await create()
+            await world.commit("afk/4/spec")
+            await world.commit("afk/4/t7")
+            const path = await world.worktree("afk/4/t7")
+            await world.collide("afk/4/t7", "afk/4/spec")
+            await world.git.rebase(world.root, { path, onto: "afk/4/spec" })
+
+            // when
+            const reset = await world.git.resetWorktree(world.root, { path, branch: "afk/4/t7" })
+
+            // then
+            expect(reset.ok).toBe(false)
+        })
+    })
+
+    describe(`${name}: cleanWorktree`, () => {
+        it("should take away an untracked file", async () => {
+            // given
+            const world = await create()
+            await world.commit("afk/4/spec")
+            const path = await world.worktree("afk/4/spec")
+            await world.soil(path)
+
+            // when
+            await world.git.cleanWorktree(world.root, path)
+
+            // then
+            expect(await world.git.isClean(world.root, path)).toBe(true)
+        })
+
+        it("should leave an ignored file where it is, because that is the installed tree", async () => {
+            // given
+            const world = await create()
+            await world.commit("afk/4/spec")
+            const path = await world.worktree("afk/4/spec")
+            await world.ignore(path)
+
+            // when
+            await world.git.cleanWorktree(world.root, path)
+
+            // then
+            expect(await world.ignores(path)).toBe(true)
         })
     })
 
