@@ -2,6 +2,7 @@ import type { Clock } from "../domain/clock.ts"
 import { baseShaOf, type EventLog, type LifecycleEvent, reverted } from "../domain/events.ts"
 import type { Git } from "../domain/git.ts"
 import { ticketOf } from "../domain/manifest.ts"
+import { commandLogPath } from "../domain/paths.ts"
 import type { PreparedRun } from "../domain/run.ts"
 import { revertMessage } from "../domain/squash.ts"
 import type { StepResult } from "./attempt.ts"
@@ -41,7 +42,9 @@ export const createRevertService =
             return { outcome: "halted", reason: listed.reason }
         }
 
-        const record = (event: LifecycleEvent): Promise<void> => events.append(root, spec, event)
+        // The reverted tip's `setup` and `verify` write here, and every event of the attempt says so.
+        const logPath = commandLogPath(spec, `t${ticket}-revert`, now())
+        const record = (event: LifecycleEvent): Promise<void> => events.append(root, spec, { ...event, logPath })
 
         /**
          * The run cannot go on, and the ticket is settled on the way out: a drain that waits on a
@@ -73,7 +76,7 @@ export const createRevertService =
             return halt(`the merge of #${ticket} could not be reverted off ${run.branch}: ${undone.reason}`)
         }
 
-        const proved = await prove(run)
+        const proved = await prove(run, logPath)
         if (!proved.ok) {
             const reason = `${run.branch} is broken independently of any ticket: it is still red with #${ticket} reverted off it`
             return halt(reason, `${reason}: ${proved.detail}`)

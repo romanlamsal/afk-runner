@@ -117,6 +117,30 @@ describe("the setup service", () => {
         expect(commands.ran).toEqual([{ cwd: ".afk/4/t7", command: "npm ci" }])
     })
 
+    it("should have the setup command write its output into the run directory", async () => {
+        // given
+        const { setup, commands } = harness()
+
+        // when
+        await setup()
+
+        // then
+        expect(commands.logs).toEqual([".afk/4/commands/20260915T111838314Z-t7-setup.log"])
+    })
+
+    it.each(["running", "ok"] as const)("should name that log on its %s event", async outcome => {
+        // given
+        const { setup, written } = harness()
+
+        // when
+        await setup()
+
+        // then
+        expect(written().find(event => event.outcome === outcome)?.logPath).toBe(
+            ".afk/4/commands/20260915T111838314Z-t7-setup.log",
+        )
+    })
+
     it("should write one start event and one end event for the attempt", async () => {
         // given
         const { setup, written } = harness()

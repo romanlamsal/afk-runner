@@ -69,11 +69,11 @@ type Setup = {
 const harness = ({ broken = "by the ticket", log = SPENT, repository = REPOSITORY }: Setup = {}) => {
     const git = createFakeGit(repository)
     const events = createFakeEventLog(log)
-    const ran: { cwd: string; command: string }[] = []
+    const ran: { cwd: string; command: string; logPath: string }[] = []
 
     /** Setup prepares a checkout and says nothing about its integrity, so only verify goes red. */
-    const commands: CommandRunner = async ({ cwd, command }) => {
-        ran.push({ cwd, command })
+    const commands: CommandRunner = async ({ cwd, command, logPath }) => {
+        ran.push({ cwd, command, logPath })
         const mended =
             broken === "by the ticket" && git.commitsOn("afk/4/spec").some(commit => commit.startsWith("revert-"))
         return command === MANIFEST.verify && !mended
@@ -137,9 +137,37 @@ describe("the revert service: taking the merge back off the branch", () => {
         await revert()
 
         // then
-        expect(ran).toEqual([
+        expect(ran.map(({ cwd, command }) => ({ cwd, command }))).toEqual([
             { cwd: ".afk/4/gate", command: "npm ci" },
             { cwd: ".afk/4/gate", command: "npm run check" },
+        ])
+    })
+
+    it("should have the reverted tip's setup and verify write into one log in the run directory", async () => {
+        // given
+        const { revert, ran } = harness()
+
+        // when
+        await revert()
+
+        // then
+        expect(ran.map(({ logPath }) => logPath)).toEqual([
+            ".afk/4/commands/20260915T111838314Z-t7-revert.log",
+            ".afk/4/commands/20260915T111838314Z-t7-revert.log",
+        ])
+    })
+
+    it("should name that log on every event of the attempt", async () => {
+        // given
+        const { revert, events } = harness()
+
+        // when
+        await revert()
+
+        // then
+        expect(events.appended.slice(SPENT.length).map(event => event.logPath)).toEqual([
+            ".afk/4/commands/20260915T111838314Z-t7-revert.log",
+            ".afk/4/commands/20260915T111838314Z-t7-revert.log",
         ])
     })
 

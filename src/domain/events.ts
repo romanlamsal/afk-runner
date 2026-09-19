@@ -108,6 +108,8 @@ const eventSchema = z.object({
     baseSha: z.string().optional(),
     /** Where the attempt's transcript is, relative to the repository root. */
     transcriptPath: z.string().optional(),
+    /** Where a step running the operator's own commands writes their output, relative to the root. */
+    logPath: z.string().optional(),
     /**
      * Free text: why a step ended as it did, or what an agent wants the reader of a commit to know.
      * There is no closed enum of failure reasons. It is quoted — the conflict resolver's note
@@ -133,7 +135,10 @@ export type LifecycleEvent = z.infer<typeof eventSchema>
  * than a copy per service, because which fields may vary is a property of the event and the event
  * is defined here.
  */
-export type EventDetails = Pick<LifecycleEvent, "sessionId" | "baseSha" | "transcriptPath" | "detail" | "usage">
+export type EventDetails = Pick<
+    LifecycleEvent,
+    "sessionId" | "baseSha" | "transcriptPath" | "logPath" | "detail" | "usage"
+>
 
 /**
  * One line of the log, or nothing. The log is read defensively on purpose: the last line of one a

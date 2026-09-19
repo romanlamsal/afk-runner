@@ -5,7 +5,7 @@ import type { CopyEnvironmentFiles } from "../domain/environment.ts"
 import type { EventDetails, EventLog, Outcome } from "../domain/events.ts"
 import type { Git } from "../domain/git.ts"
 import { ticketOf } from "../domain/manifest.ts"
-import { ticketWorktree } from "../domain/paths.ts"
+import { commandLogPath, ticketWorktree } from "../domain/paths.ts"
 import type { PreparedRun } from "../domain/run.ts"
 import type { Tracker } from "../domain/tracker.ts"
 import type { StepResult } from "./attempt.ts"
@@ -47,9 +47,10 @@ export const createSetupService =
 
         const branch = ticketBranch(spec, ticket)
         const worktree = ticketWorktree(spec, ticket)
+        const logPath = commandLogPath(spec, `t${ticket}-setup`, now())
 
         const record = (outcome: Outcome, details: EventDetails = {}): Promise<void> =>
-            events.append(root, spec, { ...details, ticket, step: "setup", outcome, at: now().toISOString() })
+            events.append(root, spec, { ...details, ticket, step: "setup", outcome, at: now().toISOString(), logPath })
 
         /** A step that got somewhere and stopped: the attempt gets its end event beside its start. */
         const failed = async (detail: string, baseSha?: string): Promise<StepResult> => {
@@ -81,7 +82,7 @@ export const createSetupService =
         // Copied rather than symlinked, and before `setup`, which is the first thing that needs them.
         await environment(root, worktree)
 
-        const prepared = await commands({ root, cwd: worktree, command: manifest.setup })
+        const prepared = await commands({ root, cwd: worktree, command: manifest.setup, logPath })
         if (!prepared.ok) {
             return failed(prepared.detail, baseSha)
         }
