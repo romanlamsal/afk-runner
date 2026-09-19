@@ -167,10 +167,13 @@ rewritten.
 _Avoid_: log line, transition, history entry
 
 **Budget**:
-How many attempts a step gets, counted off its start events in the log. Nothing stores a counter, so
-nothing can hold one that disagrees; a budget no step can be counted for is asserted rather than
-derivable, which is what made `fix` a step (ADR-0022). Each step counts its own, except a resolve,
-which spends its rebase's.
+How many attempts a step gets, counted off the log. A budget exists to stop a *failure* repeating,
+and an attempt a kill left `running` never reported back, so it is not one: the fix budget counts
+**answered** attempts, its terminal events (ADR-0009). The others count start events, and
+`repairFor` passes a step nothing ended without asking its budget; only a setup's recut spends one
+on a kill (ADR-0024). Nothing stores a counter, so nothing can hold one
+that disagrees; a budget no step can be counted for is asserted rather than derivable, which is what
+made `fix` a step (ADR-0022). Each step counts its own, except a resolve, which spends its rebase's.
 _Avoid_: retry limit, attempt counter, quota
 
 **Status**:

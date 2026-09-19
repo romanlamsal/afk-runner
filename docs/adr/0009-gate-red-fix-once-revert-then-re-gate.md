@@ -12,6 +12,36 @@ status: accepted
 3. **Re-run the gate on the reverted tip.** Green confirms the ticket was the cause. **Red halts the
    run**: the branch is broken independently of any ticket and nothing above it is trustworthy.
 
+## Amendment: a kill is not an answer
+
+An operator interrupted a run whose fix agent had made the right repair and not yet reported back.
+The budget was counted off `fix` **start** events, so the attempt nobody answered had spent it; the
+gate went red again, the merge was reverted, the revert was killed too, and the next resume opened
+the spec PR on a tip nothing had proven. Step 3 was skipped without anything saying so.
+
+**A budget is spent by an answered attempt, not by a started one.** A budget exists to stop a
+*failure* repeating, and an attempt that never reported back is not a failure — `repairFor` already
+reasons this way for every other step. The fix budget is the log's terminal `fix` events: a `fix`
+the log left `running`, with nothing live behind it, is dispatched again however many times it is
+killed. A `fix` that reported back — `ok` or `failed` — spends the one attempt, so "exactly one"
+holds for the case it was written for. A fix picked back up after a kill reads the merge off the
+killed attempt's start event, because that agent may have committed before it died and the merge is
+still what the revert takes off.
+
+**A revert the log left `running` is dispatched again.** It is made safe to repeat the way the merge
+is: the `afk-reverted` trailer answers whether the revert commit already landed, and a repeat that
+finds it goes straight on to proving the tip rather than reverting twice. Step 3 is therefore never
+skipped by a kill: the reverted tip is proven, and red still halts the run.
+
+**A ticket the sequence still has a move for has come to nothing.** Only the revert's own record
+makes a ticket read as failed. What the sequence still owes a ticket is one function, asked by both
+the schedule and the conclusion, so that the board, the run's exit code and the spec PR's draft flag
+cannot disagree about it.
+
+This supersedes the first consequence below where it says the budget is counted off start events,
+and that a killed run cannot buy a second attempt: it can, and should, because it never had the
+first answered.
+
 ## Considered options
 
 - **Skip step 3.** Rejected. Without it the runner reverts every ticket in turn against a branch

@@ -58,12 +58,28 @@ type Setup = {
     /** What the fix agent reported. */
     reply?: Partial<AgentResult>
     repository?: FakeRepository
+    /** The log the fix is handed out against. */
+    log?: readonly LifecycleEvent[]
 }
 
-const harness = ({ fixer = "commits", reply, repository = REPOSITORY }: Setup = {}) => {
+/**
+ * A fix a killed run left `running`: it committed on the spec branch before it died, and nothing
+ * answered it.
+ */
+const KILLED_FIX: readonly LifecycleEvent[] = [
+    ...RED_GATE,
+    { ticket: 7, step: "fix", outcome: "running", at: "2026-09-15T11:18:35.000Z", baseSha: "squash-afk/4/t7" },
+]
+
+const KILLED_REPOSITORY: FakeRepository = {
+    branches: { main: ["cut"], "afk/4/spec": ["cut", "squash-afk/4/t7", "the-killed-fix"] },
+    checkouts: { ".afk/4/gate": "afk/4/spec" },
+}
+
+const harness = ({ fixer = "commits", reply, repository = REPOSITORY, log = RED_GATE }: Setup = {}) => {
     const git = createFakeGit(repository)
     const agent = createFakeAgent(reply)
-    const events = createFakeEventLog(RED_GATE)
+    const events = createFakeEventLog(log)
 
     const fix = createFixService({
         agent: async invocation => {
@@ -265,5 +281,42 @@ describe("the fix service: an attempt that came to nothing", () => {
 
         // then
         expect(git.commitsOn("afk/4/spec")).toEqual(["cut", "squash-afk/4/t7"])
+    })
+})
+
+describe("the fix service: a fix picked back up after a kill", () => {
+    const killed = { log: KILLED_FIX, repository: KILLED_REPOSITORY }
+
+    it("should carry the merge the killed fix was let loose on, so that the revert still takes it off", async () => {
+        // given
+        const { fix, events } = harness(killed)
+
+        // when
+        await fix()
+
+        // then
+        expect(events.appended.at(KILLED_FIX.length)?.baseSha).toBe("squash-afk/4/t7")
+    })
+
+    it("should hand the fix agent what the gate said, rather than the killed fix's silence", async () => {
+        // given
+        const { fix, agent } = harness(killed)
+
+        // when
+        await fix()
+
+        // then
+        expect(agent.invocations[0]?.prompt).toContain("a type error in src/domain/decide.ts")
+    })
+
+    it("should write a transcript of its own, rather than over the killed fix's", async () => {
+        // given
+        const { fix, agent } = harness(killed)
+
+        // when
+        await fix()
+
+        // then
+        expect(agent.invocations[0]?.transcriptPath).toBe(".afk/4/transcripts/20260915T111838314Z-t7-fix-2.jsonl")
     })
 })

@@ -1,6 +1,6 @@
 import type { AgentRunner } from "../domain/agent.ts"
 import type { Clock } from "../domain/clock.ts"
-import { type EventDetails, type EventLog, type Outcome, statusOf } from "../domain/events.ts"
+import { attempts, baseShaOf, type EventDetails, type EventLog, type Outcome } from "../domain/events.ts"
 import { fixerFault } from "../domain/fix.ts"
 import type { Git } from "../domain/git.ts"
 import { ticketOf } from "../domain/manifest.ts"
@@ -30,8 +30,9 @@ export type FixDeps = {
  * committing a fix that works leaves a green branch, and the branch is what afk proves. That is why
  * this ends at `fix: ok` or `fix: failed` and the gate is what asks the question (ADR-0009).
  *
- * The attempt is one because the budget is one, counted off the `fix` start events this writes
- * (ADR-0022). There is no loop here to bound.
+ * The attempt is one because the budget is one, counted off the `fix` events that answer it
+ * (ADR-0022). A fix a killed run left `running` is dispatched here again, and that is the same
+ * attempt picked back up rather than a second one. There is no loop here to bound.
  */
 export const createFixService =
     ({ agent, events, git, now }: FixDeps): FixTicket =>
@@ -49,11 +50,15 @@ export const createFixService =
         // serial and the gate worktree is the branch's sole writer: nothing can have landed after
         // it (ADR-0006). It is read *now*, before the fix agent commits on top of it, and carried
         // by the start event so that the revert undoes the squash and the fix together even when a
-        // different process is the one that performs it (ADR-0009).
-        const landed = await git.revision(root, run.branch)
+        // different process is the one that performs it (ADR-0009). A fix picked back up after a
+        // kill reads it off the start event of the one that was killed instead: that agent may have
+        // committed before it died, and the merge is still what has to come off.
+        const log = await events.read(root, spec)
+        const landed = baseShaOf(log, ticket, "fix") ?? (await git.revision(root, run.branch))
 
-        // One attempt, and never a second, so the transcript is named for the only one there is.
-        const transcript = transcriptPath(spec, `t${ticket}-fix-1`, now())
+        // Named for how many times it was started, so a fix picked back up after a kill does not
+        // write over the transcript of the one that was killed.
+        const transcript = transcriptPath(spec, `t${ticket}-fix-${attempts(log, ticket, "fix") + 1}`, now())
         const attempted = await attemptWithAgent(
             agent,
             {
@@ -64,9 +69,10 @@ export const createFixService =
                     branch: run.branch,
                     verify: manifest.verify,
                     // What the gate said when it went red, quoted for the agent that has to
-                    // reproduce it. It is read back off the log rather than carried along, and like
-                    // every detail nothing branches on it.
-                    detail: statusOf(await events.read(root, spec), ticket)?.detail,
+                    // reproduce it. It is read back off the log rather than carried along — off the
+                    // gate's own event, which a killed fix's start event may since have followed —
+                    // and like every detail nothing branches on it.
+                    detail: log.findLast(event => event.ticket === ticket && event.step === "gate")?.detail,
                 }),
                 root,
                 cwd: run.gate,

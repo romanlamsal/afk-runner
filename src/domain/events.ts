@@ -191,6 +191,14 @@ export const statusOf = (events: readonly LifecycleEvent[], ticket: number): Lif
 export const attempts = (events: readonly LifecycleEvent[], ticket: number, step: Step): number =>
     events.filter(event => event.ticket === ticket && event.step === step && event.outcome === "running").length
 
+/**
+ * How many times a step has been answered, counted from its terminal events. An attempt a killed run
+ * left `running` was never answered, so it is not a failure — and a budget, which exists to stop a
+ * failure repeating, is not spent by it.
+ */
+export const answered = (events: readonly LifecycleEvent[], ticket: number, step: Step): number =>
+    events.filter(event => event.ticket === ticket && event.step === step && event.outcome !== "running").length
+
 /** Only the gate produces verified, and a ticket reverted after one stops being verified (ADR-0015). */
 export const verified = (events: readonly LifecycleEvent[], ticket: number): boolean => {
     const last = statusOf(events, ticket)

@@ -1060,7 +1060,7 @@ describe("a run resumed over a fix a killed run left part-way", () => {
     /** A repository the ticket's merge broke, so that the reverted tip is what goes green again. */
     const blamed = { tickets: [ticket(10)], failing: "npm run check", red: "the merge", resume: true } as const
 
-    it("should gate what the killed fix left behind, and carry on to the revert", async () => {
+    it("should fix it again, gate what that left behind, and carry on to the revert", async () => {
         // given
         const harnessed = harness(blamed)
         killedMidFix(harnessed)
@@ -1072,12 +1072,13 @@ describe("a run resumed over a fix a killed run left part-way", () => {
         expect(settled(harnessed.events.appended)).toEqual([
             "#10 merge ok",
             "#10 gate failed",
+            "#10 fix failed",
             "#10 gate failed",
             "#10 revert failed",
         ])
     })
 
-    it("should never spend a second fix agent on it, because the killed one spent the budget", async () => {
+    it("should send the fix agent to it again, because the killed one was never answered", async () => {
         // given
         const harnessed = harness(blamed)
         killedMidFix(harnessed)
@@ -1086,7 +1087,7 @@ describe("a run resumed over a fix a killed run left part-way", () => {
         await harnessed.run()
 
         // then
-        expect(harnessed.fixer.invocations).toEqual([])
+        expect(harnessed.fixer.invocations).toHaveLength(1)
     })
 
     it("should take the killed fix's merge back off the spec branch rather than leave it red underneath", async () => {

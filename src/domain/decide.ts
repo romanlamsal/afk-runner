@@ -1,4 +1,5 @@
 import {
+    answered,
     attempts,
     type BrokenStep,
     brokenStep,
@@ -75,7 +76,7 @@ export type Action =
     | { kind: "gate"; ticket: number }
     /**
      * The one attempt a red gate is worth: an agent let loose on the spec branch to mend what the
-     * ticket's merge broke. The budget is one, counted off the log's `fix` start events, and what
+     * ticket's merge broke. The budget is one, counted off the log's answered `fix` events, and what
      * the attempt came to is never taken as the answer — the gate runs again afterwards, because
      * the branch is what afk proves (ADR-0009, ADR-0022).
      */
@@ -113,8 +114,9 @@ const ATTEMPT_BUDGET = 2
 
 /**
  * What a red gate is worth: one fix attempt, and failing that the merge comes back off the branch.
- * A budget rather than a retry policy, and counted off the log's `fix` start events like every
- * other, so that a run killed mid-fix cannot buy a second one (ADR-0009, ADR-0022).
+ * A budget rather than a retry policy, and counted off the log's **answered** `fix` events: a fix a
+ * killed run left `running` never reported back, so it is not the failure the budget exists to stop
+ * repeating, and an operator's interrupt does not cost the ticket its one repair (ADR-0009, ADR-0022).
  */
 const FIX_BUDGET = 1
 
@@ -215,18 +217,18 @@ export const nextActions = (
      * attempt, the gate again on what it left behind, and the revert once the budget is spent
      * (ADR-0023).
      *
-     * A fix is never judged by what the fix agent said, and a `fix: running` a killed run left
-     * behind is no different: the gate follows all three alike, because the branch is what afk
-     * proves. Its start event has already spent the budget, so the sequence carries on to the
-     * revert rather than round again — which is why a killed fix cannot buy a second one.
+     * A fix is never judged by what the fix agent said: the gate follows `ok` and `failed` alike,
+     * because the branch is what afk proves. A `fix: running` a killed run left behind is a fix
+     * nobody answered, which is not an attempt that failed — it is dispatched again, however many
+     * times it is killed, exactly as `repairFor` treats every other step nothing ended.
      */
     const afterRedGate = (ticket: number): Action | undefined => {
         const last = statusOf(events, ticket)
         if (last?.step === "fix") {
-            return { kind: "gate", ticket }
+            return last.outcome === "running" ? { kind: "fix", ticket } : { kind: "gate", ticket }
         }
         if (last?.step === "gate" && last.outcome === "failed") {
-            return attempts(events, ticket, "fix") < FIX_BUDGET ? { kind: "fix", ticket } : { kind: "revert", ticket }
+            return answered(events, ticket, "fix") < FIX_BUDGET ? { kind: "fix", ticket } : { kind: "revert", ticket }
         }
         return undefined
     }

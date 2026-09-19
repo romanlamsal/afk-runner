@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+    answered,
     attempts,
     brokenStep,
     cameTo,
@@ -66,6 +67,24 @@ describe("statusOf", () => {
 
         // then
         expect(status).toBeUndefined()
+    })
+})
+
+describe("answered", () => {
+    it("should count a step's terminal events, and not an attempt nothing ended", () => {
+        // given
+        const events = [
+            event(10, "fix", "running"),
+            event(10, "fix", "running"),
+            event(10, "fix", "failed"),
+            event(10, "gate", "failed"),
+        ]
+
+        // when
+        const counted = answered(events, 10, "fix")
+
+        // then
+        expect(counted).toBe(1)
     })
 })
 

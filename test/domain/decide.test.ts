@@ -471,7 +471,6 @@ describe("nextActions: the gate-red sequence", () => {
     it.each([
         ["reported success", "ok"],
         ["reported failure", "failed"],
-        ["was killed part-way", "running"],
     ] as const)("should gate a ticket again whose fix %s, because the branch is what afk proves", (_name, outcome) => {
         // given
         const tickets = [ticket(10)]
@@ -494,12 +493,12 @@ describe("nextActions: the gate-red sequence", () => {
         expect(actions).toEqual([reverting(10)])
     })
 
-    it("should never spend a second fix on a log that carries one already, however that one ended", () => {
-        // given — ADR-0022: the budget is the log's `fix` start events and nothing else
+    it("should revert rather than fix again when the one fix reported failure, because it was answered", () => {
+        // given — ADR-0022: the budget is the log's answered `fix` events, and a failure is an answer
         const tickets = [ticket(10)]
 
         // when
-        const actions = decide(tickets, [...fixed(10, "running"), ...red(10)])
+        const actions = decide(tickets, [...fixed(10, "failed"), ...red(10)])
 
         // then
         expect(actions).toEqual([reverting(10)])
@@ -556,23 +555,38 @@ describe("nextActions: the gate-red sequence", () => {
 })
 
 describe("nextActions: a gate-red sequence a killed run left part-way", () => {
-    it("should gate a ticket whose fix was killed, and never buy it a second fix", () => {
-        // given — the finding: a killed fix agent could buy a second fix attempt
+    it.each([
+        ["once", fixed(10, "running")],
+        ["twice", [...fixed(10, "running"), event(10, "fix", "running")]],
+    ] as const)("should fix a ticket again whose fix was killed %s, because nobody answered it", (_name, events) => {
+        // given — the finding: an operator's interrupt spent the ticket's one repair
         const tickets = [ticket(10)]
 
         // when
-        const actions = decide(tickets, fixed(10, "running"))
+        const actions = decide(tickets, events)
+
+        // then
+        expect(actions).toEqual([fixing(10)])
+    })
+
+    it("should gate a ticket whose fix answered after one was killed", () => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, [...fixed(10, "running"), event(10, "fix", "running"), event(10, "fix", "ok")])
 
         // then
         expect(actions).toEqual([gating(10)])
     })
 
-    it("should carry a killed fix on to the revert once that gate is red, rather than fix it again", () => {
-        // given — the same log, one gate further on: the budget was spent by the start event
+    it("should revert once the gate after a fix answered past a killed one is red, because the budget is spent", () => {
+        // given
         const tickets = [ticket(10)]
+        const events = [...fixed(10, "running"), event(10, "fix", "running"), event(10, "fix", "ok"), ...red(10)]
 
         // when
-        const actions = decide(tickets, [...fixed(10, "running"), ...red(10)])
+        const actions = decide(tickets, events)
 
         // then
         expect(actions).toEqual([reverting(10)])
