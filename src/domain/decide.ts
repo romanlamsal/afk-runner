@@ -1,5 +1,4 @@
 import {
-    answered,
     attempts,
     type BrokenStep,
     brokenStep,
@@ -8,6 +7,7 @@ import {
     type LifecycleEvent,
     merged,
     mergeSideStep,
+    owedAfterRedGate,
     prepared,
     rebased,
     repairableStep,
@@ -112,14 +112,6 @@ export type RunParameters = {
  */
 const ATTEMPT_BUDGET = 2
 
-/**
- * What a red gate is worth: one fix attempt, and failing that the merge comes back off the branch.
- * A budget rather than a retry policy, and counted off the log's **answered** `fix` events: a fix a
- * killed run left `running` never reported back, so it is not the failure the budget exists to stop
- * repeating, and an operator's interrupt does not cost the ticket its one repair (ADR-0009, ADR-0022).
- */
-const FIX_BUDGET = 1
-
 const ticketsOf = (actions: readonly Action[]): ReadonlySet<number> =>
     new Set(actions.flatMap(action => ("ticket" in action ? [action.ticket] : [])))
 
@@ -211,34 +203,10 @@ export const nextActions = (
         return last?.step === "setup" && last.outcome !== "ok" && attempts(events, ticket, "setup") < ATTEMPT_BUDGET
     }
 
-    /**
-     * Where a ticket stands in the gate-red sequence, or nothing where it is not in one. The whole
-     * of ADR-0009, read off the log rather than held as control flow inside a service: one fix
-     * attempt, the gate again on what it left behind, and the revert once the budget is spent
-     * (ADR-0023).
-     *
-     * A fix is never judged by what the fix agent said: the gate follows `ok` and `failed` alike,
-     * because the branch is what afk proves. A `fix: running` a killed run left behind is a fix
-     * nobody answered, which is not an attempt that failed — it is dispatched again, however many
-     * times it is killed, exactly as `repairFor` treats every other step nothing ended.
-     *
-     * A `revert: running` is the same: nobody answered it, so the sequence still has a move for the
-     * ticket, and it is the revert again. Its trailer cross-check makes the repeat harmless, and the
-     * repeat is what still proves the reverted tip. A ticket is beyond repair only once the revert's
-     * own record says so (ADR-0009).
-     */
+    /** The move the gate-red sequence still owes a ticket, as an action (ADR-0009). */
     const afterRedGate = (ticket: number): Action | undefined => {
-        const last = statusOf(events, ticket)
-        if (last?.step === "fix") {
-            return last.outcome === "running" ? { kind: "fix", ticket } : { kind: "gate", ticket }
-        }
-        if (last?.step === "gate" && last.outcome === "failed") {
-            return answered(events, ticket, "fix") < FIX_BUDGET ? { kind: "fix", ticket } : { kind: "revert", ticket }
-        }
-        if (last?.step === "revert" && last.outcome === "running") {
-            return { kind: "revert", ticket }
-        }
-        return undefined
+        const move = owedAfterRedGate(events, ticket)
+        return move === undefined ? undefined : { kind: move, ticket }
     }
 
     /**

@@ -389,6 +389,25 @@ describe("boardOf: a ticket nothing more will happen to", () => {
         expect(row && dead(row)).toBe(false)
     })
 
+    it.each([
+        ["a red gate a fix is still owed to", [event(7, "gate", "failed")]],
+        ["a fix at work on a red gate", [event(7, "gate", "failed"), event(7, "fix", "running")]],
+        [
+            "a red gate a revert is still owed to",
+            [event(7, "gate", "failed"), event(7, "fix", "ok"), event(7, "gate", "failed")],
+        ],
+        ["a revert a killed run left running", [event(7, "gate", "failed"), event(7, "revert", "running")]],
+    ] as const)("should not read %s as dead", (_case, events) => {
+        // given
+        const log = [...implemented(7), event(7, "merge", "ok"), ...events]
+
+        // when
+        const row = rowOf(log, 7)
+
+        // then
+        expect(row && dead(row)).toBe(false)
+    })
+
     it("should keep a verified ticket listed", () => {
         // given: the whole spec worked through, which is the frame the run is left looking at
         const events = [7, 8, 9].flatMap(number => [...implemented(number), event(number, "gate", "ok")])

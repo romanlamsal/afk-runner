@@ -360,6 +360,48 @@ export const reverted = (ticket: number, at: Date, detail: string): LifecycleEve
     detail,
 })
 
+/** The moves the gate-red sequence is made of (ADR-0009). */
+export type RedGateMove = "fix" | "gate" | "revert"
+
+/**
+ * What a red gate is worth: one fix attempt, and failing that the merge comes back off the branch.
+ * A budget rather than a retry policy, and counted off the log's **answered** `fix` events: a fix a
+ * killed run left `running` never reported back, so it is not the failure the budget exists to stop
+ * repeating, and an operator's interrupt does not cost the ticket its one repair (ADR-0009, ADR-0022).
+ */
+const FIX_BUDGET = 1
+
+/**
+ * What the gate-red sequence still owes a ticket, or nothing where it is not in one. The whole of
+ * ADR-0009, read off the log rather than held as control flow inside a service: one fix attempt,
+ * the gate again on what it left behind, and the revert once the budget is spent (ADR-0023).
+ *
+ * One rule with two readers — the schedule, which dispatches the move, and the conclusion, which
+ * answers nothing while a move is owed — so that the two cannot disagree about it.
+ *
+ * A fix is never judged by what the fix agent said: the gate follows `ok` and `failed` alike,
+ * because the branch is what afk proves. A `fix: running` a killed run left behind is a fix nobody
+ * answered, which is not an attempt that failed — it is owed again, however many times it is
+ * killed, exactly as `repairFor` treats every other step nothing ended.
+ *
+ * A `revert: running` is the same: nobody answered it, so the sequence still owes the ticket the
+ * revert. Its trailer cross-check makes the repeat harmless, and the repeat is what still proves the
+ * reverted tip. A ticket is beyond repair only once the revert's own record says so (ADR-0009).
+ */
+export const owedAfterRedGate = (events: readonly LifecycleEvent[], ticket: number): RedGateMove | undefined => {
+    const last = statusOf(events, ticket)
+    if (last?.step === "fix") {
+        return last.outcome === "running" ? "fix" : "gate"
+    }
+    if (last?.step === "gate" && last.outcome === "failed") {
+        return answered(events, ticket, "fix") < FIX_BUDGET ? "fix" : "revert"
+    }
+    if (last?.step === "revert" && last.outcome === "running") {
+        return "revert"
+    }
+    return undefined
+}
+
 /**
  * The four things a ticket can come to, and the whole of what a run says about one. A ticket the log
  * has not brought to any of them — never attempted, or mid-step — has come to none, which is why
@@ -373,8 +415,14 @@ export type Conclusion = (typeof CONCLUSIONS)[number]
  * What a ticket came to, decided here and nowhere else. It is not display-only: the exit code and
  * the pull request's draft flag are read from it, so a second route to the same judgement would let
  * what the operator is shown disagree with what the process returns (`layers.md`, question 3).
+ *
+ * A ticket the gate-red sequence still owes a move has come to nothing: a red gate is not a failed
+ * ticket while a fix or a revert is still to come, and only the revert's own record says it failed.
  */
 export const cameTo = (events: readonly LifecycleEvent[], ticket: number): Conclusion | undefined => {
+    if (owedAfterRedGate(events, ticket) !== undefined) {
+        return undefined
+    }
     switch (statusOf(events, ticket)?.outcome) {
         case "ok":
             return verified(events, ticket) ? "verified" : "unverified"
