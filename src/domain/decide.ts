@@ -221,6 +221,11 @@ export const nextActions = (
      * because the branch is what afk proves. A `fix: running` a killed run left behind is a fix
      * nobody answered, which is not an attempt that failed — it is dispatched again, however many
      * times it is killed, exactly as `repairFor` treats every other step nothing ended.
+     *
+     * A `revert: running` is the same: nobody answered it, so the sequence still has a move for the
+     * ticket, and it is the revert again. Its trailer cross-check makes the repeat harmless, and the
+     * repeat is what still proves the reverted tip. A ticket is beyond repair only once the revert's
+     * own record says so (ADR-0009).
      */
     const afterRedGate = (ticket: number): Action | undefined => {
         const last = statusOf(events, ticket)
@@ -229,6 +234,9 @@ export const nextActions = (
         }
         if (last?.step === "gate" && last.outcome === "failed") {
             return answered(events, ticket, "fix") < FIX_BUDGET ? { kind: "fix", ticket } : { kind: "revert", ticket }
+        }
+        if (last?.step === "revert" && last.outcome === "running") {
+            return { kind: "revert", ticket }
         }
         return undefined
     }

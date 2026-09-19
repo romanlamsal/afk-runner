@@ -69,28 +69,46 @@ const trailed = (name: string, spec: number, message: string): number | undefine
 }
 
 /**
- * Which of this spec's tickets these commit messages say are on the branch. It is read as a
- * **cross-check** and never as the dispatcher: which ticket is taken through the merge track is the
- * event log's to say, and a commit can only answer whether that ticket's work is already there —
- * never which step failed, or why (ADR-0011).
- *
- * History is append-only, so a reverted ticket's squash is still on the branch and its revert is
- * too. The last trailer naming a ticket is the one that says where it stands, which is what keeps
- * "ask git which tickets landed" answerable from a fresh clone after a revert (ADR-0009).
+ * Where each of this spec's tickets stands by these commit messages: landed or reverted, by the last
+ * trailer naming it. History is append-only, so a reverted ticket's squash is still on the branch
+ * and its revert is too, and only the later of the two says where the ticket is (ADR-0009).
  */
-export const mergedTickets = (spec: number, messages: readonly string[]): readonly number[] => {
-    const landed = new Set<number>()
+const trailedTickets = (spec: number, messages: readonly string[]): ReadonlyMap<number, "merged" | "reverted"> => {
+    const standing = new Map<number, "merged" | "reverted">()
 
     for (const message of messages) {
         const merged = trailed(TRAILER, spec, message)
         const reverted = trailed(REVERT_TRAILER, spec, message)
         if (merged !== undefined) {
-            landed.add(merged)
+            standing.set(merged, "merged")
         }
         if (reverted !== undefined) {
-            landed.delete(reverted)
+            standing.set(reverted, "reverted")
         }
     }
 
-    return [...landed]
+    return standing
 }
+
+const standingAs = (standing: "merged" | "reverted", spec: number, messages: readonly string[]): readonly number[] =>
+    [...trailedTickets(spec, messages)].flatMap(([ticket, where]) => (where === standing ? [ticket] : []))
+
+/**
+ * Which of this spec's tickets these commit messages say are on the branch. It is read as a
+ * **cross-check** and never as the dispatcher: which ticket is taken through the merge track is the
+ * event log's to say, and a commit can only answer whether that ticket's work is already there —
+ * never which step failed, or why (ADR-0011).
+ *
+ * A reverted ticket is not on it, which is what keeps "ask git which tickets landed" answerable from
+ * a fresh clone after a revert (ADR-0009).
+ */
+export const mergedTickets = (spec: number, messages: readonly string[]): readonly number[] =>
+    standingAs("merged", spec, messages)
+
+/**
+ * Which of this spec's tickets these commit messages say were taken back off the branch — the same
+ * cross-check, asked by a revert: a revert a killed run left `running` may already have landed its
+ * commit, and reverting a second time would undo whatever came after it (ADR-0009).
+ */
+export const revertedTickets = (spec: number, messages: readonly string[]): readonly number[] =>
+    standingAs("reverted", spec, messages)

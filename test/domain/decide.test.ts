@@ -614,15 +614,51 @@ describe("nextActions: a gate-red sequence a killed run left part-way", () => {
         expect(actions).not.toContainEqual({ kind: "skip", ticket: 12 })
     })
 
-    it("should leave the ticket doomed when the run was killed mid-revert, with no pass over it", () => {
-        // given — ADR-0009: putting back a merge that was on its way off is what recovery must not do
+    it("should revert again when the run was killed mid-revert, because nobody answered it", () => {
+        // given — the finding: a killed revert had no move out of it, and the reverted tip was never proven
         const tickets = [ticket(10)]
 
         // when
         const actions = decide(tickets, [...fixed(10), ...red(10), event(10, "revert", "running")])
 
         // then
-        expect(actions).toEqual([{ kind: "finish" }])
+        expect(actions).toEqual([reverting(10)])
+    })
+
+    it("should revert again however many times the revert is killed", () => {
+        // given
+        const tickets = [ticket(10)]
+        const killed = [event(10, "revert", "running"), event(10, "revert", "running")]
+
+        // when
+        const actions = decide(tickets, [...fixed(10), ...red(10), ...killed])
+
+        // then
+        expect(actions).toEqual([reverting(10)])
+    })
+
+    it("should leave a revert alone while the driver says it is running", () => {
+        // given
+        const tickets = [ticket(10)]
+
+        // when
+        const actions = decide(tickets, [...fixed(10), ...red(10), event(10, "revert", "running")], {
+            inFlight: [reverting(10)],
+        })
+
+        // then
+        expect(actions).toEqual([])
+    })
+
+    it("should not skip the dependents of a ticket whose revert was killed, because it is not yet failed", () => {
+        // given
+        const tickets = [ticket(11), ticket(12, [11])]
+
+        // when
+        const actions = decide(tickets, [...fixed(11), ...red(11), event(11, "revert", "running")])
+
+        // then
+        expect(actions).not.toContainEqual({ kind: "skip", ticket: 12 })
     })
 
     it("should leave a fix alone while the driver says it is running", () => {
@@ -883,13 +919,13 @@ describe("nextActions: a step whose process is gone", () => {
         const actions = decide(tickets, events)
 
         // then
-        expect(actions).toEqual([{ kind: "finish" }])
+        expect(actions).toEqual([reverting(10)])
     })
 
-    it("should skip the dependents of a ticket a killed run left mid-revert", () => {
+    it("should skip the dependents of a ticket only once its revert is recorded", () => {
         // given
         const tickets = [ticket(11), ticket(12, [11])]
-        const events = [event(11, "merge", "ok"), event(11, "gate", "failed"), event(11, "revert", "running")]
+        const events = [event(11, "merge", "ok"), event(11, "gate", "failed"), event(11, "revert", "failed")]
 
         // when
         const actions = decide(tickets, events)
@@ -1421,6 +1457,8 @@ describe("concluded", () => {
         ["a ticket implemented and not yet on the branch", [...cut(10), event(10, "implement", "ok")], false],
         ["a ticket the gate proved", verified(10), true],
         ["a ticket that spent everything it gets", failed(10), true],
+        ["a ticket a killed run left mid-revert", [...fixed(10), ...red(10), event(10, "revert", "running")], false],
+        ["a ticket whose revert is recorded", [...fixed(10), ...red(10), event(10, "revert", "failed")], true],
         ["a run still writing its pull request", [...verified(10), runStep("running")], false],
         ["a run whose pull request was written", [...verified(10), runStep("running"), runStep("ok")], true],
     ] as const satisfies readonly (readonly [string, readonly LifecycleEvent[], boolean])[])(

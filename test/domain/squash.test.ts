@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { mergedTickets, revertMessage, squashMessage, ticketTrailer } from "../../src/domain/squash.ts"
+import { mergedTickets, revertedTickets, revertMessage, squashMessage, ticketTrailer } from "../../src/domain/squash.ts"
 
 /**
  * The squash body is what a reviewer of the spec PR reads, so everything here is a question about
@@ -193,5 +193,26 @@ describe("mergedTickets", () => {
 
         // then
         expect(merged).toEqual([])
+    })
+})
+
+describe("revertedTickets", () => {
+    it.each([
+        ["a ticket that only landed", () => [message()], []],
+        [
+            "a ticket whose merge was reverted",
+            () => [message(), revertMessage({ spec: 4, ticket: 9, title: "t" })],
+            [9],
+        ],
+        ["a revert for another spec", () => [message(), revertMessage({ spec: 5, ticket: 9, title: "t" })], []],
+    ] as const)("should read %s", (_name, messages, expected) => {
+        // given
+        const log = messages()
+
+        // when
+        const reverted = revertedTickets(4, log)
+
+        // then
+        expect(reverted).toEqual(expected)
     })
 })

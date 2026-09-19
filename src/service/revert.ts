@@ -4,7 +4,7 @@ import type { Git } from "../domain/git.ts"
 import { ticketOf } from "../domain/manifest.ts"
 import { commandLogPath } from "../domain/paths.ts"
 import type { PreparedRun } from "../domain/run.ts"
-import { revertMessage } from "../domain/squash.ts"
+import { revertedTickets, revertMessage } from "../domain/squash.ts"
 import type { StepResult } from "./attempt.ts"
 import type { ProveBranch } from "./gate.ts"
 
@@ -32,6 +32,10 @@ export type RevertDeps = {
  * is red without the ticket halt the run as well, and the detail is what tells the three apart —
  * which is the only place they ever need telling apart: to the schedule they are one thing, a ticket
  * nothing more will happen to.
+ *
+ * It is safe to ask for twice. A revert a killed run left `running` is dispatched again, and one
+ * whose commit already landed is not reverted a second time: the tip is proven all the same, so a
+ * kill never skips the proof (ADR-0009).
  */
 export const createRevertService =
     ({ events, git, now, prove }: RevertDeps): RevertTicket =>
@@ -61,19 +65,32 @@ export const createRevertService =
         // behind is the tree that was green before the ticket merged (ADR-0009).
         const landed = baseShaOf(await events.read(root, spec), ticket, "fix")
 
+        // The spec branch's own log, queried by the revert trailer, is the cross-check for whether
+        // the revert commit already landed. It guards the window a run killed between the revert
+        // and its event leaves behind, exactly as the merge's own cross-check guards its squash: a
+        // repeat that finds the commit there goes straight on to proving the tip, because reverting
+        // a second time would undo more than the ticket (ADR-0009).
+        const onSpecBranch = await git.log(root, { rev: run.branch, notIn: run.base })
+
         await record({ ticket, step: "revert", outcome: "running", at: now().toISOString() })
 
-        if (landed === undefined) {
-            return halt(`the merge of #${ticket} could not be found on ${run.branch} to revert`)
+        if (onSpecBranch === undefined) {
+            return halt(`what has landed on ${run.branch} could not be read, so #${ticket} was not reverted`)
         }
 
-        const undone = await git.revert(root, {
-            path: run.gate,
-            from: landed,
-            message: revertMessage({ spec, ticket, title: listed.ticket.title }),
-        })
-        if (!undone.ok) {
-            return halt(`the merge of #${ticket} could not be reverted off ${run.branch}: ${undone.reason}`)
+        if (!revertedTickets(spec, onSpecBranch).includes(ticket)) {
+            if (landed === undefined) {
+                return halt(`the merge of #${ticket} could not be found on ${run.branch} to revert`)
+            }
+
+            const undone = await git.revert(root, {
+                path: run.gate,
+                from: landed,
+                message: revertMessage({ spec, ticket, title: listed.ticket.title }),
+            })
+            if (!undone.ok) {
+                return halt(`the merge of #${ticket} could not be reverted off ${run.branch}: ${undone.reason}`)
+            }
         }
 
         const proved = await prove(run, logPath)
