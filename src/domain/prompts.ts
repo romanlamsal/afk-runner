@@ -59,14 +59,18 @@ export const implementerPrompt = ({
     verify: string
 }): string =>
     [
-        `Implement ticket #${ticket} of spec #${spec}: ${title}.`,
+        `/mattpocock-skills:implement ticket #${ticket} of spec #${spec}: ${title}.`,
         "",
-        `You are in a worktree of your own, checked out on ${branch}. Read the ticket and the spec`,
-        "issue, and read this repository's own documentation of how it wants code and tests written",
+        `You are in a worktree of your own, checked out on ${branch}.`,
+        "Read this repository's own documentation of how it wants code and tests written",
         "before you write any.",
         "",
         "Then:",
-        `1. Implement the ticket, and commit your work on ${branch}. Several commits are fine.`,
+        `1. Implement the ticket per the skill, and commit your work on ${branch}. `
+        + "mattpocock-skills:code-review is the correct skill to run a code review. "
+        + "Fix the findings you can autonomously fix - comment the unfixable findings in the ticket's issue on the issue tracker. "
+        + "Several commits are fine."
+        ,
         `2. Run \`${verify}\` and act on what it says. Fix what you broke, and commit the fix.`,
         "3. Report what you did.",
         "",
@@ -74,7 +78,7 @@ export const implementerPrompt = ({
         "is not committed does not exist as far as the rest of the run is concerned.",
         "",
         `Stay on ${branch}: do not merge, do not rebase, do not push, and do not touch another`,
-        "branch or another worktree. Write nothing to the issue tracker.",
+        "branch or another worktree. Write nothing to the issue tracker except the unfixable review findings.",
     ].join("\n")
 
 /**
@@ -148,7 +152,8 @@ export const resolverPrompt = ({
     verify: string
 }): string =>
     [
-        `A rebase of ${branch} onto ${onto} has stopped on a conflict. The branch carries ticket`,
+        `/mattpocock-skills:resolving-merge-conflicts A rebase of ${branch} onto ${onto} has stopped on a conflict. 
+        The branch carries ticket`,
         `#${ticket} of spec #${spec}: ${title}.`,
         "",
         "You are in that branch's own worktree, with the rebase in progress. Resolve it:",
