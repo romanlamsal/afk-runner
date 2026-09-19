@@ -42,7 +42,7 @@ const row = (
     title: string,
     track: Track,
     steps: readonly BoardStep[],
-    rest: { waiting?: boolean; conclusion?: Conclusion; elapsed?: number } = {},
+    rest: { waiting?: boolean; conclusion?: Conclusion; elapsed?: number; quiet?: boolean } = {},
 ): BoardRow => ({
     ticket,
     title,
@@ -53,6 +53,7 @@ const row = (
     // Why a step came to what it did is the line adapter's to say: a row says it in a colour.
     detail: undefined,
     elapsed: rest.elapsed,
+    quiet: rest.quiet ?? false,
 })
 
 const IMPLEMENTING = trail({ setup: "ok", implement: "running" })
@@ -303,6 +304,50 @@ describe("boardFrame: the elapsed figure", () => {
             expect(lines).toHaveLength(3)
         },
     )
+})
+
+/** Whether the running step is still writing, carried by colour and never by the words (ADR-0031). */
+describe("boardFrame: a step gone quiet", () => {
+    it.each([
+        ["still writing", false, "running"],
+        ["gone quiet", true, "quiet"],
+    ] as const)("should read the running step of a row %s as %s", (_case, quiet, role) => {
+        // given
+        const busy = row(7, "A ticket", "implement", IMPLEMENTING, { elapsed: 58_000, quiet })
+
+        // when
+        const [line] = boardFrame({ at: undefined, rows: [busy] }, WIDE)
+
+        // then
+        expect(spanFor(line, "implement")?.role).toBe(role)
+    })
+
+    it.each([
+        ["still writing", false, "plain"],
+        ["gone quiet", true, "quiet"],
+    ] as const)("should read the elapsed figure of a row %s as %s", (_case, quiet, role) => {
+        // given
+        const busy = row(7, "A ticket", "implement", IMPLEMENTING, { elapsed: 58_000, quiet })
+
+        // when
+        const [line] = boardFrame({ at: undefined, rows: [busy] }, WIDE)
+
+        // then
+        expect(spanFor(line, "58s")?.role).toBe(role)
+    })
+
+    it("should write a quiet row in the words a writing one is written in", () => {
+        // given
+        const rows = [false, true].map(quiet =>
+            row(7, "A ticket", "implement", IMPLEMENTING, { elapsed: 58_000, quiet }),
+        )
+
+        // when
+        const [writing, quiet] = rows.map(one => boardFrame({ at: undefined, rows: [one] }, WIDE).map(textOf)[0])
+
+        // then
+        expect(quiet).toBe(writing)
+    })
 })
 
 describe("elapsedText", () => {

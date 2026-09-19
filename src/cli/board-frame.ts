@@ -47,14 +47,16 @@ const SETTLED_ROLES: Record<SettledOutcome, Role> = {
 
 /**
  * Where a step stands in the run, as the role it is read as: a step not reached yet is ahead, a step
- * the log started and has not ended is running, and a settled one is whatever it settled on.
+ * the log started and has not ended is running — or quiet, where its row says it has stopped writing
+ * — and a settled one is whatever it settled on. The words stay the step's name either way: the
+ * colour carries the silence, and the text keeps meaning what it always has (ADR-0031).
  */
-const roleOf = (entry: BoardStep): Role => {
+const roleOf = (entry: BoardStep, quiet: boolean): Role => {
     switch (entry.state) {
         case "settled":
             return SETTLED_ROLES[entry.outcome]
         case "running":
-            return "running"
+            return quiet ? "quiet" : "running"
         case "ahead":
             return "ahead"
     }
@@ -65,7 +67,7 @@ const roleOf = (entry: BoardStep): Role => {
  * — they existed so a green step and a red one differed with colour off, and the palette says it now
  * — so a step occupies the same columns from the first frame to the last (ADR-0031).
  */
-const stepSpan = (entry: BoardStep): Span => ({ text: entry.step, role: roleOf(entry) })
+const stepSpan = (entry: BoardStep, quiet: boolean): Span => ({ text: entry.step, role: roleOf(entry, quiet) })
 
 /**
  * What a ticket came to, as the role its number is read as. A run that has not brought the ticket to
@@ -189,7 +191,7 @@ const wrapped = (text: string, width: number): readonly Line[] => {
  */
 const trail = (row: BoardRow): Line =>
     [
-        ...row.steps.map(stepSpan),
+        ...row.steps.map(entry => stepSpan(entry, row.quiet)),
         ...(row.waiting ? [plain(WAITING)] : []),
         ...(dead(row) ? [{ text: DEAD, role: verdictOf(row) }] : []),
     ]
@@ -221,10 +223,19 @@ export const elapsedText = (ms: number): string => {
 /**
  * The end of a row: how long its running step has been going, and nothing at all where no step is
  * running. It goes after everything else on the row, so that its width changing as it counts moves
- * nothing but itself, and the trail's words stay what they were (ADR-0031, ADR-0034).
+ * nothing but itself, and the trail's words stay what they were (ADR-0031, ADR-0034). A step gone
+ * quiet has its figure drawn at the same warning as its name, since the figure is where the eye goes
+ * to ask whether the step is still alive.
  */
 const elapsedSpans = (row: BoardRow): Span[] =>
-    row.elapsed === undefined ? [] : [plain(" "), plain(ELAPSED), plain(" "), plain(elapsedText(row.elapsed))]
+    row.elapsed === undefined
+        ? []
+        : [
+              plain(" "),
+              plain(ELAPSED),
+              plain(" "),
+              { text: elapsedText(row.elapsed), role: row.quiet ? "quiet" : "plain" },
+          ]
 
 /** A column's worth of padding, and no span at all where a column needs none. */
 const padding = (columns: number): Span[] => (columns > 0 ? [plain(" ".repeat(columns))] : [])

@@ -11,6 +11,7 @@ import { createSignalInterrupts } from "./infrastructure/interrupts.ts"
 import { killEveryChild } from "./infrastructure/process.ts"
 import { createIntervalTicker } from "./infrastructure/ticker.ts"
 import { createGitHubTracker } from "./infrastructure/tracker.ts"
+import { createFileActivity } from "./repository/activity.ts"
 import { createFileEventLog } from "./repository/event-log.ts"
 import { createFileManifestStore } from "./repository/manifest-store.ts"
 import { createFileRunLock } from "./repository/run-lock.ts"
@@ -110,8 +111,16 @@ export const assembleCli = (): Cli => {
     const prove = createProveBranch({ commands })
 
     // The one thing that redraws the board, handed to the runner and the viewer alike so that both
-    // redraw on the same terms: a change to the log, and a tick while nothing settles.
-    const watch = createWatchBoardService({ board, events, now, ticker: createIntervalTicker() })
+    // redraw on the same terms: a change to the log, and a tick while nothing settles. It reads when
+    // each running step last wrote off the run directory, so both draw the same colour for the same
+    // step (ADR-0034).
+    const watch = createWatchBoardService({
+        activity: createFileActivity(),
+        board,
+        events,
+        now,
+        ticker: createIntervalTicker(),
+    })
 
     const drive = createDriveService({
         events,

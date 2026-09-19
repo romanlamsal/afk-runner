@@ -1,4 +1,5 @@
-import { type Board, boardOf } from "../domain/board.ts"
+import type { Activity } from "../domain/activity.ts"
+import { type Board, boardOf, writers } from "../domain/board.ts"
 import type { Clock, Ticker } from "../domain/clock.ts"
 import type { EventLog, LifecycleEvent } from "../domain/events.ts"
 import type { Manifest } from "../domain/manifest.ts"
@@ -30,6 +31,8 @@ export type WatchOptions = {
 export type WatchBoard = (target: WatchTarget, options?: WatchOptions) => Promise<readonly LifecycleEvent[]>
 
 export type WatchBoardDeps = {
+    /** When each running step last wrote, which is what says whether it has gone quiet. */
+    activity: Activity
     /** Where each frame is shown (ADR-0029). */
     board: Board
     events: EventLog
@@ -56,7 +59,7 @@ type Woke =
  * was attempted (ADR-0011).
  */
 export const createWatchBoardService =
-    ({ board, events, now, ticker }: WatchBoardDeps): WatchBoard =>
+    ({ activity, board, events, now, ticker }: WatchBoardDeps): WatchBoard =>
     async ({ root, spec, manifest }, { until = () => false, signal } = {}) => {
         // One abort stops both sources, whether the caller asked or the log said enough.
         const stopping = new AbortController()
@@ -66,7 +69,17 @@ export const createWatchBoardService =
         }
         signal?.addEventListener("abort", stop, { once: true })
 
-        const draw = (log: readonly LifecycleEvent[]): void => board.show(boardOf(manifest, log, now()))
+        // A tick re-reads the writes too: a step goes quiet by writing nothing, so no change to the
+        // log ever says so.
+        const draw = async (log: readonly LifecycleEvent[]): Promise<void> => {
+            const at = now()
+            const writes = new Map(
+                await Promise.all(
+                    writers(manifest, log).map(async path => [path, await activity.lastWrite(root, path, at)] as const),
+                ),
+            )
+            board.show(boardOf(manifest, log, at, writes))
+        }
 
         const logs = events.follow(root, spec, stopping.signal)[Symbol.asyncIterator]()
         const nextLog = (): Promise<Woke> => logs.next().then(next => ({ from: "log", next }))
@@ -88,7 +101,7 @@ export const createWatchBoardService =
                     continue
                 }
                 last = woke.next.value
-                draw(last)
+                await draw(last)
                 if (until(last)) {
                     break
                 }
@@ -104,7 +117,7 @@ export const createWatchBoardService =
                 awaitingTick = undefined
                 continue
             }
-            draw(last)
+            await draw(last)
             awaitingTick = nextTick(ticks)
         }
 
@@ -113,7 +126,7 @@ export const createWatchBoardService =
 
         if (signal?.aborted === true) {
             last = await events.read(root, spec)
-            draw(last)
+            await draw(last)
         }
         return last
     }

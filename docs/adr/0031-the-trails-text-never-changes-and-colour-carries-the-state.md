@@ -109,3 +109,8 @@ going (ADR-0034). That figure is text, because a number is read rather than glan
 after `waiting` and `dead` so that nothing to its left moves as it counts. A figure that counts up
 cannot say whether the step behind it is alive — a killed step counts like a working one — and that
 is what colour is for.
+
+A running step that has gone quiet takes the `quiet` role: still underlined, because it is still
+the live edge of the run, and amber, because silence is a warning rather than a failure. The step's
+name and its elapsed figure both take it. A step still writing keeps `running`, and its figure stays
+plain.

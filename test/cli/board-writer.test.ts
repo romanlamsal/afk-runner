@@ -27,6 +27,7 @@ const VIEW: BoardView = {
             conclusion: undefined,
             detail: undefined,
             elapsed: undefined,
+            quiet: false,
         },
     ],
 }

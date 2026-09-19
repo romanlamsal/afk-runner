@@ -7,6 +7,7 @@ import type { LifecycleEvent, Step } from "../../src/domain/events.ts"
 import { createShowBoardService } from "../../src/service/board.ts"
 import type { StartRun } from "../../src/service/start.ts"
 import { createWatchBoardService } from "../../src/service/watch.ts"
+import { createFakeActivity } from "../fakes/activity.ts"
 import { createFakeBoard } from "../fakes/board.ts"
 import { createStubDrive } from "../fakes/drive.ts"
 import { createFakeEventLog } from "../fakes/event-log.ts"
@@ -44,8 +45,11 @@ const harness = ({
     planned = true,
     log = [],
     changes = [],
+    writes = [],
 }: {
     planned?: boolean
+    /** What the run directory's records say each path last had written to it, and when. */
+    writes?: readonly (readonly [string, string])[]
     log?: readonly LifecycleEvent[]
     /** What a run appends while the viewer is following: one group per change to the log. */
     changes?: readonly (readonly LifecycleEvent[])[]
@@ -54,6 +58,10 @@ const harness = ({
     const events = createFakeEventLog(log, { changes })
     const manifests = createFakeManifestStore(planned ? { ok: true, manifest: MANIFEST } : undefined)
     const git = createFakeGit()
+    const activity = createFakeActivity()
+    for (const [path, when] of writes) {
+        activity.write(path, new Date(when))
+    }
     const printed: string[] = []
     const errors: string[] = []
     const cli = createCli({
@@ -67,6 +75,7 @@ const harness = ({
                 git: git.git,
                 manifests: manifests.store,
                 watch: createWatchBoardService({
+                    activity: activity.activity,
                     board: board.board,
                     events: events.log,
                     now: () => new Date(at(9)),
@@ -137,6 +146,7 @@ describe("afk <spec> --board-only", () => {
                         waiting: false,
                         conclusion: undefined,
                         detail: undefined,
+                        quiet: false,
                     },
                     {
                         ticket: 6,
@@ -146,6 +156,7 @@ describe("afk <spec> --board-only", () => {
                         waiting: false,
                         conclusion: undefined,
                         detail: undefined,
+                        quiet: false,
                     },
                 ],
             },
@@ -266,6 +277,24 @@ describe("afk <spec> --board-only", () => {
 
         // then
         expect(code).toEqual(EXIT.complete)
+    })
+
+    it.each([
+        ["still writing", at(8), false],
+        ["gone quiet", at(2), true],
+    ] as const)("should draw a running step whose transcript was last written to %s", async (_case, written, quiet) => {
+        // given: the viewer derives its view at 10:09
+        const transcript = ".afk/4/transcripts/t5-implement-1.jsonl"
+        const { cli, board } = harness({
+            log: [{ ticket: 5, step: "implement", outcome: "running", at: at(1), transcriptPath: transcript }],
+            writes: [[transcript, written]],
+        })
+
+        // when
+        await cli(["4", "--board-only"])
+
+        // then
+        expect(board.shown[0]?.rows[0]?.quiet).toBe(quiet)
     })
 
     it("should write nothing to the run directory", async () => {

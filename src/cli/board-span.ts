@@ -16,7 +16,7 @@
  * The step roles are the outcomes a step settles on, `ok` aside: a step that simply worked is the
  * background everything else is read against, so it carries the same role as an indent.
  */
-export const ROLES = ["plain", "ahead", "running", "conflicted", "failed", "skipped", "verified"] as const
+export const ROLES = ["plain", "ahead", "running", "quiet", "conflicted", "failed", "skipped", "verified"] as const
 
 export type Role = (typeof ROLES)[number]
 

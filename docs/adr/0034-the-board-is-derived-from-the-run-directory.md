@@ -60,3 +60,12 @@ is a separate question, answered from what the step itself wrote and carried by 
   to the log and on a one-second tick, derives the view afresh and draws it; the runner and
   `--board-only` both drive through it, so two terminals showing one run redraw on the same terms.
   A tick appends nothing: the log stays a record of what was attempted (ADR-0011).
+- **Silence is the second thing it buys.** A new driven port, `Activity`, answers when the step
+  writing to a path last wrote, no later than a given instant, with one method over the run
+  directory. It reads the step's own records — the `timestamp` an agent's transcript records carry,
+  and the instant each line of a command log opens with — so an agent step and a command step are
+  read the same way, and never a modification time a replay could not reconstruct. The watch reads
+  them on every wake, tick included — a step goes quiet by writing nothing, so no change to the log
+  says so — and `boardOf` takes those writes beside the instant, and a row gains `quiet`: running, and nothing written for longer
+  than `QUIET_AFTER_MS`, counted from the step's start where it has written nothing yet. A view
+  handed no writes claims no silence, which is what a replay draws until it reads the transcripts.

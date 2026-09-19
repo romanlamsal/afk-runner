@@ -14,8 +14,8 @@ import {
 import type { Manifest } from "./manifest.ts"
 
 /**
- * The board: the view of a run, derived from what the run directory holds — the manifest and the
- * event log — and an instant handed in (ADR-0034). It claims nothing about liveness, so it says what
+ * The board: the view of a run, derived from what the run directory holds — the manifest, the
+ * event log and when each running step last wrote — and an instant handed in (ADR-0034). It claims nothing about liveness, so it says what
  * the log says — which is what lets it be drawn by anything that can read the run directory rather
  * than only by the process running it.
  *
@@ -120,6 +120,17 @@ export type BoardRow = {
      * gone counts up like one that is working (ADR-0034).
      */
     elapsed: number | undefined
+    /**
+     * Whether the step the log left running has gone quiet: nothing written for longer than
+     * `QUIET_AFTER_MS`. Silence is counted from the step's last write, as its own records carry it,
+     * and from its start where it has written nothing yet — a step that has only just begun has not
+     * gone quiet. Never quiet where no step is running, or where the start carried no instant.
+     *
+     * It is the one weight the log alone cannot give, and it is still read off the run directory
+     * rather than off a process: a step whose process is gone stops writing, so it goes quiet, which
+     * is the thing an operator watching the elapsed figure count up could not tell (ADR-0034).
+     */
+    quiet: boolean
 }
 
 /**
@@ -207,11 +218,6 @@ const runningStep = (events: readonly LifecycleEvent[], ticket: number): Step | 
     running(events, ticket) ? brokenStep(events, ticket) : undefined
 
 /**
- * The reason the ticket's last settled event gave, where it gave one. The last settled event rather
- * than the last event that carried a detail: a reason belongs to the step it was written about, so
- * a step that ended saying nothing says nothing rather than inheriting an older step's words.
- */
-/**
  * How long the ticket's running step has been going at `now`, or nothing where it has none. The
  * start is the ticket's last event, because a ticket with a step running is one whose last word is
  * that step's start; a prepare pass is timed from its own start, since the pass is what is running.
@@ -226,6 +232,69 @@ const elapsedOf = (events: readonly LifecycleEvent[], ticket: number, now: Date)
     return Number.isNaN(started) ? undefined : Math.max(0, now.getTime() - started)
 }
 
+/**
+ * How long a running step may write nothing before its row says so. Long enough that an agent
+ * thinking through a hard step, or a test suite between two lines of output, still reads as working;
+ * short enough that a step nothing is behind any more is noticed well before an operator would give
+ * up on it.
+ */
+export const QUIET_AFTER_MS = 3 * 60 * 1000
+
+/**
+ * When each running step last wrote, keyed by the path it writes to, as the run directory answered
+ * it. A path it has no answer for is a step that has written nothing yet.
+ */
+export type LastWrites = ReadonlyMap<string, Date | undefined>
+
+/**
+ * Where the ticket's running step writes, or nothing where no step is running or the one that is
+ * writes nowhere. It is read off the step's start event, which names its transcript or its command
+ * log, so an agent step and a command step are found the same way.
+ */
+const writerOf = (events: readonly LifecycleEvent[], ticket: number): string | undefined => {
+    const last = statusOf(events, ticket)
+    return last?.outcome === "running" ? (last.transcriptPath ?? last.logPath) : undefined
+}
+
+/**
+ * Every path a running step of the run is writing to: what has to be asked when each last wrote
+ * before the view can say which of them has gone quiet.
+ */
+export const writers = (manifest: Manifest, events: readonly LifecycleEvent[]): readonly string[] =>
+    manifest.tickets.flatMap(ticket => writerOf(events, ticket.number) ?? [])
+
+/**
+ * Whether the ticket's running step has written nothing for longer than `QUIET_AFTER_MS` at `now`.
+ * Silence runs from its last write, and from its start where it has written nothing since: a write
+ * the records place before the start belongs to an earlier attempt, never to this one.
+ *
+ * Handed no writes at all, it is never quiet: that is a board drawn without the run directory's
+ * records to hand, and silence it cannot see is not silence it may claim.
+ */
+const quietOf = (
+    events: readonly LifecycleEvent[],
+    ticket: number,
+    now: Date,
+    writes: LastWrites | undefined,
+): boolean => {
+    const last = statusOf(events, ticket)
+    if (writes === undefined || last?.outcome !== "running") {
+        return false
+    }
+    const started = new Date(last.at).getTime()
+    if (Number.isNaN(started)) {
+        return false
+    }
+    const path = writerOf(events, ticket)
+    const written = path === undefined ? undefined : writes.get(path)?.getTime()
+    return now.getTime() - Math.max(started, written ?? started) > QUIET_AFTER_MS
+}
+
+/**
+ * The reason the ticket's last settled event gave, where it gave one. The last settled event rather
+ * than the last event that carried a detail: a reason belongs to the step it was written about, so
+ * a step that ended saying nothing says nothing rather than inheriting an older step's words.
+ */
 const detailOf = (events: readonly LifecycleEvent[], ticket: number): string | undefined =>
     events.findLast(event => event.ticket === ticket && event.outcome !== "running")?.detail
 
@@ -247,11 +316,17 @@ const trailOf = (events: readonly LifecycleEvent[], ticket: number, open: Step |
     })
 
 /**
- * The whole view, as a pure function of the manifest, the log and the instant it is derived at. The
- * instant is handed in rather than read, so the same three inputs are the same view wherever they
- * are drawn — a live run passes the time now, a replay the replayed instant (ADR-0034).
+ * The whole view, as a pure function of the manifest, the log, the instant it is derived at and when
+ * each running step last wrote, where those are to hand. The instant and the writes are handed in rather than read, so the
+ * same inputs are the same view wherever they are drawn — a live run passes the time now, a replay
+ * the replayed instant (ADR-0034).
  */
-export const boardOf = (manifest: Manifest, events: readonly LifecycleEvent[], now: Date): BoardView => ({
+export const boardOf = (
+    manifest: Manifest,
+    events: readonly LifecycleEvent[],
+    now: Date,
+    writes: LastWrites | undefined,
+): BoardView => ({
     // The log is append-only, so its last line is the last thing that happened: the order it was
     // written in is the order it happened in, and no event is ever rewritten (ADR-0011).
     at: events.at(-1)?.at,
@@ -268,6 +343,7 @@ export const boardOf = (manifest: Manifest, events: readonly LifecycleEvent[], n
             conclusion: cameTo(events, ticket.number),
             detail: detailOf(events, ticket.number),
             elapsed: elapsedOf(events, ticket.number, now),
+            quiet: quietOf(events, ticket.number, now, writes),
         }
     }),
 })

@@ -231,7 +231,8 @@ ticket count. A row is the ticket's number, its trail, and — where a step is r
 step has been going (`| 58s`); a row with nothing running ends at its trail. Derived from the run
 directory and an instant handed in, never from the driver's in-flight set: a step the log left
 `running` is one whose end event is not written rather than one that is certainly happening, and the
-elapsed figure counts up either way (ADR-0030, ADR-0034). Nothing about it is written down, and
+elapsed figure counts up either way (ADR-0030, ADR-0034). Whether that step is still writing is
+carried by colour: a step gone *quiet* draws as a warning. Nothing about it is written down, and
 `afk <spec> --board-only` and a replay draw the same board from the same run directory.
 _Avoid_: dashboard, monitor, progress view, TUI
 
@@ -241,6 +242,13 @@ every row whatever track the ticket is on. Its words never change; colour carrie
 what was begun and what is still ahead, and may carry whether a running step is still writing
 (ADR-0031). How long a step has run is not part of it: that figure comes after it, at the row's end.
 _Avoid_: progress bar, timeline, breadcrumb
+
+**Quiet**:
+A running step that has written nothing for a while — three minutes. Read from the step's own
+records, an agent's transcript or a command's log, each of which stamps every line with when it was
+written; never from a file's modification time. It is evidence, not a verdict: a quiet step may be
+thinking and may be dead, and the board says which it looks like rather than which it is (ADR-0034).
+_Avoid_: stalled, hung, idle, dead
 
 **Interrupted**:
 A step the log left `running` whose action the driver does not hold: the step's process is gone, and

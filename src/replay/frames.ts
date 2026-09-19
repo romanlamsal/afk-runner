@@ -130,16 +130,18 @@ const drawnAt = (events: readonly LifecycleEvent[]): Date =>
  *
  * The closing frame is the whole log's board, held once more with no event beside it: the replay
  * ends on what a resume would open on rather than on the last line's own news.
+ *
+ * No writes are handed in: a replay reads no transcript or command log, so no row claims silence.
  */
 export const replayFrames = (manifest: Manifest, events: readonly LifecycleEvent[]): readonly ReplayFrame[] => [
-    { view: boardOf(manifest, [], drawnAt([])), event: undefined, at: undefined },
+    { view: boardOf(manifest, [], drawnAt([]), undefined), event: undefined, at: undefined },
     // Each frame derives from the whole prefix rather than from the one before it, because that is
     // what the board is: a function of the log, never of the last thing drawn (ADR-0030).
     ...events.map((event, index): ReplayFrame => {
         const soFar = events.slice(0, index + 1)
-        return { view: boardOf(manifest, soFar, drawnAt(soFar)), event, at: instantOf(event) }
+        return { view: boardOf(manifest, soFar, drawnAt(soFar), undefined), event, at: instantOf(event) }
     }),
-    { view: boardOf(manifest, events, drawnAt(events)), event: undefined, at: undefined },
+    { view: boardOf(manifest, events, drawnAt(events), undefined), event: undefined, at: undefined },
 ]
 
 /**

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { Board, BoardView } from "../../src/domain/board.ts"
 import type { LifecycleEvent } from "../../src/domain/events.ts"
 import { createWatchBoardService } from "../../src/service/watch.ts"
+import { createFakeActivity, type FakeActivity } from "../fakes/activity.ts"
 import { createFakeBoard } from "../fakes/board.ts"
 import { createFakeEventLog, type FakeEventLog } from "../fakes/event-log.ts"
 import { createFakeTicker } from "../fakes/ticker.ts"
@@ -39,14 +40,17 @@ const harness = ({
     changes = [],
     beats = 0,
     board = createFakeBoard().board,
+    activity = createFakeActivity(),
 }: {
     log?: readonly LifecycleEvent[]
     changes?: readonly (readonly LifecycleEvent[])[]
     beats?: number
     board?: Board
+    activity?: FakeActivity
 } = {}) => {
     const events = createFakeEventLog(log, { changes })
     const watch = createWatchBoardService({
+        activity: activity.activity,
         board,
         events: events.log,
         now: advancing(),
@@ -93,6 +97,31 @@ describe("createWatchBoardService", () => {
 
         // then
         expect(board.shown.map(view => view.rows[0]?.elapsed)).toEqual([1000, 2000, 3000])
+    })
+
+    it.each([
+        ["still writing", ["2026-01-01T10:00:00.000Z"], false],
+        ["written nothing since it started", [], true],
+    ] as const)("should draw a step running for ten minutes that has %s", async (_case, writes, quiet) => {
+        // given
+        const board = createFakeBoard()
+        const activity = createFakeActivity()
+        const transcript = ".afk/4/transcripts/t5-implement-1.jsonl"
+        for (const write of writes) {
+            activity.write(transcript, new Date(write))
+        }
+        const started: LifecycleEvent = {
+            ...event("running", 0),
+            at: "2026-01-01T09:50:00.000Z",
+            transcriptPath: transcript,
+        }
+        const { watch } = harness({ board: board.board, activity, log: [started], beats: 1 })
+
+        // when
+        await watch(TARGET)
+
+        // then
+        expect(board.shown.map(view => view.rows[0]?.quiet)).toEqual([quiet, quiet])
     })
 
     it("should append nothing to the log on a tick", async () => {

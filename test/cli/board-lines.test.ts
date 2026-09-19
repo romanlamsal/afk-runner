@@ -26,6 +26,7 @@ const row = (steps: readonly BoardStep[], rest: { track?: Track; detail?: string
     conclusion: undefined,
     detail: rest.detail,
     elapsed: undefined,
+    quiet: false,
 })
 
 const view = (...rows: readonly BoardRow[]): BoardView => ({ rows, at: undefined })
