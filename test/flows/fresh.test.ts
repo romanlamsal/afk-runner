@@ -18,6 +18,7 @@ import { createStubRelease } from "../fakes/release.ts"
 import { createFakeRunLock } from "../fakes/run-lock.ts"
 import { createFakeRunRecords } from "../fakes/run-records.ts"
 import { createStubShowBoard } from "../fakes/show-board.ts"
+import { createFakeTakeOver } from "../fakes/takeover.ts"
 import { createFakeTracker } from "../fakes/tracker.ts"
 
 /**
@@ -69,6 +70,7 @@ const harness = () => {
                 cwd: "/repo",
                 git: git.git,
                 lock: lock.lock,
+                takeOver: createFakeTakeOver(lock),
                 self: { pid: 1 },
                 records: records.records,
                 tracker: tracker.tracker,
@@ -88,6 +90,7 @@ const harness = () => {
                     now: () => new Date(),
                 }),
                 lock: lock.lock,
+                takeOver: createFakeTakeOver(lock),
                 self: { pid: 1 },
                 records: records.records,
             }),

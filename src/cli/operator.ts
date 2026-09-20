@@ -17,6 +17,9 @@ export type TerminalOperatorDeps = {
     print: (line: string) => void
 }
 
+/** Only a yes is a yes, so that nobody takes a run over by hitting return (ADR-0035). */
+const YES = /^y(es)?$/i
+
 const shown = (notice: Notice): string => `${notice.kind === "warning" ? "!" : "-"} ${notice.message}`
 
 /**
@@ -57,6 +60,20 @@ export const createTerminalOperator = ({ input, output, print }: TerminalOperato
                 const setup = await ask(readline, "setup:  ", commands.setup)
                 const verify = setup === undefined ? undefined : await ask(readline, "verify: ", commands.verify)
                 return setup === undefined || verify === undefined ? undefined : { setup, verify }
+            } finally {
+                readline.close()
+            }
+        },
+        takeOver: async (spec, holder) => {
+            const readline = createInterface({ input, output, terminal: true })
+            readline.once("SIGINT", () => readline.close())
+            try {
+                const answer = await ask(
+                    readline,
+                    `spec #${spec} is already being run by afk process ${holder.pid}. Take it over? [y/N] `,
+                    "",
+                )
+                return answer !== undefined && YES.test(answer)
             } finally {
                 readline.close()
             }

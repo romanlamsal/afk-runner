@@ -113,3 +113,53 @@ describe("createTerminalOperator().report", () => {
         expect(printed).toEqual(["- main is 1 commit ahead of origin/main"])
     })
 })
+
+/** The takeover offer, answered with `answer` once the question is on screen. */
+const offered = (answer: string): Promise<boolean> => {
+    const input = new PassThrough()
+    const output = new PassThrough()
+    let asked = false
+    output.setEncoding("utf8")
+    output.on("data", (chunk: string) => {
+        if (!asked && chunk.includes("Take it over?")) {
+            asked = true
+            setImmediate(() => input.write(`${answer}\n`))
+        }
+    })
+    const operator = createTerminalOperator({ input, output, print: () => undefined })
+    return operator.takeOver(4, { pid: 7 })
+}
+
+describe("createTerminalOperator().takeOver", () => {
+    it.each([
+        ["y", true],
+        ["yes", true],
+        ["Y", true],
+        ["", false],
+        ["n", false],
+        ["no", false],
+        ["sure", false],
+    ] as const)("should take over on %j only where it is a yes", async (answer, expected) => {
+        // given
+        const answered = offered(answer)
+
+        // when
+        const accepted = await answered
+
+        // then
+        expect(accepted).toBe(expected)
+    })
+
+    it("should decline when the input closes instead of deciding", async () => {
+        // given
+        const input = new PassThrough()
+        const operator = createTerminalOperator({ input, output: new PassThrough(), print: () => undefined })
+        const accepted = operator.takeOver(4, { pid: 7 })
+
+        // when
+        input.end()
+
+        // then
+        await expect(accepted).resolves.toBe(false)
+    })
+})

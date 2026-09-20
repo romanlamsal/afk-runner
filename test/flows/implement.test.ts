@@ -34,6 +34,7 @@ import { createStubRelease } from "../fakes/release.ts"
 import { createFakeRunLock } from "../fakes/run-lock.ts"
 import { createFakeRunRecords } from "../fakes/run-records.ts"
 import { createStubShowBoard } from "../fakes/show-board.ts"
+import { createFakeTakeOver } from "../fakes/takeover.ts"
 import { createFakeTracker, type FakeTrackerSetup } from "../fakes/tracker.ts"
 import { createFakeWatch } from "../fakes/watch.ts"
 import { manifestOf, ticket } from "../fixtures/manifest.ts"
@@ -241,6 +242,7 @@ const harness = ({
                 operator: operator.operator,
                 plan: async () => ({ ok: true, manifest }),
                 lock: lock.lock,
+                takeOver: createFakeTakeOver(lock),
                 self: { pid: 1 },
                 records: records.records,
             }),

@@ -32,6 +32,7 @@ import { createResolveService } from "./service/resolve.ts"
 import { createRevertService } from "./service/revert.ts"
 import { createSetupService } from "./service/setup.ts"
 import { createStartService } from "./service/start.ts"
+import { createTakeOverService } from "./service/takeover.ts"
 import { createWatchBoardService } from "./service/watch.ts"
 
 /**
@@ -93,6 +94,19 @@ export const assembleCli = (): Cli => {
     // services resolve — nothing here assumes the two are the same.
     const cwd = process.cwd()
 
+    // Whether there is somebody at the terminal to answer a question. Decided once, so that the
+    // invocation's rules and the takeover's offer cannot disagree about it (ADR-0014, ADR-0035).
+    const interactive = process.stdin.isTTY === true
+    const operator = createTerminalOperator({ input: process.stdin, output: process.stdout, print })
+    // Only ever offered where somebody can answer it: off a terminal, a live holder is a refusal and
+    // nothing else (ADR-0035).
+    const takeOver = createTakeOverService({
+        lock,
+        operator,
+        interactive,
+        wait: ms => new Promise(resolve => setTimeout(resolve, ms)),
+    })
+
     const start = createStartService({
         cwd,
         environment,
@@ -101,9 +115,10 @@ export const assembleCli = (): Cli => {
         lock,
         self,
         manifests,
-        operator: createTerminalOperator({ input: process.stdin, output: process.stdout, print }),
+        operator,
         plan: createPlanService({ agent, events, git, manifests, now }),
         records,
+        takeOver,
     })
 
     // Asked twice, for different reasons: by the gate, about a ticket, and by the revert, about the
@@ -139,10 +154,10 @@ export const assembleCli = (): Cli => {
     })
 
     return createCli({
-        isInteractive: () => process.stdin.isTTY === true,
+        isInteractive: () => interactive,
         printError,
         run: createRun({
-            fresh: createFreshService({ cwd, git, lock, self, records, tracker }),
+            fresh: createFreshService({ cwd, git, lock, self, records, tracker, takeOver }),
             showBoard: createShowBoardService({ cwd, git, manifests, watch }),
             start,
             drive,

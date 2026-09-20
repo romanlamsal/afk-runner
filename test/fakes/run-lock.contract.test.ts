@@ -8,5 +8,13 @@ import { createFakeRunLock } from "./run-lock.ts"
 describeRunLockContract("the run lock fake", async () => {
     const fake = createFakeRunLock()
     fake.die(3)
-    return { lock: fake.lock, root: "/repo", spec: 4, self: { pid: 1 }, live: { pid: 2 }, dead: { pid: 3 } }
+    return {
+        lock: fake.lock,
+        root: "/repo",
+        spec: 4,
+        self: { pid: 1 },
+        live: { pid: 2 },
+        dead: { pid: 3 },
+        doomed: { pid: 5 },
+    }
 })

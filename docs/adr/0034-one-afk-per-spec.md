@@ -42,4 +42,4 @@ refuses, naming the holder.**
 - **A pid can be reused.** A lock naming a dead afk whose pid now belongs to something else reads as
   held. The refusal names the pid, which is enough for an operator to see it is not afk.
 - **Taking over a live run is not part of this decision.** Off a terminal the refusal is flat; an
-  interactive takeover builds on the port, and gets a decision of its own.
+  interactive takeover builds on the port, and gets a decision of its own (ADR-0035).

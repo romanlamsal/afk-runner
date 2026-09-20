@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { heldByAnother, refusalToShare } from "../../src/domain/lock.ts"
+import { heldByAnother, refusalToGo, refusalToShare } from "../../src/domain/lock.ts"
 
 describe("heldByAnother", () => {
     it.each([
@@ -25,6 +25,19 @@ describe("refusalToShare", () => {
 
         // when
         const refusal = refusalToShare(4, holder)
+
+        // then
+        expect(refusal).toContain("afk process 4242")
+    })
+})
+
+describe("refusalToGo", () => {
+    it("should name the process that would not go", () => {
+        // given
+        const holder = { pid: 4242 }
+
+        // when
+        const refusal = refusalToGo(4, holder)
 
         // then
         expect(refusal).toContain("afk process 4242")

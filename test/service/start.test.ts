@@ -12,6 +12,7 @@ import { createFakeManifestStore, type FakeManifestStore } from "../fakes/manife
 import { createFakeOperator, type FakeOperator } from "../fakes/operator.ts"
 import { createFakeRunLock, type FakeRunLock } from "../fakes/run-lock.ts"
 import { createFakeRunRecords, type FakeRunRecords } from "../fakes/run-records.ts"
+import { createFakeTakeOver } from "../fakes/takeover.ts"
 
 const MANIFEST: Manifest = {
     spec: 4,
@@ -44,6 +45,8 @@ type Setup = {
     base?: string
     /** Who holds the run lock already, if anybody (ADR-0034). */
     heldBy?: Holder
+    /** What the operator said to taking over a live holder, where they were asked (ADR-0035). */
+    takesOver?: boolean
 }
 
 /** The process starting, as the lock names it. */
@@ -66,7 +69,7 @@ const harness = (setup: Setup = {}): Harness => {
     const manifests = createFakeManifestStore(
         setup.stored === undefined ? undefined : { ok: true, manifest: setup.stored },
     )
-    const operator = createFakeOperator(setup.answer, setup.aborts ?? false)
+    const operator = createFakeOperator({ answer: setup.answer, aborts: setup.aborts ?? false })
     const records = createFakeRunRecords()
     const lock = createFakeRunLock({ heldBy: setup.heldBy })
     const events = createFakeEventLog(
@@ -90,6 +93,7 @@ const harness = (setup: Setup = {}): Harness => {
             return { ok: true, manifest: setup.planned ?? MANIFEST }
         },
         records: records.records,
+        takeOver: createFakeTakeOver(lock, setup.takesOver ?? false),
     })
 
     return {
@@ -554,5 +558,65 @@ describe("createStartService: the run lock", () => {
 
         // then
         expect(result.outcome).toBe("prepared")
+    })
+})
+
+describe("createStartService: taking over a live run", () => {
+    it("should start once the operator has taken the run over", async () => {
+        // given
+        const { start } = harness({ heldBy: { pid: 7 }, takesOver: true })
+
+        // when
+        const result = await start()
+
+        // then
+        expect(result.outcome).toBe("prepared")
+    })
+
+    it("should hold the lock itself once the operator has taken the run over", async () => {
+        // given
+        const { start, lock } = harness({ heldBy: { pid: 7 }, takesOver: true })
+
+        // when
+        await start()
+
+        // then
+        expect(await lock.lock.holder("/repo", 4)).toEqual(SELF)
+    })
+
+    it("should refuse, naming the holder, rather than take over a run the flags refuse anyway", async () => {
+        // given
+        const { start } = harness({ heldBy: { pid: 7 }, takesOver: true, stored: MANIFEST, started: true })
+
+        // when
+        const result = await start()
+
+        // then
+        expect(result).toEqual({
+            outcome: "refused",
+            reason: expect.stringContaining("already being run by afk process 7"),
+        })
+    })
+
+    it("should leave the holder running when the flags refuse the start anyway", async () => {
+        // given
+        const { start, lock } = harness({ heldBy: { pid: 7 }, takesOver: true, stored: MANIFEST, started: true })
+
+        // when
+        await start()
+
+        // then
+        expect(await lock.lock.holder("/repo", 4)).toEqual({ pid: 7 })
+    })
+
+    it("should leave the lock with its holder when the operator declines", async () => {
+        // given
+        const { start, lock } = harness({ heldBy: { pid: 7 }, takesOver: false })
+
+        // when
+        await start()
+
+        // then
+        expect(await lock.lock.holder("/repo", 4)).toEqual({ pid: 7 })
     })
 })

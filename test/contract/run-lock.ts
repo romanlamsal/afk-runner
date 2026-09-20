@@ -17,6 +17,23 @@ export type RunLockWorld = {
     live: Holder
     /** A process that existed once and exists no longer. */
     dead: Holder
+    /** A live process of this world's own, to be interrupted or killed. It goes on its interrupts. */
+    doomed: Holder
+}
+
+/**
+ * The lock's holder once it has settled. A signalled process is gone only once it has been reaped,
+ * which is its parent's business and takes a moment.
+ */
+const settled = async (lock: RunLock, root: string, spec: number): Promise<Holder | undefined> => {
+    for (let tries = 0; tries < 100; tries += 1) {
+        const holder = await lock.holder(root, spec)
+        if (holder === undefined) {
+            return undefined
+        }
+        await new Promise(resolve => setTimeout(resolve, 20))
+    }
+    return lock.holder(root, spec)
 }
 
 export const describeRunLockContract = (name: string, create: () => Promise<RunLockWorld>): void => {
@@ -99,6 +116,49 @@ export const describeRunLockContract = (name: string, create: () => Promise<RunL
             // then
             expect(holder).toEqual(expected === undefined ? undefined : world[expected])
         })
+    })
+
+    describe(`${name}: interrupt and kill`, () => {
+        it("should leave nobody holding the lock of a holder interrupted twice", async () => {
+            // given
+            const { lock, root, spec, doomed } = await create()
+            await lock.acquire(root, spec, doomed)
+            await lock.interrupt(doomed)
+            await lock.interrupt(doomed)
+
+            // when
+            const holder = await settled(lock, root, spec)
+
+            // then
+            expect(holder).toBeUndefined()
+        })
+
+        it("should leave nobody holding the lock of a holder killed", async () => {
+            // given
+            const { lock, root, spec, doomed } = await create()
+            await lock.acquire(root, spec, doomed)
+            await lock.kill(doomed)
+
+            // when
+            const holder = await settled(lock, root, spec)
+
+            // then
+            expect(holder).toBeUndefined()
+        })
+
+        it.each(["interrupt", "kill"] as const)(
+            "should %s a process that no longer exists without failing",
+            async how => {
+                // given
+                const { lock, dead } = await create()
+
+                // when
+                const signalled = lock[how](dead)
+
+                // then
+                await expect(signalled).resolves.toBeUndefined()
+            },
+        )
     })
 
     describe(`${name}: release`, () => {

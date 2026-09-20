@@ -27,6 +27,10 @@ export type RunLock = {
     release: (root: string, spec: number, self: Holder) => Promise<void>
     /** The live holder of the lock, if there is one. Reads, and never writes. */
     holder: (root: string, spec: number) => Promise<Holder | undefined>
+    /** Send the holder its own interrupt, as its terminal would. A holder already gone is not an error. */
+    interrupt: (holder: Holder) => Promise<void>
+    /** Kill the holder outright, for one its interrupts did not move. A holder already gone is not an error. */
+    kill: (holder: Holder) => Promise<void>
 }
 
 /**
@@ -40,3 +44,25 @@ export const heldByAnother = (holder: Holder | undefined, self: Holder): holder 
 export const refusalToShare = (spec: number, holder: Holder): string =>
     `spec #${spec} is already being run by afk process ${holder.pid}: ` +
     "wait for it to finish, or stop it before starting another"
+
+/**
+ * What taking over a live run is given (ADR-0035). The holder is sent its own interrupt twice — the
+ * first drains, the second kills every child it started and exits (ADR-0016) — and then waited for.
+ */
+export const TAKEOVER = {
+    /**
+     * Between the two interrupts. Two of one signal sent back to back can arrive as one, and a holder
+     * that only counted one is draining, not going.
+     */
+    gapMs: 500,
+    /** How often the lock is looked at while waiting for it to free. */
+    pollMs: 200,
+    /** What the holder gets to go of its own accord before it is killed outright. */
+    graceMs: 10_000,
+    /** What a killed holder gets to be gone in before the takeover gives up on it. */
+    killedMs: 5_000,
+} as const
+
+/** The refusal a takeover gets from a holder that outlived being killed. */
+export const refusalToGo = (spec: number, holder: Holder): string =>
+    `afk process ${holder.pid} still holds spec #${spec} after being killed: stop it before starting another`

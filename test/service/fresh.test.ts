@@ -4,6 +4,7 @@ import { createFreshService, type FreshResult } from "../../src/service/fresh.ts
 import { createFakeGit, type FakeGit, type FakeRepository } from "../fakes/git.ts"
 import { createFakeRunLock, type FakeRunLock } from "../fakes/run-lock.ts"
 import { createFakeRunRecords, type FakeRunRecords } from "../fakes/run-records.ts"
+import { createFakeTakeOver } from "../fakes/takeover.ts"
 import { createFakeTracker, type FakeTracker, type FakeTrackerSetup } from "../fakes/tracker.ts"
 
 /**
@@ -37,6 +38,7 @@ const harness = ({
     tracker: setup = { openFor: ["afk/4/spec"] },
     unremovable,
     heldBy,
+    takesOver = false,
 }: {
     repository?: FakeRepository
     tracker?: FakeTrackerSetup
@@ -44,6 +46,8 @@ const harness = ({
     unremovable?: string
     /** Who holds the run lock already, if anybody (ADR-0034). */
     heldBy?: Holder
+    /** What the operator said to taking over a live holder, where they were asked (ADR-0035). */
+    takesOver?: boolean
 } = {}): Harness => {
     const git = createFakeGit(repository)
     const records = createFakeRunRecords({ unremovable })
@@ -56,6 +60,7 @@ const harness = ({
         self: { pid: 1 },
         records: records.records,
         tracker: tracker.tracker,
+        takeOver: createFakeTakeOver(lock, takesOver),
     })
 
     return { git, records, tracker, lock, fresh: () => service(4) }
@@ -292,6 +297,19 @@ describe("the fresh service: the run lock", () => {
 
         // when
         const result = await harnessed.fresh()
+
+        // then
+        expect(result.outcome).toBe("cleared")
+    })
+})
+
+describe("the fresh service: taking over a live run", () => {
+    it("should throw the run away once the operator has taken it over", async () => {
+        // given
+        const { fresh } = harness({ heldBy: { pid: 7 }, takesOver: true })
+
+        // when
+        const result = await fresh()
 
         // then
         expect(result.outcome).toBe("cleared")

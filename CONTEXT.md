@@ -268,6 +268,11 @@ start refuses while its holder is live; a lock whose holder no longer exists is 
 board takes none (ADR-0034).
 _Avoid_: mutex, pidfile, session
 
+**Takeover**:
+Getting a live holder off a run, on a terminal and only on the operator's yes: the holder is sent its
+own interrupt twice, waited for, and killed outright if it will not go (ADR-0035).
+_Avoid_: steal, force, override
+
 **Starting over**:
 Taking a spec back to nothing: its worktrees, its branches local and remote, its pull request and
 its run directory, all away in one act and without a prompt. It takes nothing back off the tracker —

@@ -19,6 +19,7 @@ import { createStubRelease } from "../fakes/release.ts"
 import { createFakeRunLock } from "../fakes/run-lock.ts"
 import { createFakeRunRecords } from "../fakes/run-records.ts"
 import { createStubShowBoard } from "../fakes/show-board.ts"
+import { createFakeTakeOver } from "../fakes/takeover.ts"
 
 /**
  * The second of the spec's three seams: the assembled run, driven through fake ports from the
@@ -64,6 +65,7 @@ const harness = (reply: { structuredOutput: unknown } = { structuredOutput: MANI
             now: () => new Date("2026-09-15T11:18:38.314Z"),
         }),
         lock: lock.lock,
+        takeOver: createFakeTakeOver(lock),
         self: { pid: 1 },
         records: records.records,
     })

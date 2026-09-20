@@ -40,6 +40,17 @@ const read = async (path: string): Promise<Holder | undefined> => {
     return parsed.success && exists(parsed.data.pid) ? parsed.data : undefined
 }
 
+/** A signal to a process that no longer exists has nothing left to do, which is what it was sent for. */
+const signal = (pid: number, name: NodeJS.Signals): void => {
+    try {
+        process.kill(pid, name)
+    } catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) {
+            throw error
+        }
+    }
+}
+
 const isAlreadyThere = (error: unknown): boolean => error instanceof Error && "code" in error && error.code === "EEXIST"
 
 /**
@@ -83,4 +94,6 @@ export const createFileRunLock = (): RunLock => ({
         }
     },
     holder: async (root, spec) => read(join(root, runLockPath(spec))),
+    interrupt: async ({ pid }) => signal(pid, "SIGINT"),
+    kill: async ({ pid }) => signal(pid, "SIGKILL"),
 })

@@ -20,6 +20,7 @@ import { createStubRelease } from "../fakes/release.ts"
 import { createFakeRunLock } from "../fakes/run-lock.ts"
 import { createFakeRunRecords } from "../fakes/run-records.ts"
 import { createStubShowBoard } from "../fakes/show-board.ts"
+import { createFakeTakeOver } from "../fakes/takeover.ts"
 
 /**
  * The bare invocation, from the argument vector to a run that is ready to implement: plan, confirm,
@@ -37,7 +38,7 @@ const harness = ({ base, answer }: { base?: BaseState; answer?: Commands } = {})
     const manifests = createFakeManifestStore()
     const environment = createFakeEnvironment()
     const git = createFakeGit(base === undefined ? {} : { base })
-    const operator = createFakeOperator(answer)
+    const operator = createFakeOperator({ answer })
     const records = createFakeRunRecords()
     const lock = createFakeRunLock()
     const events = createFakeEventLog()
@@ -67,6 +68,7 @@ const harness = ({ base, answer }: { base?: BaseState; answer?: Commands } = {})
                     now: () => new Date(),
                 }),
                 lock: lock.lock,
+                takeOver: createFakeTakeOver(lock),
                 self: { pid: 1 },
                 records: records.records,
             }),
