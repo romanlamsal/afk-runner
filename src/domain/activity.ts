@@ -1,3 +1,5 @@
+import type { LastWrites } from "./board.ts"
+
 /**
  * What a step has written, read back as when it last wrote anything. It is what tells a step that is
  * working from one that has gone quiet, and it is read from the step's own records rather than from
@@ -66,3 +68,19 @@ export const lastWriteIn = (lines: readonly string[], at: Date): Date | undefine
             (latest, written) => (latest === undefined || written > latest ? written : latest),
             undefined,
         )
+
+/**
+ * When each of a run's running steps last wrote, asked of the run directory for one instant. It is
+ * the whole of what a view needs beside the log, and it is composed here rather than in each caller
+ * so that the runner's board, `--board-only` and a replay ask the same question the same way.
+ *
+ * Every path is asked at once: the files are independent, and a board drawn per tick should not
+ * wait for one read to finish before starting the next.
+ */
+export const lastWrites = async (
+    activity: Activity,
+    root: string,
+    paths: readonly string[],
+    at: Date,
+): Promise<LastWrites> =>
+    new Map(await Promise.all(paths.map(async path => [path, await activity.lastWrite(root, path, at)] as const)))

@@ -68,4 +68,12 @@ is a separate question, answered from what the step itself wrote and carried by 
   them on every wake, tick included — a step goes quiet by writing nothing, so no change to the log
   says so — and `boardOf` takes those writes beside the instant, and a row gains `quiet`: running, and nothing written for longer
   than `QUIET_AFTER_MS`, counted from the step's start where it has written nothing yet. A view
-  handed no writes claims no silence, which is what a replay draws until it reads the transcripts.
+  handed no writes claims no silence.
+- **A replay is a recording rather than an approximation.** Its clock is the replayed instant: it
+  stands at each line's own instant and advances across the gap to the next at the speed factor, so
+  the replay redraws through a gap exactly where the live watch ticked through it, and the figure a
+  row counts up is the one the live row showed. Its colour is read from the same transcripts and
+  command logs, bounded by the replayed instant, so what a row says about silence is what the files
+  said then rather than what the finished files say now. A log outside a run directory, or a run
+  whose records are gone, is replayed with no writes at all: the figures still count and no row
+  claims a silence nothing can see.

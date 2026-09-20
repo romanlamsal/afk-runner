@@ -1,30 +1,30 @@
-import { type BoardView, boardOf } from "../domain/board.ts"
-import type { Action } from "../domain/decide.ts"
-import { attempts, brokenStep, type LifecycleEvent, repairableStep, type Step, statusOf } from "../domain/events.ts"
-import type { Manifest } from "../domain/manifest.ts"
+import type { LifecycleEvent } from "../domain/events.ts"
+import { TICK_MS } from "../service/watch.ts"
 
 /**
- * Replaying an event log as the board it was, and the pure half of it: one view per line of the
- * log, and the wait between two of them.
+ * Replaying an event log as the board it was, and the pure half of it: the moments a replay draws,
+ * each one a prefix of the log and the instant the replayed clock stood at, and how long to hold
+ * the moment before it.
  *
- * The board is a pure function of three inputs and the log is only two of them (ADR-0029). The
- * third — the driver's live action set — is the one thing a log can never carry, because liveness
- * is not recordable: a `running` event says a step began, and only the process that began it can
- * say whether it is still happening (ADR-0019).
+ * A replay has no time now of its own, so the replayed instant is its clock: it stands at the last
+ * instant the log carries and advances between two lines at the speed factor, exactly as the live
+ * run's clock advanced through the same gap. That is what makes a row's elapsed figure and its
+ * silence the ones the live board showed rather than something recomputed from now (ADR-0034).
  *
- * So a replay reconstructs it, the only way a log allows: at any point in the log, a step whose
- * start event is its ticket's last word was running *then*, because the process that wrote that
- * line was alive to write it. That is true of every prefix but one — the whole log — and that is
- * the exception the closing frame exists for.
+ * The board itself is not built here: it is derived from the run directory, and the transcripts and
+ * command logs a moment's colour comes from are files somebody has to read.
  */
 
-/** One drawn moment of the replay: the view, and what the log says it is about. */
-export type ReplayFrame = {
-    view: BoardView
-    /** The event the frame is about, and nothing for the two frames no event produced. */
+/** One drawn moment of the replay: what the board is derived from, and what the replay does first. */
+export type ReplayMoment = {
+    /** The log as of this moment: the board is a function of the whole prefix, never of the last frame. */
+    log: readonly LifecycleEvent[]
+    /** Where the replayed clock stands, which is what a row's elapsed figure counts to. */
+    at: Date
+    /** The event the moment is about, and nothing for the edges and for a moment only the clock made. */
     event: LifecycleEvent | undefined
-    /** When that event was appended, where it carried an instant a clock can read. */
-    at: Date | undefined
+    /** How long to hold before drawing it, in milliseconds of the replay's own time. */
+    wait: number
 }
 
 /** How fast a replay goes: a wait of its own, or the log's own clock divided down. */
@@ -49,117 +49,85 @@ const instantOf = (event: LifecycleEvent): Date | undefined => {
 }
 
 /**
- * The action the driver held while this step was running, rebuilt from the log the step is read
- * out of. The kind is the step — that is what `stepOf` reads back off it — and the fields beside it
- * are counted the same way the decision function counts them, so that a rebuilt action is one the
- * driver could have been holding rather than one shaped like it.
- *
- * A prepare pass is the one that can come back empty: it is read at the step it was sent to repair,
- * and a pass over a log with no repairable step behind it is a log that disagrees with itself. The
- * ticket is then simply not busy, which is what it looks like anyway.
- *
- * `plan` and `pull-request` are about the run rather than about a ticket (ADR-0028), and no action
- * of the driver's names them.
- */
-const actionOf = (events: readonly LifecycleEvent[], ticket: number, step: Step): Action | undefined => {
-    switch (step) {
-        case "setup":
-            return { kind: "setup", ticket }
-        case "implement":
-            return { kind: "implement", ticket, attempt: attempts(events, ticket, "implement") }
-        case "prepare": {
-            const broke = brokenStep(events, ticket)
-            return broke !== undefined && repairableStep(broke)
-                ? { kind: "prepare", ticket, brokenStep: broke }
-                : undefined
-        }
-        case "rebase":
-            return { kind: "rebase", ticket }
-        // A resolve spends the rebase's budget rather than one of its own, so it is counted off the
-        // rebase start events exactly as the decision function counts it.
-        case "resolve":
-            return { kind: "resolve", ticket, attempt: attempts(events, ticket, "rebase") }
-        case "merge":
-            return { kind: "merge", ticket }
-        case "gate":
-            return { kind: "gate", ticket }
-        case "fix":
-            return { kind: "fix", ticket }
-        case "revert":
-            return { kind: "revert", ticket }
-        case "plan":
-        case "pull-request":
-            return undefined
-    }
-}
-
-/**
- * The live action set as of this much of the log: one action per ticket whose last event says a
- * step began and nothing has ended it.
- *
- * Read per ticket rather than over the whole log because that is what "still running" means here —
- * a start event some later event of the same ticket answered is a step that ended, and one nothing
- * answered is a step that was going when the line after it was written.
- */
-export const liveActions = (manifest: Manifest, events: readonly LifecycleEvent[]): readonly Action[] =>
-    manifest.tickets.flatMap((ticket): Action[] => {
-        const last = statusOf(events, ticket.number)
-        if (last === undefined || last.outcome !== "running") {
-            return []
-        }
-        const action = actionOf(events, ticket.number, last.step)
-        return action === undefined ? [] : [action]
-    })
-
-/**
  * The instant a prefix of the log was drawn at: the last instant it carries a clock can read. A
- * replay has no time now of its own, so the replayed instant is what a row's elapsed figure counts
- * to, which is what makes the figure the one the live board showed as that line was written
- * (ADR-0034). A prefix with no readable instant has nothing running to count, so the epoch serves.
+ * prefix with no readable instant has nothing running to count, so the epoch serves.
  */
 const drawnAt = (events: readonly LifecycleEvent[]): Date =>
     events.map(instantOf).findLast(at => at !== undefined) ?? new Date(0)
 
-/**
- * Every frame a log is, in order: the empty board the run opened on, one frame per line, and the
- * board the next process would open on.
- *
- * The opening frame is what makes the replay a run rather than a summary — off a terminal the first
- * view is the baseline and news for nothing, so starting anywhere else would swallow whatever had
- * already happened by then.
- *
- * The closing frame is the whole log's board, held once more with no event beside it: the replay
- * ends on what a resume would open on rather than on the last line's own news.
- *
- * No writes are handed in: a replay reads no transcript or command log, so no row claims silence.
- */
-export const replayFrames = (manifest: Manifest, events: readonly LifecycleEvent[]): readonly ReplayFrame[] => [
-    { view: boardOf(manifest, [], drawnAt([]), undefined), event: undefined, at: undefined },
-    // Each frame derives from the whole prefix rather than from the one before it, because that is
-    // what the board is: a function of the log, never of the last thing drawn (ADR-0030).
-    ...events.map((event, index): ReplayFrame => {
-        const soFar = events.slice(0, index + 1)
-        return { view: boardOf(manifest, soFar, drawnAt(soFar), undefined), event, at: instantOf(event) }
-    }),
-    { view: boardOf(manifest, events, drawnAt(events), undefined), event: undefined, at: undefined },
-]
-
-/**
- * How long to hold the frame before this one. Nothing before the first, and nothing across a frame
- * the log gave no instant for: the two frames no event produced are the run's own edges, and a wait
- * against them would be invented rather than replayed.
- */
-export const waitBefore = (pacing: Pacing, previous: ReplayFrame | undefined, frame: ReplayFrame): number => {
-    if (previous === undefined) {
-        return 0
-    }
+/** The replay's own time across a gap of the run's: the gap divided, and nothing where there is none. */
+const gapOf = (pacing: Pacing, from: Date | undefined, to: Date | undefined): number => {
     if (pacing.kind === "fixed") {
         return Math.max(0, pacing.ms)
     }
-    if (previous.at === undefined || frame.at === undefined || pacing.factor <= 0) {
+    if (from === undefined || to === undefined || pacing.factor <= 0) {
         return 0
     }
     // A log is appended to in order, but it is a file on disk and a clock that went backwards is a
     // machine's business rather than a replay's: the gap is never negative.
-    return Math.max(0, (frame.at.getTime() - previous.at.getTime()) / pacing.factor)
+    return Math.max(0, (to.getTime() - from.getTime()) / pacing.factor)
+}
+
+/**
+ * The moments a wait is filled with: the same log again, drawn at the instants the replayed clock
+ * passes through on its way to the next line.
+ *
+ * It is the live watch's tick, replayed. Nothing settles across a gap, so nothing the log says
+ * changes — what changes is the clock, and with it how long the running step has been going and
+ * whether it has written anything lately. A replay without them would hold a still frame across the
+ * very minute the live board spent counting, which is the frame run 1117 was killed over.
+ */
+const ticksAcross = (log: readonly LifecycleEvent[], from: Date, to: Date, held: number): readonly ReplayMoment[] =>
+    // The replayed clock advances by the speed factor, so one tick of the replay is one tick's worth
+    // of the run divided down, and the number of them is how many ticks the wait is long — less the
+    // one that would land on the next line's own instant, which is the line's moment rather than a
+    // tick, and drawing the older log at it would be a frame the live board never showed.
+    Array.from({ length: Math.ceil(held / TICK_MS) - 1 }, (_unused, index): ReplayMoment => {
+        const through = ((index + 1) * TICK_MS) / held
+        return {
+            log,
+            at: new Date(from.getTime() + (to.getTime() - from.getTime()) * through),
+            event: undefined,
+            wait: TICK_MS,
+        }
+    })
+
+/**
+ * Every moment a log is, in order: the empty board the run opened on, one moment per line with the
+ * clock's own moments between them, and the board the next process would open on.
+ *
+ * The opening moment is what makes the replay a run rather than a summary — off a terminal the first
+ * view is the baseline and news for nothing, so starting anywhere else would swallow whatever had
+ * already happened by then.
+ *
+ * The closing moment is the whole log again with no event beside it: the replay ends on what a
+ * resume would open on rather than on the last line's own news.
+ */
+export const replayMoments = (events: readonly LifecycleEvent[], pacing: Pacing): readonly ReplayMoment[] => {
+    const moments: ReplayMoment[] = [{ log: [], at: drawnAt([]), event: undefined, wait: 0 }]
+
+    let previous: Date | undefined
+    events.forEach((event, index) => {
+        const at = instantOf(event)
+        const held = gapOf(pacing, previous, at)
+        // Each moment derives from the whole prefix rather than from the one before it, because that
+        // is what the board is: a function of the log, never of the last thing drawn (ADR-0030).
+        const before = events.slice(0, index)
+        const ticks =
+            previous === undefined || at === undefined || pacing.kind === "fixed"
+                ? []
+                : ticksAcross(before, previous, at, held)
+        const log = events.slice(0, index + 1)
+
+        moments.push(...ticks, {
+            log,
+            at: at ?? drawnAt(log),
+            event,
+            wait: held - ticks.length * TICK_MS,
+        })
+        previous = at ?? previous
+    })
+
+    moments.push({ log: events, at: drawnAt(events), event: undefined, wait: 0 })
+    return moments
 }

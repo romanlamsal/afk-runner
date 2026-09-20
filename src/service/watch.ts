@@ -1,4 +1,4 @@
-import type { Activity } from "../domain/activity.ts"
+import { type Activity, lastWrites } from "../domain/activity.ts"
 import { type Board, boardOf, writers } from "../domain/board.ts"
 import type { Clock, Ticker } from "../domain/clock.ts"
 import type { EventLog, LifecycleEvent } from "../domain/events.ts"
@@ -73,12 +73,7 @@ export const createWatchBoardService =
         // log ever says so.
         const draw = async (log: readonly LifecycleEvent[]): Promise<void> => {
             const at = now()
-            const writes = new Map(
-                await Promise.all(
-                    writers(manifest, log).map(async path => [path, await activity.lastWrite(root, path, at)] as const),
-                ),
-            )
-            board.show(boardOf(manifest, log, at, writes))
+            board.show(boardOf(manifest, log, at, await lastWrites(activity, root, writers(manifest, log), at)))
         }
 
         const logs = events.follow(root, spec, stopping.signal)[Symbol.asyncIterator]()

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { lastWriteIn, writtenAt } from "../../src/domain/activity.ts"
+import { lastWriteIn, lastWrites, writtenAt } from "../../src/domain/activity.ts"
+import { createFakeActivity } from "../fakes/activity.ts"
 
 /**
  * Reading a step's own records for when they were written. A transcript line and a command log line
@@ -48,5 +49,32 @@ describe("lastWriteIn: the latest instant a file's lines carry", () => {
 
         // then
         expect(written).toEqual(last)
+    })
+})
+
+describe("lastWrites: what every running step of a run last wrote", () => {
+    it("should answer each path as of the instant asked about, so one view reads one moment", async () => {
+        // given
+        const fake = createFakeActivity()
+        fake.write("transcripts/a.jsonl", new Date("2026-09-15T11:10:00.000Z"))
+        fake.write("transcripts/a.jsonl", new Date("2026-09-15T11:40:00.000Z"))
+        fake.write("commands/b.log", new Date("2026-09-15T11:20:00.000Z"))
+
+        // when
+        const writes = await lastWrites(
+            fake.activity,
+            "/repo",
+            ["transcripts/a.jsonl", "commands/b.log", "transcripts/gone.jsonl"],
+            new Date("2026-09-15T11:30:00.000Z"),
+        )
+
+        // then
+        expect(writes).toEqual(
+            new Map([
+                ["transcripts/a.jsonl", new Date("2026-09-15T11:10:00.000Z")],
+                ["commands/b.log", new Date("2026-09-15T11:20:00.000Z")],
+                ["transcripts/gone.jsonl", undefined],
+            ]),
+        )
     })
 })
