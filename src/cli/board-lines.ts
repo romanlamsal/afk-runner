@@ -8,7 +8,8 @@ import type { Step } from "../domain/events.ts"
  *
  * A step a previous process left running is said once, on the first view that is news for anything:
  * the baseline it arrives on is news for nothing, and a repair pass reopening it says it again as it
- * begins.
+ * begins. A step going from running to interrupted is news too — the run it belonged to stopped
+ * being held, which is a thing that happened to the step even though no line of the log says so.
  *
  * It is lossless at step granularity because the driver shows a view on every pass and every settled
  * action ends one: a step that began and a step that ended are two views apart, so neither can be
@@ -18,8 +19,8 @@ import type { Step } from "../domain/events.ts"
  * replaying a previous process's log as though it had just happened.
  */
 
-/** What a change to a row is: a step of it, and what that step began or came to. */
-type Change = { step: Step; outcome: SettledOutcome | "running" }
+/** What a change to a row is: a step of it, and what that step began, came to, or was left as. */
+type Change = { step: Step; outcome: SettledOutcome | "running" | "interrupted" }
 
 const changes = (before: BoardRow, after: BoardRow): readonly Change[] => {
     const was = new Map(before.steps.map(entry => [entry.step, entry]))
@@ -29,6 +30,11 @@ const changes = (before: BoardRow, after: BoardRow): readonly Change[] => {
         switch (entry.state) {
             case "running":
                 return previous?.state === "running" ? [] : [{ step: entry.step, outcome: "running" }]
+            case "interrupted":
+                // The run losing its holder is news about a step nobody is doing any more, and it
+                // is said once: the step stays interrupted until something starts it again, and a
+                // line per frame about a run that is over is not a record of anything.
+                return previous?.state === "interrupted" ? [] : [{ step: entry.step, outcome: "interrupted" }]
             case "settled":
                 return previous?.state === "settled" && previous.outcome === entry.outcome
                     ? []
@@ -42,8 +48,15 @@ const changes = (before: BoardRow, after: BoardRow): readonly Change[] => {
     })
 }
 
+/**
+ * What a step settling on something other than working out is, named rather than excluded: a step
+ * that began, and one a dead run left open, are neither of them settled, so the log wrote no reason
+ * about either and a weight added beside them takes none of this list.
+ */
+const UNHAPPY: readonly Change["outcome"][] = ["conflicted", "failed", "skipped"]
+
 /** A step that did not simply work, which is the only kind a reason is ever written about. */
-const unhappy = (change: Change): boolean => change.outcome !== "ok" && change.outcome !== "running"
+const unhappy = (change: Change): boolean => UNHAPPY.includes(change.outcome)
 
 const written = (ticket: number, change: Change, detail: string | undefined): string =>
     `#${ticket} ${change.step} ${change.outcome}${detail === undefined ? "" : `: ${detail}`}`

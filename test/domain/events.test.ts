@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest"
 import {
+    answered,
     attempts,
     brokenStep,
     cameTo,
     cutFrom,
     type LifecycleEvent,
     type Outcome,
+    owedAfterRedGate,
     prepared,
     progressOf,
     readEvent,
@@ -66,6 +68,24 @@ describe("statusOf", () => {
 
         // then
         expect(status).toBeUndefined()
+    })
+})
+
+describe("answered", () => {
+    it("should count a step's terminal events, and not an attempt nothing ended", () => {
+        // given
+        const events = [
+            event(10, "fix", "running"),
+            event(10, "fix", "running"),
+            event(10, "fix", "failed"),
+            event(10, "gate", "failed"),
+        ]
+
+        // when
+        const counted = answered(events, 10, "fix")
+
+        // then
+        expect(counted).toBe(1)
     })
 })
 
@@ -142,6 +162,15 @@ describe("cameTo", () => {
         ["a squash the gate has not run over", [event(10, "merge", "ok")], "unverified"],
         ["a step that failed", [event(10, "implement", "failed")], "failed"],
         ["a revert", [event(10, "revert", "failed")], "failed"],
+        ["a red gate a fix is still owed to", [event(10, "gate", "failed")], undefined],
+        ["a fix the gate has not run over", [event(10, "fix", "ok")], undefined],
+        ["a fix that reported failure", [event(10, "fix", "failed")], undefined],
+        [
+            "a red gate a revert is still owed to",
+            [event(10, "fix", "running"), event(10, "fix", "ok"), event(10, "gate", "failed")],
+            undefined,
+        ],
+        ["a revert a killed run left running", [event(10, "revert", "running")], undefined],
         ["a ticket a blocker took down", [event(10, "implement", "skipped")], "skipped"],
         ["a step that began and never ended", [event(10, "implement", "running")], undefined],
         ["a rebase git stopped part-way", [event(10, "rebase", "conflicted")], undefined],
@@ -154,6 +183,33 @@ describe("cameTo", () => {
 
         // then
         expect(conclusion).toBe(expected)
+    })
+})
+
+describe("owedAfterRedGate", () => {
+    it.each([
+        ["a red gate no fix has answered", [event(10, "gate", "failed")], "fix"],
+        ["a red gate after a killed fix", [event(10, "fix", "running"), event(10, "gate", "failed")], "fix"],
+        ["a fix a killed run left running", [event(10, "fix", "running")], "fix"],
+        ["a fix that reported back", [event(10, "fix", "running"), event(10, "fix", "ok")], "gate"],
+        ["a fix that reported failure", [event(10, "fix", "running"), event(10, "fix", "failed")], "gate"],
+        [
+            "a red gate after an answered fix",
+            [event(10, "fix", "running"), event(10, "fix", "failed"), event(10, "gate", "failed")],
+            "revert",
+        ],
+        ["a revert a killed run left running", [event(10, "revert", "running")], "revert"],
+        ["a recorded revert", [event(10, "revert", "running"), event(10, "revert", "failed")], undefined],
+        ["a green gate", [event(10, "gate", "ok")], undefined],
+        ["a ticket the log never mentioned", [], undefined],
+    ] as const)("should owe %s a %s", (_name, events, expected) => {
+        // given — the events from the table
+
+        // when
+        const move = owedAfterRedGate(events, 10)
+
+        // then
+        expect(move).toBe(expected)
     })
 })
 
@@ -172,6 +228,17 @@ describe("progressOf", () => {
 
         // then
         expect(progress).toEqual({ verified: [9], unverified: [10], failed: [11], skipped: [12] })
+    })
+
+    it("should count a ticket in the middle of the gate-red sequence as failed nowhere", () => {
+        // given: what the exit code and the pull request's draft flag read
+        const events = [event(10, "gate", "failed"), event(10, "fix", "running")]
+
+        // when
+        const progress = progressOf([10], events)
+
+        // then
+        expect(progress).toEqual({ verified: [], unverified: [], failed: [], skipped: [] })
     })
 })
 

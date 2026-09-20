@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { BaseState } from "../../src/domain/git.ts"
+import type { Holder } from "../../src/domain/lock.ts"
 import type { Manifest } from "../../src/domain/manifest.ts"
 import type { StartMode } from "../../src/domain/mode.ts"
 import type { Commands } from "../../src/domain/operator.ts"
@@ -9,13 +10,21 @@ import { createFakeEventLog } from "../fakes/event-log.ts"
 import { createFakeGit, type FakeGit } from "../fakes/git.ts"
 import { createFakeManifestStore, type FakeManifestStore } from "../fakes/manifest-store.ts"
 import { createFakeOperator, type FakeOperator } from "../fakes/operator.ts"
+import { createFakeRunLock, type FakeRunLock } from "../fakes/run-lock.ts"
 import { createFakeRunRecords, type FakeRunRecords } from "../fakes/run-records.ts"
+import { createFakeTakeOver } from "../fakes/takeover.ts"
 
 const MANIFEST: Manifest = {
     spec: 4,
     setup: "npm ci",
     verify: "npm run check",
     tickets: [{ number: 5, title: "Plan a spec", blockedBy: [] }],
+}
+
+/** A repository an earlier process left its gate worktree in, on the spec branch. */
+const GATE_ON_SPEC_BRANCH = {
+    branches: { main: ["trunk-tip"], "afk/4/spec": ["trunk-tip", "landed-5"] },
+    checkouts: { ".afk/4/gate": "afk/4/spec" },
 }
 
 type Setup = {
@@ -34,7 +43,14 @@ type Setup = {
     planned?: Manifest
     /** `--branch`, as an accepted invocation carries it. */
     base?: string
+    /** Who holds the run lock already, if anybody (ADR-0034). */
+    heldBy?: Holder
+    /** What the operator said to taking over a live holder, where they were asked (ADR-0035). */
+    takesOver?: boolean
 }
+
+/** The process starting, as the lock names it. */
+const SELF: Holder = { pid: 1 }
 
 type Harness = {
     start: () => Promise<StartResult>
@@ -42,6 +58,7 @@ type Harness = {
     manifests: FakeManifestStore
     operator: FakeOperator
     records: FakeRunRecords
+    lock: FakeRunLock
     /** The repositories and specs the planner was asked about, and what it was asked to base them on. */
     planned: { root: string; spec: number; base: string | undefined }[]
 }
@@ -52,8 +69,9 @@ const harness = (setup: Setup = {}): Harness => {
     const manifests = createFakeManifestStore(
         setup.stored === undefined ? undefined : { ok: true, manifest: setup.stored },
     )
-    const operator = createFakeOperator(setup.answer, setup.aborts ?? false)
+    const operator = createFakeOperator({ answer: setup.answer, aborts: setup.aborts ?? false })
     const records = createFakeRunRecords()
+    const lock = createFakeRunLock({ heldBy: setup.heldBy })
     const events = createFakeEventLog(
         setup.started === true
             ? [{ ticket: 10, step: "implement", outcome: "running", at: "2026-09-15T11:18:38.314Z" }]
@@ -66,6 +84,8 @@ const harness = (setup: Setup = {}): Harness => {
         environment: environment.copy,
         events: events.log,
         git: git.git,
+        lock: lock.lock,
+        self: SELF,
         manifests: manifests.store,
         operator: operator.operator,
         plan: async (root, spec, asked) => {
@@ -73,6 +93,7 @@ const harness = (setup: Setup = {}): Harness => {
             return { ok: true, manifest: setup.planned ?? MANIFEST }
         },
         records: records.records,
+        takeOver: createFakeTakeOver(lock, setup.takesOver ?? false),
     })
 
     return {
@@ -80,6 +101,7 @@ const harness = (setup: Setup = {}): Harness => {
         manifests,
         operator,
         records,
+        lock,
         planned,
         start: () =>
             service({
@@ -274,6 +296,60 @@ describe("createStartService", () => {
         expect(git.worktrees).toEqual([{ path: ".afk/4/gate", branch: "afk/4/spec", startPoint: "main" }])
     })
 
+    it("should reuse a gate worktree that holds the spec branch rather than re-create it", async () => {
+        // given
+        const { start, git } = harness({ repository: GATE_ON_SPEC_BRANCH })
+
+        // when
+        await start()
+
+        // then
+        expect(git.worktrees).toEqual([])
+    })
+
+    it.each([["soil"], ["edit"]] as const)(
+        "should start a reused gate worktree clean of what %s left in it",
+        async leave => {
+            // given
+            const { start, git } = harness({ repository: GATE_ON_SPEC_BRANCH })
+            git[leave](".afk/4/gate")
+
+            // when
+            await start()
+
+            // then
+            expect(await git.git.isClean("/repo", ".afk/4/gate")).toBe(true)
+        },
+    )
+
+    it("should keep the ignored files in a reused gate worktree, which are the installed tree", async () => {
+        // given
+        const { start, git } = harness({ repository: GATE_ON_SPEC_BRANCH })
+        git.ignore(".afk/4/gate")
+
+        // when
+        await start()
+
+        // then
+        expect(git.ignores(".afk/4/gate")).toBe(true)
+    })
+
+    it.each([
+        ["missing", {}],
+        ["on another branch", { ".afk/4/gate": "afk/4/t5" }],
+    ] as const)("should re-create a gate worktree that is %s", async (_, checkouts) => {
+        // given
+        const { start, git } = harness({
+            repository: { branches: { main: ["trunk-tip"], "afk/4/spec": ["trunk-tip"] }, checkouts },
+        })
+
+        // when
+        await start()
+
+        // then
+        expect(git.worktrees).toEqual([{ path: ".afk/4/gate", branch: "afk/4/spec", startPoint: "main" }])
+    })
+
     it("should hand back the prepared run", async () => {
         // given
         const { start } = harness()
@@ -425,5 +501,122 @@ describe("createStartService", () => {
 
         // then
         expect(planned).toEqual([{ root: "/repo", spec: 4, base: "release" }])
+    })
+})
+
+describe("createStartService: the run lock", () => {
+    it.each([
+        ["plan-and-implement", {}],
+        ["plan-only", {}],
+        ["implement-only", { stored: MANIFEST }],
+    ] as const)("should take the lock when starting %s", async (mode, setup) => {
+        // given
+        const { start, lock } = harness({ mode, ...setup })
+
+        // when
+        await start()
+
+        // then
+        expect([...lock.held.values()]).toEqual([SELF])
+    })
+
+    it.each(["plan-and-implement", "plan-only", "implement-only"] as const)(
+        "should refuse %s while another afk holds the run, naming it",
+        async mode => {
+            // given
+            const { start } = harness({ mode, stored: MANIFEST, started: true, consented: true, heldBy: { pid: 7 } })
+
+            // when
+            const result = await start()
+
+            // then
+            expect(result).toEqual({
+                outcome: "refused",
+                reason: expect.stringContaining("already being run by afk process 7"),
+            })
+        },
+    )
+
+    it("should plan nothing while another afk holds the run", async () => {
+        // given
+        const { start, planned } = harness({ heldBy: { pid: 7 } })
+
+        // when
+        await start()
+
+        // then
+        expect(planned).toEqual([])
+    })
+
+    it("should start over a lock whose holder no longer exists", async () => {
+        // given
+        const harnessed = harness({ heldBy: { pid: 7 } })
+        harnessed.lock.die(7)
+
+        // when
+        const result = await harnessed.start()
+
+        // then
+        expect(result.outcome).toBe("prepared")
+    })
+})
+
+describe("createStartService: taking over a live run", () => {
+    it("should start once the operator has taken the run over", async () => {
+        // given
+        const { start } = harness({ heldBy: { pid: 7 }, takesOver: true })
+
+        // when
+        const result = await start()
+
+        // then
+        expect(result.outcome).toBe("prepared")
+    })
+
+    it("should hold the lock itself once the operator has taken the run over", async () => {
+        // given
+        const { start, lock } = harness({ heldBy: { pid: 7 }, takesOver: true })
+
+        // when
+        await start()
+
+        // then
+        expect(await lock.lock.holder("/repo", 4)).toEqual(SELF)
+    })
+
+    it("should refuse, naming the holder, rather than take over a run the flags refuse anyway", async () => {
+        // given
+        const { start } = harness({ heldBy: { pid: 7 }, takesOver: true, stored: MANIFEST, started: true })
+
+        // when
+        const result = await start()
+
+        // then
+        expect(result).toEqual({
+            outcome: "refused",
+            reason: expect.stringContaining("already being run by afk process 7"),
+        })
+    })
+
+    it("should leave the holder running when the flags refuse the start anyway", async () => {
+        // given
+        const { start, lock } = harness({ heldBy: { pid: 7 }, takesOver: true, stored: MANIFEST, started: true })
+
+        // when
+        await start()
+
+        // then
+        expect(await lock.lock.holder("/repo", 4)).toEqual({ pid: 7 })
+    })
+
+    it("should leave the lock with its holder when the operator declines", async () => {
+        // given
+        const { start, lock } = harness({ heldBy: { pid: 7 }, takesOver: false })
+
+        // when
+        await start()
+
+        // then
+        expect(await lock.lock.holder("/repo", 4)).toEqual({ pid: 7 })
     })
 })

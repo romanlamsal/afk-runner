@@ -1,8 +1,10 @@
 import { specBranch, specBranchPrefix } from "../domain/branches.ts"
 import type { Git } from "../domain/git.ts"
+import { type Holder, type RunLock, refusalToShare } from "../domain/lock.ts"
 import { runDirectory } from "../domain/paths.ts"
 import type { RunRecordStore } from "../domain/records.ts"
 import type { Tracker } from "../domain/tracker.ts"
+import type { TakeOver } from "./takeover.ts"
 
 export type FreshResult =
     /** Nothing of this spec's run is left. `pullRequest` is whether there was one to close. */
@@ -17,8 +19,14 @@ export type FreshDeps = {
     /** Where afk was invoked. The target repository is this directory's git top level. */
     cwd: string
     git: Git
+    /** Starting over is the most destructive thing afk does, so it never happens under a live run. */
+    lock: RunLock
+    /** This process, as the lock names it. */
+    self: Holder
     records: RunRecordStore
     tracker: Tracker
+    /** The takeover service's driving port: a live holder is an offer on a terminal (ADR-0035). */
+    takeOver: TakeOver
 }
 
 const failed = (reason: string): FreshResult => ({ outcome: "failed", reason })
@@ -43,11 +51,27 @@ const failed = (reason: string): FreshResult => ({ outcome: "failed", reason })
  * wants to find afterwards is the record that it was tried (ADR-0013).
  */
 export const createFreshService =
-    ({ cwd, git, records, tracker }: FreshDeps): StartFresh =>
+    ({ cwd, git, lock, self, records, tracker, takeOver }: FreshDeps): StartFresh =>
     async spec => {
         const root = await git.topLevel(cwd)
         if (root === undefined) {
             return failed("this is not a git worktree: run afk from inside the repository whose spec this is")
+        }
+
+        // Taken before the first thing goes, and gone with the run directory at the end: what starts
+        // next in this process takes it again (ADR-0034).
+        const acquired = await lock.acquire(root, spec, self)
+        if (!acquired.ok) {
+            const taken = await takeOver(root, spec, acquired.holder)
+            if (taken.outcome === "refused") {
+                return failed(taken.reason)
+            }
+
+            // Asked again rather than assumed: a third afk may have taken what the holder let go of.
+            const retaken = await lock.acquire(root, spec, self)
+            if (!retaken.ok) {
+                return failed(refusalToShare(spec, retaken.holder))
+            }
         }
 
         const worktrees = await git.removeWorktreesUnder(root, runDirectory(spec))

@@ -45,7 +45,7 @@ const harness = ({ failing }: Setup = {}) => {
     const gate = createGateService({
         events: events.log,
         git: git.git,
-        now: () => new Date(),
+        now: () => new Date("2026-09-15T11:18:38.314Z"),
         prove: createProveBranch({ commands: commands.run }),
     })
 
@@ -138,6 +138,36 @@ describe("the gate service: a spec branch that does not hold up", () => {
 
         // then
         expect(events.appended.at(-1)?.detail).toBe("`npm run check` failed: exit 1")
+    })
+})
+
+/** A red gate's whole failure is read after the fact from its log; the event still says roughly what. */
+describe("the gate service: where the output goes", () => {
+    it("should have setup and verify write into one log for the attempt, in the run directory", async () => {
+        // given
+        const { gate, commands } = harness()
+
+        // when
+        await gate()
+
+        // then
+        expect(commands.logs).toEqual([
+            ".afk/4/commands/20260915T111838314Z-t7-gate.log",
+            ".afk/4/commands/20260915T111838314Z-t7-gate.log",
+        ])
+    })
+
+    it.each(["running", "failed"] as const)("should name that log on its %s event", async outcome => {
+        // given
+        const { gate, events } = harness({ failing: "npm run check" })
+
+        // when
+        await gate()
+
+        // then
+        expect(events.appended.find(event => event.outcome === outcome)?.logPath).toBe(
+            ".afk/4/commands/20260915T111838314Z-t7-gate.log",
+        )
     })
 })
 

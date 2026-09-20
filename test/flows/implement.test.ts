@@ -22,7 +22,6 @@ import { createRevertService, type RevertTicket } from "../../src/service/revert
 import { createSetupService, type SetupTicket } from "../../src/service/setup.ts"
 import { createStartService } from "../../src/service/start.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
-import { createFakeBoard } from "../fakes/board.ts"
 import { createFakeCommands } from "../fakes/commands.ts"
 import { createFakeEnvironment } from "../fakes/environment.ts"
 import { createFakeEventLog } from "../fakes/event-log.ts"
@@ -31,9 +30,13 @@ import { createFakeGit } from "../fakes/git.ts"
 import { createFakeInterrupts } from "../fakes/interrupts.ts"
 import { createFakeManifestStore } from "../fakes/manifest-store.ts"
 import { createFakeOperator } from "../fakes/operator.ts"
+import { createStubRelease } from "../fakes/release.ts"
+import { createFakeRunLock } from "../fakes/run-lock.ts"
 import { createFakeRunRecords } from "../fakes/run-records.ts"
 import { createStubShowBoard } from "../fakes/show-board.ts"
+import { createFakeTakeOver } from "../fakes/takeover.ts"
 import { createFakeTracker, type FakeTrackerSetup } from "../fakes/tracker.ts"
+import { createFakeWatch } from "../fakes/watch.ts"
 import { manifestOf, ticket } from "../fixtures/manifest.ts"
 
 /**
@@ -118,6 +121,7 @@ const harness = ({
     const manifests = createFakeManifestStore({ ok: true, manifest })
     const operator = createFakeOperator()
     const records = createFakeRunRecords()
+    const lock = createFakeRunLock()
     const tracker = createFakeTracker(trackerSetup)
     const printed: string[] = []
     const errors: string[] = []
@@ -226,6 +230,7 @@ const harness = ({
         isInteractive: () => true,
         printError: line => errors.push(line),
         run: createRun({
+            release: createStubRelease(),
             showBoard: createStubShowBoard(),
             fresh: createStubFresh(),
             start: createStartService({
@@ -236,10 +241,12 @@ const harness = ({
                 manifests: manifests.store,
                 operator: operator.operator,
                 plan: async () => ({ ok: true, manifest }),
+                lock: lock.lock,
+                takeOver: createFakeTakeOver(lock),
+                self: { pid: 1 },
                 records: records.records,
             }),
             drive: createDriveService({
-                board: createFakeBoard().board,
                 events: events.log,
                 interrupts: interrupts.interrupts,
                 implement: createImplementService({
@@ -279,6 +286,7 @@ const harness = ({
                 revert,
                 prepare: createPrepareService({ agent: preparer.run, events: events.log, git: git.git, now }),
                 now,
+                watch: createFakeWatch().watch,
             }),
             finish: createFinishService({
                 agent: writer.run,
@@ -1060,7 +1068,7 @@ describe("a run resumed over a fix a killed run left part-way", () => {
     /** A repository the ticket's merge broke, so that the reverted tip is what goes green again. */
     const blamed = { tickets: [ticket(10)], failing: "npm run check", red: "the merge", resume: true } as const
 
-    it("should gate what the killed fix left behind, and carry on to the revert", async () => {
+    it("should fix it again, gate what that left behind, and carry on to the revert", async () => {
         // given
         const harnessed = harness(blamed)
         killedMidFix(harnessed)
@@ -1072,12 +1080,13 @@ describe("a run resumed over a fix a killed run left part-way", () => {
         expect(settled(harnessed.events.appended)).toEqual([
             "#10 merge ok",
             "#10 gate failed",
+            "#10 fix failed",
             "#10 gate failed",
             "#10 revert failed",
         ])
     })
 
-    it("should never spend a second fix agent on it, because the killed one spent the budget", async () => {
+    it("should send the fix agent to it again, because the killed one was never answered", async () => {
         // given
         const harnessed = harness(blamed)
         killedMidFix(harnessed)
@@ -1086,7 +1095,7 @@ describe("a run resumed over a fix a killed run left part-way", () => {
         await harnessed.run()
 
         // then
-        expect(harnessed.fixer.invocations).toEqual([])
+        expect(harnessed.fixer.invocations).toHaveLength(1)
     })
 
     it("should take the killed fix's merge back off the spec branch rather than leave it red underneath", async () => {

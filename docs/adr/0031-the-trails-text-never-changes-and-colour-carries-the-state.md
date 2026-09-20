@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted, extended by ADR-0034
 ---
 
 # The trail's text never changes, and colour carries the state
@@ -96,3 +96,27 @@ it does not cover; the arithmetic decides it instead.
   after them to push around. ADR-0030 already took `beyond repair` off the board.
 - **The outcome glyphs go.** `OUTCOMES` in the frame existed so a green step and a red one differed
   without colour, and hue says it now.
+
+## Extension: colour may carry liveness
+
+The decision above gave colour one job: the state a step is in. It is extended so that colour may
+also carry **liveness** — whether a running step has written anything recently — and it does so on
+the same terms: the trail's words still never change, and what colour says is a role the frame
+hands out and the palette alone treats (ADR-0033).
+
+What does change is the row's end. A row with a running step ends in how long that step has been
+going (ADR-0034). That figure is text, because a number is read rather than glanced at, and it sits
+after `waiting` and `dead` so that nothing to its left moves as it counts. A figure that counts up
+cannot say whether the step behind it is alive — a killed step counts like a working one — and that
+is what colour is for.
+
+A running step that has gone quiet takes the `quiet` role: still underlined, because it is still
+the live edge of the run, and amber, because silence is a warning rather than a failure. The step's
+name and its elapsed figure both take it. A step still writing keeps `running`, and its figure stays
+plain.
+
+A step a run nothing holds any more left open takes the `interrupted` role: amber, because it did
+not go clean and nothing broke, and *not* underlined, because it is not the live edge — nothing is.
+It is what `quiet` is a suspicion of, and the underline is the whole of the difference between
+wondering whether a step is still going and reading that it is not. The row's words are unchanged
+again, and the row ends in no figure at all: an interrupted step is not counting towards anything.

@@ -6,9 +6,16 @@ import { eventLogPath } from "../domain/paths.ts"
 /** How often a follower looks at the file. Small enough that a frame follows an append, and no more. */
 const POLL_MS = 200
 
-const pause = (ms: number): Promise<void> =>
+/** A wait that an abort cuts short, so that a follower told to stop is not left sleeping. */
+const pause = (ms: number, signal: AbortSignal | undefined): Promise<void> =>
     new Promise(resolve => {
-        setTimeout(resolve, ms)
+        const done = (): void => {
+            clearTimeout(timer)
+            signal?.removeEventListener("abort", done)
+            resolve()
+        }
+        const timer = setTimeout(done, ms)
+        signal?.addEventListener("abort", done, { once: true })
     })
 
 /**
@@ -59,18 +66,18 @@ export const createFileEventLog = ({ pollMs = POLL_MS }: { pollMs?: number } = {
          * are the same are a log that has not moved, and a torn last line that is completed later is
          * a change even where it parsed to nothing before.
          */
-        follow: async function* (root, spec) {
+        follow: async function* (root, spec, signal) {
             let seen: string | undefined
             let looked = false
 
-            for (;;) {
+            while (signal?.aborted !== true) {
                 const contents = await contentsOf(root, spec)
                 if (!looked || contents !== seen) {
                     seen = contents
                     looked = true
                     yield eventsIn(contents)
                 }
-                await pause(pollMs)
+                await pause(pollMs, signal)
             }
         },
     }

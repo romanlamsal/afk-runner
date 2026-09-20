@@ -33,6 +33,12 @@ export type FakeGit = {
     collide: (branch: string) => void
     /** Make the worktree at `path` dirty, as an agent that left work uncommitted does. */
     soil: (path: string) => void
+    /** Change a tracked file in the worktree at `path`, which a reset puts back and a clean does not. */
+    edit: (path: string) => void
+    /** Leave an ignored file in the worktree at `path`, as an install does. */
+    ignore: (path: string) => void
+    /** Whether the ignored file `ignore` left at `path` is still there. */
+    ignores: (path: string) => boolean
     /** Every branch pushed, in the order it was pushed. */
     pushed: string[]
     /** The branches the remote has: what a push put there, less what a deletion took away. */
@@ -89,7 +95,19 @@ export const createFakeGit = (repository: FakeRepository = {}): FakeGit => {
     const colliding = new Set(repository.colliding ?? [])
     /** Worktree path to the rebase git stopped in, which is the only state a rebase leaves. */
     const stopped = new Map<string, RebaseRequest>()
+    /** Worktrees with an untracked file in them, which only a clean takes away. */
     const dirty = new Set<string>()
+    /** Worktrees with a tracked file changed, which only a reset puts back. */
+    const edited = new Set<string>()
+    /** Worktrees with an ignored file in them, which neither takes away. */
+    const ignored = new Set<string>()
+
+    /** Everything a worktree held besides its branch, which goes when the worktree does. */
+    const forget = (path: string): void => {
+        dirty.delete(path)
+        edited.delete(path)
+        ignored.delete(path)
+    }
 
     /** The commits leading to `rev`, whether it names a branch or a commit already on one. */
     const historyOf = (rev: string): readonly string[] => {
@@ -158,6 +176,13 @@ export const createFakeGit = (repository: FakeRepository = {}): FakeGit => {
         soil: path => {
             dirty.add(path)
         },
+        edit: path => {
+            edited.add(path)
+        },
+        ignore: path => {
+            ignored.add(path)
+        },
+        ignores: path => ignored.has(path),
         git: {
             topLevel: async () => ("root" in repository ? repository.root : "/repo"),
             hasLocalBranch: async (_root, branch) => branches.has(branch),
@@ -184,14 +209,31 @@ export const createFakeGit = (repository: FakeRepository = {}): FakeGit => {
                 if (!branches.has(request.branch)) {
                     branches.set(request.branch, [...historyOf(request.startPoint)])
                 }
+                // Whatever was at the path is replaced, and nothing in it survives.
+                forget(request.path)
                 checkouts.set(request.path, request.branch)
+                return { ok: true }
+            },
+            // A rebase git stopped in has a detached head: it holds no branch there is a tip of.
+            resetWorktree: async (_root, { path, branch }) => {
+                if (checkouts.get(path) !== branch || stopped.has(path)) {
+                    return { ok: false, reason: `the worktree at ${path} does not hold ${branch}` }
+                }
+                edited.delete(path)
+                return { ok: true }
+            },
+            cleanWorktree: async (_root, path) => {
+                if (!checkouts.has(path)) {
+                    return { ok: false, reason: `no worktree at ${path}` }
+                }
+                dirty.delete(path)
                 return { ok: true }
             },
             hasWorktree: async (_root, path) => checkouts.has(path),
             removeWorktree: async (_root, path) => {
                 removed.push(path)
                 checkouts.delete(path)
-                dirty.delete(path)
+                forget(path)
                 return { ok: true }
             },
             removeWorktreesUnder: async (_root, path) => {
@@ -201,14 +243,14 @@ export const createFakeGit = (repository: FakeRepository = {}): FakeGit => {
                 for (const worktree of [...checkouts.keys()].filter(at => at.startsWith(`${path}/`))) {
                     removed.push(worktree)
                     checkouts.delete(worktree)
-                    dirty.delete(worktree)
+                    forget(worktree)
                 }
                 return { ok: true }
             },
 
             revision: async (_root, rev) => tipOf(rev),
             contains: async (_root, { rev, commit }) => historyOf(rev).includes(commit),
-            isClean: async (_root, path) => !dirty.has(path) && !stopped.has(path),
+            isClean: async (_root, path) => !dirty.has(path) && !edited.has(path) && !stopped.has(path),
             log: async (_root, { rev, notIn }) =>
                 resolves(rev) && resolves(notIn)
                     ? ownCommits(rev, notIn).map(commit => messages.get(commit) ?? commit)

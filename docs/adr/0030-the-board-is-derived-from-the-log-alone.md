@@ -1,8 +1,18 @@
 ---
-status: accepted
+status: superseded by ADR-0034
 ---
 
 # The board is derived from the log alone
+
+> **Superseded by ADR-0034.** The board now reads the run directory rather than the log alone, and is
+> handed an instant to count a running step's elapsed time to. The principle stands: anything able to
+> read the run directory draws the same board, and the driver's in-flight set is not part of it.
+>
+> **"Three states require no guess; four forced one" no longer holds**, and that section is the part
+> of this decision that is actually reversed. It was true while the only witness to liveness was the
+> driver's in-flight set. The run lock is a second witness, it lives in the run directory, and it
+> answers for the run rather than for a step — so the fourth weight, `interrupted`, is read rather
+> than guessed, and ADR-0034's last consequence is where it is decided.
 
 ADR-0029 gave the board three inputs: the manifest, the event log and the driver's live action set.
 The third was not optional. A `running` event whose action the driver holds is a step that is

@@ -9,9 +9,12 @@ import { createEnvironmentFiles } from "./infrastructure/environment-files.ts"
 import { createGit } from "./infrastructure/git.ts"
 import { createSignalInterrupts } from "./infrastructure/interrupts.ts"
 import { killEveryChild } from "./infrastructure/process.ts"
+import { createIntervalTicker } from "./infrastructure/ticker.ts"
 import { createGitHubTracker } from "./infrastructure/tracker.ts"
+import { createFileActivity } from "./repository/activity.ts"
 import { createFileEventLog } from "./repository/event-log.ts"
 import { createFileManifestStore } from "./repository/manifest-store.ts"
+import { createFileRunLock } from "./repository/run-lock.ts"
 import { createFileRunRecordStore } from "./repository/run-records.ts"
 import { createShowBoardService } from "./service/board.ts"
 import { createDriveService } from "./service/drive.ts"
@@ -24,10 +27,13 @@ import { createMergeService } from "./service/merge.ts"
 import { createPlanService } from "./service/plan.ts"
 import { createPrepareService } from "./service/prepare.ts"
 import { createRebaseService } from "./service/rebase.ts"
+import { createReleaseService } from "./service/release.ts"
 import { createResolveService } from "./service/resolve.ts"
 import { createRevertService } from "./service/revert.ts"
 import { createSetupService } from "./service/setup.ts"
 import { createStartService } from "./service/start.ts"
+import { createTakeOverService } from "./service/takeover.ts"
+import { createWatchBoardService } from "./service/watch.ts"
 
 /**
  * Assembly is not a layer. It is the only module that knows both a port and its implementation:
@@ -48,6 +54,9 @@ export const assembleCli = (): Cli => {
     const environment = createEnvironmentFiles()
     const events = createFileEventLog()
     const git = createGit()
+    // One afk per spec, and this process is the one the lock names while it holds it (ADR-0034).
+    const lock = createFileRunLock()
+    const self = { pid: process.pid }
     // Selection is TTY detection and there is no flag: the board is simply what a run looks like,
     // redrawn where there is a terminal to draw it on and a line per change where there is not
     // (ADR-0029).
@@ -85,23 +94,51 @@ export const assembleCli = (): Cli => {
     // services resolve — nothing here assumes the two are the same.
     const cwd = process.cwd()
 
+    // Whether there is somebody at the terminal to answer a question. Decided once, so that the
+    // invocation's rules and the takeover's offer cannot disagree about it (ADR-0014, ADR-0035).
+    const interactive = process.stdin.isTTY === true
+    const operator = createTerminalOperator({ input: process.stdin, output: process.stdout, print })
+    // Only ever offered where somebody can answer it: off a terminal, a live holder is a refusal and
+    // nothing else (ADR-0035).
+    const takeOver = createTakeOverService({
+        lock,
+        operator,
+        interactive,
+        wait: ms => new Promise(resolve => setTimeout(resolve, ms)),
+    })
+
     const start = createStartService({
         cwd,
         environment,
         events,
         git,
+        lock,
+        self,
         manifests,
-        operator: createTerminalOperator({ input: process.stdin, output: process.stdout, print }),
+        operator,
         plan: createPlanService({ agent, events, git, manifests, now }),
         records,
+        takeOver,
     })
 
     // Asked twice, for different reasons: by the gate, about a ticket, and by the revert, about the
     // branch that ticket was taken back off (ADR-0009).
     const prove = createProveBranch({ commands })
 
-    const drive = createDriveService({
+    // The one thing that redraws the board, handed to the runner and the viewer alike so that both
+    // redraw on the same terms: a change to the log, and a tick while nothing settles. It reads when
+    // each running step last wrote off the run directory, and who holds the run, so both draw the
+    // same colour for the same step and neither calls a dead run's steps live (ADR-0034).
+    const watch = createWatchBoardService({
+        activity: createFileActivity(),
         board,
+        events,
+        lock,
+        now,
+        ticker: createIntervalTicker(),
+    })
+
+    const drive = createDriveService({
         events,
         interrupts,
         implement: createImplementService({ agent, events, git, now }),
@@ -114,17 +151,19 @@ export const assembleCli = (): Cli => {
         revert: createRevertService({ events, git, now, prove }),
         prepare: createPrepareService({ agent, events, git, now }),
         now,
+        watch,
     })
 
     return createCli({
-        isInteractive: () => process.stdin.isTTY === true,
+        isInteractive: () => interactive,
         printError,
         run: createRun({
-            fresh: createFreshService({ cwd, git, records, tracker }),
-            showBoard: createShowBoardService({ board, cwd, events, git, manifests }),
+            fresh: createFreshService({ cwd, git, lock, self, records, tracker, takeOver }),
+            showBoard: createShowBoardService({ cwd, git, manifests, watch }),
             start,
             drive,
             finish: createFinishService({ agent, events, git, now, tracker }),
+            release: createReleaseService({ cwd, git, lock, self }),
             print,
             printError,
             boardDrawn: drawing,

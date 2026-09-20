@@ -108,6 +108,8 @@ const eventSchema = z.object({
     baseSha: z.string().optional(),
     /** Where the attempt's transcript is, relative to the repository root. */
     transcriptPath: z.string().optional(),
+    /** Where a step running the operator's own commands writes their output, relative to the root. */
+    logPath: z.string().optional(),
     /**
      * Free text: why a step ended as it did, or what an agent wants the reader of a commit to know.
      * There is no closed enum of failure reasons. It is quoted — the conflict resolver's note
@@ -133,7 +135,10 @@ export type LifecycleEvent = z.infer<typeof eventSchema>
  * than a copy per service, because which fields may vary is a property of the event and the event
  * is defined here.
  */
-export type EventDetails = Pick<LifecycleEvent, "sessionId" | "baseSha" | "transcriptPath" | "detail" | "usage">
+export type EventDetails = Pick<
+    LifecycleEvent,
+    "sessionId" | "baseSha" | "transcriptPath" | "logPath" | "detail" | "usage"
+>
 
 /**
  * One line of the log, or nothing. The log is read defensively on purpose: the last line of one a
@@ -161,8 +166,10 @@ export type EventLog = {
      *
      * It ends only where nothing more can arrive, which over a file on disk is never: a follower
      * leaves the loop when it has seen enough, and must be ready for one that goes on indefinitely.
+     * Aborting `signal` ends it too, even while it is waiting on a change that may never come —
+     * which is what lets a follower stop without a look left pending behind it.
      */
-    follow: (root: string, spec: number) => AsyncIterable<readonly LifecycleEvent[]>
+    follow: (root: string, spec: number, signal?: AbortSignal) => AsyncIterable<readonly LifecycleEvent[]>
 }
 
 /**
@@ -185,6 +192,14 @@ export const statusOf = (events: readonly LifecycleEvent[], ticket: number): Lif
  */
 export const attempts = (events: readonly LifecycleEvent[], ticket: number, step: Step): number =>
     events.filter(event => event.ticket === ticket && event.step === step && event.outcome === "running").length
+
+/**
+ * How many times a step has been answered, counted from its terminal events. An attempt a killed run
+ * left `running` was never answered, so it is not a failure — and a budget, which exists to stop a
+ * failure repeating, is not spent by it.
+ */
+export const answered = (events: readonly LifecycleEvent[], ticket: number, step: Step): number =>
+    events.filter(event => event.ticket === ticket && event.step === step && event.outcome !== "running").length
 
 /** Only the gate produces verified, and a ticket reverted after one stops being verified (ADR-0015). */
 export const verified = (events: readonly LifecycleEvent[], ticket: number): boolean => {
@@ -347,6 +362,48 @@ export const reverted = (ticket: number, at: Date, detail: string): LifecycleEve
     detail,
 })
 
+/** The moves the gate-red sequence is made of (ADR-0009). */
+export type RedGateMove = "fix" | "gate" | "revert"
+
+/**
+ * What a red gate is worth: one fix attempt, and failing that the merge comes back off the branch.
+ * A budget rather than a retry policy, and counted off the log's **answered** `fix` events: a fix a
+ * killed run left `running` never reported back, so it is not the failure the budget exists to stop
+ * repeating, and an operator's interrupt does not cost the ticket its one repair (ADR-0009, ADR-0022).
+ */
+const FIX_BUDGET = 1
+
+/**
+ * What the gate-red sequence still owes a ticket, or nothing where it is not in one. The whole of
+ * ADR-0009, read off the log rather than held as control flow inside a service: one fix attempt,
+ * the gate again on what it left behind, and the revert once the budget is spent (ADR-0023).
+ *
+ * One rule with two readers — the schedule, which dispatches the move, and the conclusion, which
+ * answers nothing while a move is owed — so that the two cannot disagree about it.
+ *
+ * A fix is never judged by what the fix agent said: the gate follows `ok` and `failed` alike,
+ * because the branch is what afk proves. A `fix: running` a killed run left behind is a fix nobody
+ * answered, which is not an attempt that failed — it is owed again, however many times it is
+ * killed, exactly as `repairFor` treats every other step nothing ended.
+ *
+ * A `revert: running` is the same: nobody answered it, so the sequence still owes the ticket the
+ * revert. Its trailer cross-check makes the repeat harmless, and the repeat is what still proves the
+ * reverted tip. A ticket is beyond repair only once the revert's own record says so (ADR-0009).
+ */
+export const owedAfterRedGate = (events: readonly LifecycleEvent[], ticket: number): RedGateMove | undefined => {
+    const last = statusOf(events, ticket)
+    if (last?.step === "fix") {
+        return last.outcome === "running" ? "fix" : "gate"
+    }
+    if (last?.step === "gate" && last.outcome === "failed") {
+        return answered(events, ticket, "fix") < FIX_BUDGET ? "fix" : "revert"
+    }
+    if (last?.step === "revert" && last.outcome === "running") {
+        return "revert"
+    }
+    return undefined
+}
+
 /**
  * The four things a ticket can come to, and the whole of what a run says about one. A ticket the log
  * has not brought to any of them — never attempted, or mid-step — has come to none, which is why
@@ -360,8 +417,14 @@ export type Conclusion = (typeof CONCLUSIONS)[number]
  * What a ticket came to, decided here and nowhere else. It is not display-only: the exit code and
  * the pull request's draft flag are read from it, so a second route to the same judgement would let
  * what the operator is shown disagree with what the process returns (`layers.md`, question 3).
+ *
+ * A ticket the gate-red sequence still owes a move has come to nothing: a red gate is not a failed
+ * ticket while a fix or a revert is still to come, and only the revert's own record says it failed.
  */
 export const cameTo = (events: readonly LifecycleEvent[], ticket: number): Conclusion | undefined => {
+    if (owedAfterRedGate(events, ticket) !== undefined) {
+        return undefined
+    }
     switch (statusOf(events, ticket)?.outcome) {
         case "ok":
             return verified(events, ticket) ? "verified" : "unverified"

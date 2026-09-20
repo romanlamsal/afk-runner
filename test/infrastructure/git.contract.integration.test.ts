@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { mkdtemp, realpath, writeFile } from "node:fs/promises"
+import { access, appendFile, mkdtemp, realpath, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
@@ -20,6 +20,9 @@ const commitHere = async (cwd: string, message: string): Promise<string> => {
     await sh(cwd, "commit", "-m", message)
     return sh(cwd, "rev-parse", "HEAD")
 }
+
+/** What an install leaves: a file the repository ignores. */
+const IGNORED = "installed.txt"
 
 const world = async (): Promise<GitWorld> => {
     const root = await realpath(await mkdtemp(join(tmpdir(), "afk-git-contract-")))
@@ -80,6 +83,23 @@ const world = async (): Promise<GitWorld> => {
         },
         soil: async path => {
             await writeFile(join(root, path, "uncommitted.txt"), "in progress\n", "utf8")
+        },
+        // Trunk's first commit is in every worktree, so there is always that file to change.
+        edit: async path => {
+            await writeFile(join(root, path, "first.txt"), "changed\n", "utf8")
+        },
+        // Ignored through the repository's own exclude file, which every worktree shares.
+        ignore: async path => {
+            await appendFile(join(root, ".git", "info", "exclude"), `${IGNORED}\n`, "utf8")
+            await writeFile(join(root, path, IGNORED), "installed\n", "utf8")
+        },
+        ignores: async path => {
+            try {
+                await access(join(root, path, IGNORED))
+                return true
+            } catch {
+                return false
+            }
         },
     }
 }

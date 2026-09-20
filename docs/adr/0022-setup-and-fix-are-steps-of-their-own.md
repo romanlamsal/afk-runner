@@ -40,6 +40,20 @@ repository's own commands, not an agent; an id in the log is one that was observ
 that never had a session never had one to record. It is the first step whose attempts have no
 session, and two events per attempt is unchanged.
 
+## Amendment: the fix budget counts answers
+
+`attempts(events, ticket, "fix")` counted starts, so a fix killed before it reported back spent the
+ticket's one repair — which is a kill being charged as a failure. **The fix budget is
+`answered(events, ticket, "fix")`: the step's terminal events.** A killed `fix` is dispatched
+again rather than sent back to the gate, and a `fix` that reported `ok` or `failed` still spends the
+budget. The rule under this record is unchanged — a budget has to be derivable from the log — and so
+is every other budget's count: they stay on start events, because `repairFor` already passes a step
+nothing ended without asking its budget, and a setup's recut is charged for a kill deliberately
+(ADR-0024).
+
+The killed `revert` is likewise dispatched again, made safe to repeat by its `afk-reverted` trailer,
+and a ticket reads as failed only once the revert's own record says so (ADR-0009).
+
 ## Considered options
 
 - **Accept the unrecorded window and document it.** Rejected. It is not a window between two facts,
@@ -58,7 +72,8 @@ session, and two events per attempt is unchanged.
 - **The claim happens inside a recorded step**, so a ticket assigned on the tracker always has an
   event. A claim that is refused still halts the run (ADR-0013); what changes is that a claim that
   succeeded and was then killed is visible.
-- **The one fix attempt becomes derivable** — `attempts(events, ticket, "fix")` is the whole of it.
+- **The one fix attempt becomes derivable** — `attempts(events, ticket, "fix")` is the whole of it
+  (since amended to `answered`, above).
   ADR-0009's "recorded as a second gate attempt" is superseded by this record. The gate on the
   reverted tip is still recorded as the **revert**'s outcome, which is untouched: that is what keeps
   a reverted ticket from ending on `gate: ok` and reading as verified.
@@ -66,4 +81,4 @@ session, and two events per attempt is unchanged.
   that a `setup` that is *killed* leaves `setup: running` rather than silence.
 - **Neither step is repairable, and neither is recovered by an agent.** A broken `setup` is recut
   (ADR-0024); a killed `fix` goes back to the gate, which is now a sequence the decision function
-  owns (ADR-0023). Both were open when this record was written.
+  owns (ADR-0023) — since amended: a killed `fix` is dispatched again (above). Both were open when this record was written.

@@ -40,3 +40,16 @@ const stamp = (at: Date): string => at.toISOString().replace(/[-:.]/g, "")
  */
 export const transcriptPath = (spec: number, label: string, at: Date): string =>
     `${runDirectory(spec)}/transcripts/${stamp(at)}-${label}.jsonl`
+
+/**
+ * One log per attempt at a step that runs the operator's own commands, named like a transcript. A
+ * step running two commands — the gate's `setup` then `verify` — writes both into the one file.
+ */
+export const commandLogPath = (spec: number, label: string, at: Date): string =>
+    `${runDirectory(spec)}/commands/${stamp(at)}-${label}.log`
+
+/**
+ * Who holds the run: the one afk process allowed to write this run directory (ADR-0034). Inside it,
+ * so the directory's own ignore file covers it and starting over takes it away with everything else.
+ */
+export const runLockPath = (spec: number): string => `${runDirectory(spec)}/lock`

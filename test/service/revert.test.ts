@@ -3,6 +3,7 @@ import type { CommandRunner } from "../../src/domain/commands.ts"
 import type { LifecycleEvent } from "../../src/domain/events.ts"
 import type { Manifest, Ticket } from "../../src/domain/manifest.ts"
 import type { PreparedRun } from "../../src/domain/run.ts"
+import { revertMessage, ticketTrailer } from "../../src/domain/squash.ts"
 import type { StepResult } from "../../src/service/attempt.ts"
 import { createProveBranch } from "../../src/service/gate.ts"
 import { createRevertService } from "../../src/service/revert.ts"
@@ -69,11 +70,11 @@ type Setup = {
 const harness = ({ broken = "by the ticket", log = SPENT, repository = REPOSITORY }: Setup = {}) => {
     const git = createFakeGit(repository)
     const events = createFakeEventLog(log)
-    const ran: { cwd: string; command: string }[] = []
+    const ran: { cwd: string; command: string; logPath: string }[] = []
 
     /** Setup prepares a checkout and says nothing about its integrity, so only verify goes red. */
-    const commands: CommandRunner = async ({ cwd, command }) => {
-        ran.push({ cwd, command })
+    const commands: CommandRunner = async ({ cwd, command, logPath }) => {
+        ran.push({ cwd, command, logPath })
         const mended =
             broken === "by the ticket" && git.commitsOn("afk/4/spec").some(commit => commit.startsWith("revert-"))
         return command === MANIFEST.verify && !mended
@@ -137,9 +138,37 @@ describe("the revert service: taking the merge back off the branch", () => {
         await revert()
 
         // then
-        expect(ran).toEqual([
+        expect(ran.map(({ cwd, command }) => ({ cwd, command }))).toEqual([
             { cwd: ".afk/4/gate", command: "npm ci" },
             { cwd: ".afk/4/gate", command: "npm run check" },
+        ])
+    })
+
+    it("should have the reverted tip's setup and verify write into one log in the run directory", async () => {
+        // given
+        const { revert, ran } = harness()
+
+        // when
+        await revert()
+
+        // then
+        expect(ran.map(({ logPath }) => logPath)).toEqual([
+            ".afk/4/commands/20260915T111838314Z-t7-revert.log",
+            ".afk/4/commands/20260915T111838314Z-t7-revert.log",
+        ])
+    })
+
+    it("should name that log on every event of the attempt", async () => {
+        // given
+        const { revert, events } = harness()
+
+        // when
+        await revert()
+
+        // then
+        expect(events.appended.slice(SPENT.length).map(event => event.logPath)).toEqual([
+            ".afk/4/commands/20260915T111838314Z-t7-revert.log",
+            ".afk/4/commands/20260915T111838314Z-t7-revert.log",
         ])
     })
 
@@ -250,5 +279,102 @@ describe("the revert service: a revert it cannot perform", () => {
 
         // then
         expect(result).toEqual({ outcome: "halted", reason: "#11 is not a ticket of spec #4" })
+    })
+})
+
+/** A revert a killed run left `running`, which is what the gate-red sequence dispatches again. */
+const KILLED: readonly LifecycleEvent[] = [
+    ...SPENT,
+    { ticket: 7, step: "revert", outcome: "running", at: "2026-09-15T11:18:37.000Z" },
+]
+
+/** The spec branch that killed revert left behind once its commit had landed. */
+const ALREADY_REVERTED: FakeRepository = {
+    branches: { main: ["cut"], "afk/4/spec": ["cut", "squash-afk/4/t7", "the-fix", "revert-squash-afk/4/t7"] },
+    messages: {
+        "squash-afk/4/t7": `Implement the slate (#7)\n\n${ticketTrailer(4, 7)}`,
+        "revert-squash-afk/4/t7": revertMessage({ spec: 4, ticket: 7, title: TICKET.title }),
+    },
+    checkouts: { ".afk/4/gate": "afk/4/spec" },
+}
+
+describe("the revert service: a revert a killed run left running", () => {
+    it("should revert when the killed attempt never landed its commit", async () => {
+        // given
+        const { revert, git } = harness({ log: KILLED })
+
+        // when
+        await revert()
+
+        // then
+        expect(git.commitsOn("afk/4/spec")).toEqual(["cut", "squash-afk/4/t7", "the-fix", "revert-squash-afk/4/t7"])
+    })
+
+    it("should not revert a second time when the killed attempt's commit is already on the spec branch", async () => {
+        // given
+        const { revert, git } = harness({ log: KILLED, repository: ALREADY_REVERTED })
+
+        // when
+        await revert()
+
+        // then
+        expect(git.commitsOn("afk/4/spec")).toEqual(["cut", "squash-afk/4/t7", "the-fix", "revert-squash-afk/4/t7"])
+    })
+
+    it("should still prove the reverted tip, so that a kill never skips the proof", async () => {
+        // given
+        const { revert, ran } = harness({ log: KILLED, repository: ALREADY_REVERTED })
+
+        // when
+        await revert()
+
+        // then
+        expect(ran.map(({ command }) => command)).toEqual(["npm ci", "npm run check"])
+    })
+
+    it.each([
+        ["fail the ticket when the reverted tip is green", "by the ticket", { outcome: "failed" }],
+        [
+            "halt the run when the reverted tip is red",
+            "by something else",
+            {
+                outcome: "halted",
+                reason: "afk/4/spec is broken independently of any ticket: it is still red with #7 reverted off it",
+            },
+        ],
+    ] as const)("should %s", async (_name, broken, expected) => {
+        // given
+        const { revert } = harness({ broken, log: KILLED, repository: ALREADY_REVERTED })
+
+        // when
+        const result = await revert()
+
+        // then
+        expect(result).toEqual(expected)
+    })
+
+    it("should record the repeat as an attempt of its own that ends the ticket", async () => {
+        // given
+        const { revert, events } = harness({ log: KILLED, repository: ALREADY_REVERTED })
+
+        // when
+        await revert()
+
+        // then
+        expect(steps(events.appended)).toEqual(["revert running", "revert running", "revert failed"])
+    })
+
+    it("should halt rather than guess when what landed on the spec branch cannot be read", async () => {
+        // given
+        const { revert } = harness({ log: KILLED, repository: { ...ALREADY_REVERTED, unreadable: ["afk/4/spec"] } })
+
+        // when
+        const result = await revert()
+
+        // then
+        expect(result).toEqual({
+            outcome: "halted",
+            reason: "what has landed on afk/4/spec could not be read, so #7 was not reverted",
+        })
     })
 })

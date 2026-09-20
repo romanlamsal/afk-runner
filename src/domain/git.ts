@@ -24,6 +24,13 @@ export type WorktreeRequest = {
     startPoint: string
 }
 
+export type ResetRequest = {
+    /** The worktree to put back, relative to the repository root. */
+    path: string
+    /** The branch it must hold for there to be anything to put back. */
+    branch: string
+}
+
 /** What a git invocation that moves a ref came to. Nothing afk asks for goes unchecked (ADR-0005). */
 export type GitResult = { ok: true } | { ok: false; reason: string }
 
@@ -86,9 +93,23 @@ export type Git = {
     inspectBase: (root: string, branch: string) => Promise<BaseState | undefined>
     /**
      * Check `branch` out at `path`, creating the branch from `startPoint` when it does not exist and
-     * replacing whatever is at `path` — the gate worktree is re-created at every process start.
+     * replacing whatever is at `path`. The gate worktree is re-created only when it cannot be
+     * reused: it is missing, or it holds something other than the spec branch.
      */
     checkoutWorktree: (root: string, request: WorktreeRequest) => Promise<GitResult>
+    /**
+     * Put the worktree at `path` back on the tip of `branch`, discarding every uncommitted change to
+     * a tracked file. Refused where no worktree is registered at `path`, or where the one there does
+     * not hold `branch` — a detached head, which a rebase git stopped in is, included. The first half
+     * of reusing the gate worktree at process start; the refusal is what re-creates it instead.
+     */
+    resetWorktree: (root: string, request: ResetRequest) => Promise<GitResult>
+    /**
+     * Take away every untracked file in the worktree at `path`, and leave every ignored one. The
+     * second half of reusing the gate worktree: nothing left behind may change what the gate proves,
+     * and an installed tree is ignored files, which is what a reuse exists to keep.
+     */
+    cleanWorktree: (root: string, path: string) => Promise<GitResult>
     /**
      * Take a worktree away, freeing the branch it held. Asked once a ticket is verified: what is in
      * a verified ticket's worktree is on the spec branch, and a failed one's is kept (ADR-0012).

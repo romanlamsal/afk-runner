@@ -3,7 +3,7 @@ import type { CommandResult, CommandRunner } from "../domain/commands.ts"
 import type { EventLog, Outcome } from "../domain/events.ts"
 import type { Git } from "../domain/git.ts"
 import { ticketOf } from "../domain/manifest.ts"
-import { ticketWorktree } from "../domain/paths.ts"
+import { commandLogPath, ticketWorktree } from "../domain/paths.ts"
 import type { PreparedRun } from "../domain/run.ts"
 import type { StepResult } from "./attempt.ts"
 
@@ -20,7 +20,7 @@ export type RunGate = (run: PreparedRun, action: { ticket: number }) => Promise<
  * that just failed and recording it as a gate would make a reverted ticket read as verified
  * (ADR-0009).
  */
-export type ProveBranch = (run: PreparedRun) => Promise<CommandResult>
+export type ProveBranch = (run: PreparedRun, logPath: string) => Promise<CommandResult>
 
 export type ProveDeps = {
     /** The operator's own `setup` and `verify`, run in the gate worktree and nowhere else. */
@@ -36,9 +36,9 @@ export type GateDeps = {
 
 export const createProveBranch =
     ({ commands }: ProveDeps): ProveBranch =>
-    async run => {
+    async (run, logPath) => {
         for (const command of [run.manifest.setup, run.manifest.verify]) {
-            const ran = await commands({ root: run.root, cwd: run.gate, command })
+            const ran = await commands({ root: run.root, cwd: run.gate, command, logPath })
             if (!ran.ok) {
                 return ran
             }
@@ -48,7 +48,7 @@ export const createProveBranch =
     }
 
 /**
- * The gate, in the gate worktree — long-lived, re-created at process start, and the spec branch's
+ * The gate, in the gate worktree — long-lived, reused across process starts, and the spec branch's
  * sole writer, so it already stands on the commit that just landed (ADR-0006).
  *
  * What it asserts is the integrity of **everything merged so far**, which every other check in the
@@ -76,8 +76,10 @@ export const createGateService =
             return { outcome: "halted", reason: listed.reason }
         }
 
+        const logPath = commandLogPath(spec, `t${ticket}-gate`, now())
+
         const record = (outcome: Outcome, detail?: string): Promise<void> =>
-            events.append(root, spec, { ticket, step: "gate", outcome, at: now().toISOString(), detail })
+            events.append(root, spec, { ticket, step: "gate", outcome, at: now().toISOString(), detail, logPath })
 
         /**
          * What a green entitles the run to tidy away. A verified ticket's worktree has nothing left
@@ -97,7 +99,7 @@ export const createGateService =
 
         await record("running")
 
-        const proved = await prove(run)
+        const proved = await prove(run, logPath)
         if (!proved.ok) {
             await record("failed", proved.detail)
             // A red gate is not the end of the ticket by itself, and it is not this service's

@@ -47,14 +47,19 @@ const SETTLED_ROLES: Record<SettledOutcome, Role> = {
 
 /**
  * Where a step stands in the run, as the role it is read as: a step not reached yet is ahead, a step
- * the log started and has not ended is running, and a settled one is whatever it settled on.
+ * the log started and has not ended is running — or quiet, where its row says it has stopped writing,
+ * or interrupted, where nothing holds the run it was started by — and a settled one is whatever it
+ * settled on. The words stay the step's name in every case: the colour carries the liveness, and the
+ * text keeps meaning what it always has (ADR-0031).
  */
-const roleOf = (entry: BoardStep): Role => {
+const roleOf = (entry: BoardStep, quiet: boolean): Role => {
     switch (entry.state) {
         case "settled":
             return SETTLED_ROLES[entry.outcome]
         case "running":
-            return "running"
+            return quiet ? "quiet" : "running"
+        case "interrupted":
+            return "interrupted"
         case "ahead":
             return "ahead"
     }
@@ -65,7 +70,7 @@ const roleOf = (entry: BoardStep): Role => {
  * — they existed so a green step and a red one differed with colour off, and the palette says it now
  * — so a step occupies the same columns from the first frame to the last (ADR-0031).
  */
-const stepSpan = (entry: BoardStep): Span => ({ text: entry.step, role: roleOf(entry) })
+const stepSpan = (entry: BoardStep, quiet: boolean): Span => ({ text: entry.step, role: roleOf(entry, quiet) })
 
 /**
  * What a ticket came to, as the role its number is read as. A run that has not brought the ticket to
@@ -189,7 +194,7 @@ const wrapped = (text: string, width: number): readonly Line[] => {
  */
 const trail = (row: BoardRow): Line =>
     [
-        ...row.steps.map(stepSpan),
+        ...row.steps.map(entry => stepSpan(entry, row.quiet)),
         ...(row.waiting ? [plain(WAITING)] : []),
         ...(dead(row) ? [{ text: DEAD, role: verdictOf(row) }] : []),
     ]
@@ -197,11 +202,49 @@ const trail = (row: BoardRow): Line =>
         // and what a step is read as reaches no space beside it.
         .flatMap((span, index): Span[] => (index === 0 ? [span] : [plain(" "), span]))
 
+/** What sets a row's elapsed figure off from the trail it is about. */
+const ELAPSED = "|"
+
+/**
+ * How long a step has been going, in the fewest units that still count it: seconds under a minute,
+ * minutes and seconds under an hour, hours and minutes past that. Seconds are whole and rounded down,
+ * so the figure never reads a second the step has not had yet.
+ */
+export const elapsedText = (ms: number): string => {
+    const seconds = Math.floor(ms / 1000)
+    if (seconds < 60) {
+        return `${seconds}s`
+    }
+    const two = (n: number): string => `${n}`.padStart(2, "0")
+    const minutes = Math.floor(seconds / 60)
+    if (minutes < 60) {
+        return `${minutes}m${two(seconds % 60)}s`
+    }
+    return `${Math.floor(minutes / 60)}h${two(minutes % 60)}m`
+}
+
+/**
+ * The end of a row: how long its running step has been going, and nothing at all where no step is
+ * running. It goes after everything else on the row, so that its width changing as it counts moves
+ * nothing but itself, and the trail's words stay what they were (ADR-0031, ADR-0034). A step gone
+ * quiet has its figure drawn at the same warning as its name, since the figure is where the eye goes
+ * to ask whether the step is still alive.
+ */
+const elapsedSpans = (row: BoardRow): Span[] =>
+    row.elapsed === undefined
+        ? []
+        : [
+              plain(" "),
+              plain(ELAPSED),
+              plain(" "),
+              { text: elapsedText(row.elapsed), role: row.quiet ? "quiet" : "plain" },
+          ]
+
 /** A column's worth of padding, and no span at all where a column needs none. */
 const padding = (columns: number): Span[] => (columns > 0 ? [plain(" ".repeat(columns))] : [])
 
 /**
- * One ticket's line: its number and its trail, and nothing else. The issue title is not on it — a
+ * One ticket's line: its number, its trail, and how long its running step has been going. The issue title is not on it — a
  * fixed trail leaves it twenty-one columns on an eighty-column terminal, which is enough for
  * `refactor: one cl...` and nothing worth reading, and the number already identifies the row
  * (ADR-0031).
@@ -212,7 +255,10 @@ const padding = (columns: number): Span[] => (columns > 0 ? [plain(" ".repeat(co
 const rowLine = (row: BoardRow, width: number): Line => {
     const number = numberSpan(row)
 
-    return fitted([...padding(LABEL - number.text.length), number, plain("  "), ...trail(row)], width)
+    return fitted(
+        [...padding(LABEL - number.text.length), number, plain("  "), ...trail(row), ...elapsedSpans(row)],
+        width,
+    )
 }
 
 /**

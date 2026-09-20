@@ -145,6 +145,7 @@ ignores itself, so it never appears in your repository's status and nothing in i
 | `gate/` | the gate worktree, re-created at every process start |
 | `t<n>/` | one worktree per ticket, removed once the ticket is verified. A failed or skipped ticket keeps its own, along with its branch — that is what the prepare agent reads |
 | `transcripts/` | one file per agent attempt, written as the stream arrives |
+| `commands/` | one file per `setup`, gate or revert attempt: the output of `setup` and `verify`, written as it arrives, each line prefixed with an ISO timestamp. A step's events name it as `logPath` |
 
 It is machine-local and deliberately not portable. What a second reader needs reaches the spec
 branch's commits instead: each ticket is one squash commit carrying `afk-ticket: <spec>/<n>`, and a

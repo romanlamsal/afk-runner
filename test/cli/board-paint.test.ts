@@ -34,6 +34,8 @@ describe("painted", () => {
     it.each([
         ["a step still ahead", "ahead", "\u001b[90mtext\u001b[0m"],
         ["a step the log started and has not ended", "running", "\u001b[4mtext\u001b[0m"],
+        ["a running step that has gone quiet", "quiet", "\u001b[4;33mtext\u001b[0m"],
+        ["a step a dead run left open", "interrupted", "\u001b[33mtext\u001b[0m"],
         ["a settled conflicted step", "conflicted", "\u001b[33mtext\u001b[0m"],
         ["a settled failed step", "failed", "\u001b[31mtext\u001b[0m"],
         ["a skipped ticket's verdict", "skipped", "\u001b[33mtext\u001b[0m"],

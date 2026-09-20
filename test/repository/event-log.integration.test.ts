@@ -156,4 +156,21 @@ describe("createFileEventLog", () => {
         // then
         expect(await followed).toEqual([event(10, "running"), event(10, "ok")])
     })
+
+    it("should end a follower waiting on a change once its signal aborts", async () => {
+        // given: a follower that has the log as it stands and is waiting for the next change
+        const repository = await root()
+        const stopping = new AbortController()
+        const following = (async () => {
+            for await (const _ of watched.follow(repository, 4, stopping.signal)) {
+                // nothing to do with a state: ending is what is asserted
+            }
+        })()
+
+        // when
+        stopping.abort()
+
+        // then
+        await expect(following).resolves.toBeUndefined()
+    })
 })

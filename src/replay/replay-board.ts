@@ -4,21 +4,25 @@ import { dirname, join, resolve } from "node:path"
 import { setTimeout as wait } from "node:timers/promises"
 import { z } from "zod"
 import { createLineBoard, createTerminalBoard } from "../cli/board-writer.ts"
-import type { Board } from "../domain/board.ts"
+import { lastWrites } from "../domain/activity.ts"
+import { type Board, boardOf, writers } from "../domain/board.ts"
 import { type LifecycleEvent, readEvent } from "../domain/events.ts"
 import { type Manifest, type ManifestRead, readStoredManifest } from "../domain/manifest.ts"
 import { eventLogPath, manifestPath } from "../domain/paths.ts"
+import { createFileActivity } from "../repository/activity.ts"
 import { parseReplayArgs, type ReplayArgs, USAGE } from "./args.ts"
-import { type Pacing, type ReplayFrame, replayFrames, waitBefore } from "./frames.ts"
+import { type Pacing, replayMoments } from "./frames.ts"
+import { recordsRoot } from "./records.ts"
 
 /**
  * Replaying a run's board off its event log: the impure half — the files, the clock and the
  * terminal — and afk's one developer tool.
  *
  * It is not part of afk and nothing of afk's calls it. It exists because the board is a pure
- * function of the log (ADR-0029), which makes a finished run replayable exactly as it was drawn:
- * the same domain function, the same frame, the same writer. A bug you can watch again is a
- * different thing from one you have to read a JSONL file to imagine.
+ * function of the run directory and an instant (ADR-0034), which makes a finished run replayable
+ * exactly as it was drawn: the same domain function, the same frame, the same writer, reading the
+ * same files — with the replayed instant where the live run read a clock. A bug you can watch again
+ * is a different thing from one you have to read a JSONL file to imagine.
  *
  * It reads and it draws, and it writes nothing anywhere.
  */
@@ -170,15 +174,20 @@ const replay = async (argv: string[]): Promise<number> => {
     const pacing: Pacing =
         args.speed === undefined ? { kind: "fixed", ms: args.interval } : { kind: "real", factor: args.speed }
 
+    // A row's colour comes from what its step wrote, so a replay reads the transcripts and command
+    // logs the run left beside its log — bounded by the replayed instant, which is what makes the
+    // silence the one the live board saw rather than the one the finished files now say (ADR-0034).
+    const root = await recordsRoot(path, events)
+    const activity = createFileActivity()
+
     const board = boardFor(args)
-    let previous: ReplayFrame | undefined
-    for (const frame of replayFrames(manifest, events)) {
-        const held = waitBefore(pacing, previous, frame)
-        if (held > 0) {
-            await wait(held)
+    for (const moment of replayMoments(events, pacing)) {
+        if (moment.wait > 0) {
+            await wait(moment.wait)
         }
-        board.show(frame.view)
-        previous = frame
+        const writes =
+            root === undefined ? undefined : await lastWrites(activity, root, writers(manifest, moment.log), moment.at)
+        board.show(boardOf(manifest, moment.log, moment.at, writes, moment.live))
     }
 
     return 0

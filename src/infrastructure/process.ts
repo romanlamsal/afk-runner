@@ -86,7 +86,16 @@ export const complaint = (ran: Ran): string => (ran.stderr === "" ? ran.stdout :
 export const run = (
     command: string,
     args: readonly string[],
-    { cwd, timeoutMs }: { cwd: string; timeoutMs?: number },
+    {
+        cwd,
+        timeoutMs,
+        onOutput,
+    }: {
+        cwd: string
+        timeoutMs?: number
+        /** Every chunk as it arrives, whole and untrimmed, for a caller that keeps more than the tail. */
+        onOutput?: (stream: "stdout" | "stderr", chunk: string) => void
+    },
 ): Promise<Ran> =>
     new Promise(resolve => {
         const child = spawn(command, [...args], { cwd, detached: true, stdio: ["ignore", "pipe", "pipe"] })
@@ -108,10 +117,12 @@ export const run = (
 
         child.stdout.setEncoding("utf8")
         child.stdout.on("data", (chunk: string) => {
+            onOutput?.("stdout", chunk)
             stdout = tail(stdout + chunk)
         })
         child.stderr.setEncoding("utf8")
         child.stderr.on("data", (chunk: string) => {
+            onOutput?.("stderr", chunk)
             stderr = tail(stderr + chunk)
         })
 

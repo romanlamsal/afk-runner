@@ -26,6 +26,8 @@ const VIEW: BoardView = {
             waiting: false,
             conclusion: undefined,
             detail: undefined,
+            elapsed: undefined,
+            quiet: false,
         },
     ],
 }

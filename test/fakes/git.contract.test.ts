@@ -46,6 +46,13 @@ const world = async (): Promise<GitWorld> => {
         soil: async path => {
             fake.soil(path)
         },
+        edit: async path => {
+            fake.edit(path)
+        },
+        ignore: async path => {
+            fake.ignore(path)
+        },
+        ignores: async path => fake.ignores(path),
     }
 }
 

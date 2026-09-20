@@ -32,9 +32,12 @@ export const createFakeEventLog = (
             append: async (_root, _spec, event) => {
                 appended.push(event)
             },
-            follow: async function* () {
+            follow: async function* (_root, _spec, signal) {
                 yield [...appended]
                 for (const change of changes) {
+                    if (signal?.aborted === true) {
+                        return
+                    }
                     appended.push(...change)
                     yield [...appended]
                 }

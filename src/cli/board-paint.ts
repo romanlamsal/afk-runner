@@ -21,6 +21,13 @@ import type { Line, Role } from "./board-span.ts"
  *   a dark terminal and on a light one alike.
  * - `running` is underline rather than a hue, so the live edge of the run stays orthogonal to what
  *   a step comes to — a step can be running now and red later without the two wanting one channel.
+ * - `quiet` is a running step that has written nothing for a while: still underlined, because it is
+ *   still the live edge, and amber, because it is a warning rather than a failure — the step may be
+ *   thinking, and it may be dead, and the operator is the one who can tell (ADR-0031, ADR-0034).
+ * - `interrupted` is a step the log left running in a run nothing holds any more: amber, because
+ *   that is the colour of a thing that did not go clean and broke nothing, and *not* underlined,
+ *   because it is not the live edge — nothing is. It is what `quiet` is a suspicion of, and the
+ *   underline is the whole of the difference between wondering and knowing (ADR-0031, ADR-0034).
  * - `conflicted` and `skipped` are both amber, which is one meaning and not two: it did not go
  *   clean, and nothing here broke. A conflict is a state git drew, and a skip is a blocker's
  *   failure rather than this ticket's.
@@ -33,6 +40,8 @@ const ROLE_CODES: Record<Role, readonly string[]> = {
     plain: [],
     ahead: ["90"],
     running: ["4"],
+    quiet: ["4", "33"],
+    interrupted: ["33"],
     conflicted: ["33"],
     failed: ["31"],
     skipped: ["33"],

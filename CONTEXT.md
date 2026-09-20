@@ -167,10 +167,13 @@ rewritten.
 _Avoid_: log line, transition, history entry
 
 **Budget**:
-How many attempts a step gets, counted off its start events in the log. Nothing stores a counter, so
-nothing can hold one that disagrees; a budget no step can be counted for is asserted rather than
-derivable, which is what made `fix` a step (ADR-0022). Each step counts its own, except a resolve,
-which spends its rebase's.
+How many attempts a step gets, counted off the log. A budget exists to stop a *failure* repeating,
+and an attempt a kill left `running` never reported back, so it is not one: the fix budget counts
+**answered** attempts, its terminal events (ADR-0009). The others count start events, and
+`repairFor` passes a step nothing ended without asking its budget; only a setup's recut spends one
+on a kill (ADR-0024). Nothing stores a counter, so nothing can hold one
+that disagrees; a budget no step can be counted for is asserted rather than derivable, which is what
+made `fix` a step (ADR-0022). Each step counts its own, except a resolve, which spends its rebase's.
 _Avoid_: retry limit, attempt counter, quota
 
 **Status**:
@@ -223,30 +226,56 @@ come to none.
 _Avoid_: result, final status, verdict
 
 **Board**:
-What a run shows while it runs: every ticket of the spec at once, one row each. Derived from the
-manifest and the event log and from nothing else: it says what the log says, and claims nothing
-about liveness, because a step the log left `running` is one whose end event is not written rather
-than one that is certainly happening (ADR-0030). Nothing about it is written
-down, and `afk <spec> --board-only` draws the same board from the run directory.
+What a run shows while it runs: every ticket of the spec at once, one row each, so its height is the
+ticket count. A row is the ticket's number, its trail, and — where a step is running — how long that
+step has been going (`| 58s`); a row with nothing running ends at its trail. Derived from the run
+directory and an instant handed in, never from the driver's in-flight set: a step the log left
+`running` is one whose end event is not written rather than one that is certainly happening, and the
+elapsed figure counts up either way (ADR-0030, ADR-0034). Whether that step is still writing is
+carried by colour: a step gone *quiet* draws as a warning. Nothing about it is written down, and
+`afk <spec> --board-only` and a replay draw the same board from the same run directory.
 _Avoid_: dashboard, monitor, progress view, TUI
 
 **Trail**:
 The steps on a board's row: every step of the run, in the order a ticket takes them, and the same on
-every row whatever track the ticket is on. What has happened, what was begun and what is still
-ahead, on one line.
+every row whatever track the ticket is on. Its words never change; colour carries what has happened,
+what was begun and what is still ahead, and may carry whether a running step is still writing
+(ADR-0031). How long a step has run is not part of it: that figure comes after it, at the row's end.
 _Avoid_: progress bar, timeline, breadcrumb
 
+**Quiet**:
+A running step that has written nothing for a while — three minutes. Read from the step's own
+records, an agent's transcript or a command's log, each of which stamps every line with when it was
+written; never from a file's modification time. It is evidence, not a verdict: a quiet step may be
+thinking and may be dead, and the board says which it looks like rather than which it is (ADR-0034).
+_Avoid_: stalled, hung, idle, dead
+
 **Interrupted**:
-A step the log left `running` whose action the driver does not hold: the step's process is gone, and
-it is not happening. Only the live action set tells it from a step that is (ADR-0019), which is what
-a resumed run is full of. It is the driver's distinction, drawn to decide what to dispatch; the
-board does not draw it (ADR-0030).
+A step the log left `running` that is not happening: its process is gone, and a resumed run's log is
+full of them. The driver tells one from a step that is happening by its live action set (ADR-0019),
+because it has to decide what to dispatch. **The board draws it too** (ADR-0034), and from the run
+directory rather than from that set: with nobody holding the run's lock, every step the log left
+running was started by a process that went with the run, so the board says so instead of saying
+`running`. The two readings are of different grain and neither is the other's — the lock says a run
+is alive, never which of its steps is.
 _Avoid_: stale, orphaned, hung, zombie
 
 **`.afk/`**:
 The run directory — the event log, worktrees, agent transcripts. Machine-local; nothing in it is
 expected to exist on another machine.
 _Avoid_: cache, workspace, scratch
+
+**Run lock**:
+The run directory's claim that one afk process is running this spec, naming that process. A second
+start refuses while its holder is live; a lock whose holder no longer exists is absent. Drawing the
+board takes none and reads it: whether anything holds the run is what tells a step that is happening
+from an *Interrupted* one (ADR-0034).
+_Avoid_: mutex, pidfile, session
+
+**Takeover**:
+Getting a live holder off a run, on a terminal and only on the operator's yes: the holder is sent its
+own interrupt twice, waited for, and killed outright if it will not go (ADR-0035).
+_Avoid_: steal, force, override
 
 **Starting over**:
 Taking a spec back to nothing: its worktrees, its branches local and remote, its pull request and
