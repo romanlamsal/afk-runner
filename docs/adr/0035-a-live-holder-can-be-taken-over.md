@@ -4,7 +4,7 @@ status: accepted
 
 # A live holder of a run can be taken over
 
-ADR-0034 made a second start against a live holder a flat refusal. That is the right answer for a
+ADR-0036 made a second start against a live holder a flat refusal. That is the right answer for a
 script and the wrong one for a person who has lost track of a run: the only way past it was finding
 the holder's terminal, or its pid, by hand.
 
@@ -14,7 +14,7 @@ Off a terminal there is no prompt and no flag, and the refusal stands.**
 - **Only a yes is a yes.** An empty answer, anything else typed, and a closed input all decline, so
   nobody takes over by hitting return. It is the same accept-or-abort shape as the confirmation
   screen (ADR-0014), asked through the same operator port, and asked before it.
-- **Declining leaves the holder alone** and refuses the start, naming the holder as ADR-0034's
+- **Declining leaves the holder alone** and refuses the start, naming the holder as ADR-0036's
   refusal does.
 - **Accepting sends the holder its own interrupt twice.** That is precisely the shutdown afk already
   has (ADR-0016): the first drains, the second kills every child it started and exits. So a takeover
@@ -29,7 +29,7 @@ Off a terminal there is no prompt and no flag, and the refusal stands.**
   hold a spec hostage. A holder still there after that is refused, naming it.
 - **A start that would refuse anyway offers nothing.** The flags and the records are asked first, so
   that saying yes to a takeover cannot kill a live run and then refuse the start that killed it —
-  two dead runs. The holder is still what the operator hears about first (ADR-0034).
+  two dead runs. The holder is still what the operator hears about first (ADR-0036).
 - **Starting over takes over too.** `--force-fresh` against a live run is offered the same takeover,
   and throws nothing away until the holder is gone.
 - **The signals are the lock adapter's.** The port gains `interrupt` and `kill`; the domain says what
@@ -42,7 +42,7 @@ Off a terminal there is no prompt and no flag, and the refusal stands.**
 - **Kill the holder straight away.** Rejected: an outright kill is what a wedged process gets. A
   holder that can drain records what it was doing, and its own second interrupt already takes its
   children with it.
-- **Record the holder's children, and kill them from the new run.** Rejected for the reason ADR-0034
+- **Record the holder's children, and kill them from the new run.** Rejected for the reason ADR-0036
   gives: the holder's own shutdown already knows them.
 
 ## Consequences
@@ -50,5 +50,5 @@ Off a terminal there is no prompt and no flag, and the refusal stands.**
 - **A holder killed outright leaves its children running** — they were started detached, in groups of
   their own. That is the price of a process that would not run its own shutdown, and is why the
   interrupts come first.
-- **A pid can be reused** (ADR-0034). A takeover offered against a lock naming a stranger's process
+- **A pid can be reused** (ADR-0036). A takeover offered against a lock naming a stranger's process
   signals that stranger. The offer names the pid, which is the operator's chance to say no.

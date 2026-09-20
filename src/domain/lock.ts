@@ -1,5 +1,5 @@
 /**
- * One afk per spec (ADR-0034). A run takes a lock on its run directory, so that a second process
+ * One afk per spec (ADR-0036). A run takes a lock on its run directory, so that a second process
  * cannot start on a spec that already has one and force its way into the first one's worktrees.
  */
 
@@ -40,7 +40,7 @@ export type RunLock = {
 export const heldByAnother = (holder: Holder | undefined, self: Holder): holder is Holder =>
     holder !== undefined && holder.pid !== self.pid
 
-/** The refusal a second start gets, naming the process that stopped it (ADR-0034). */
+/** The refusal a second start gets, naming the process that stopped it (ADR-0036). */
 export const refusalToShare = (spec: number, holder: Holder): string =>
     `spec #${spec} is already being run by afk process ${holder.pid}: ` +
     "wait for it to finish, or stop it before starting another"

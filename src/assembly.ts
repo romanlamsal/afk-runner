@@ -54,7 +54,7 @@ export const assembleCli = (): Cli => {
     const environment = createEnvironmentFiles()
     const events = createFileEventLog()
     const git = createGit()
-    // One afk per spec, and this process is the one the lock names while it holds it (ADR-0034).
+    // One afk per spec, and this process is the one the lock names while it holds it (ADR-0036).
     const lock = createFileRunLock()
     const self = { pid: process.pid }
     // Selection is TTY detection and there is no flag: the board is simply what a run looks like,

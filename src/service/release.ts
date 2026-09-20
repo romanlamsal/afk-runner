@@ -14,7 +14,7 @@ export type ReleaseDeps = {
 }
 
 /**
- * Letting go of the run lock once a run ends, however it ended (ADR-0034). A process that never
+ * Letting go of the run lock once a run ends, however it ended (ADR-0036). A process that never
  * gets here — killed, crashed — leaves a lock naming a pid that no longer exists, which is absent.
  */
 export const createReleaseService =

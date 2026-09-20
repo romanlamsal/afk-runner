@@ -44,7 +44,7 @@ const harness = ({
     tracker?: FakeTrackerSetup
     /** Why the run directory will not go, for a machine that holds on to it. */
     unremovable?: string
-    /** Who holds the run lock already, if anybody (ADR-0034). */
+    /** Who holds the run lock already, if anybody (ADR-0036). */
     heldBy?: Holder
     /** What the operator said to taking over a live holder, where they were asked (ADR-0035). */
     takesOver?: boolean

@@ -280,7 +280,7 @@ _Avoid_: cache, workspace, scratch
 The run directory's claim that one afk process is running this spec, naming that process. A second
 start refuses while its holder is live; a lock whose holder no longer exists is absent. Drawing the
 board takes none and reads it: whether anything holds the run is what tells a step that is happening
-from an *Interrupted* one (ADR-0034).
+from an *Interrupted* one (ADR-0034, ADR-0036).
 _Avoid_: mutex, pidfile, session
 
 **Takeover**:

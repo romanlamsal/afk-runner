@@ -54,7 +54,7 @@ const signal = (pid: number, name: NodeJS.Signals): void => {
 const isAlreadyThere = (error: unknown): boolean => error instanceof Error && "code" in error && error.code === "EEXIST"
 
 /**
- * The run lock as a file in the run directory, naming the holder's pid (ADR-0034). Written with
+ * The run lock as a file in the run directory, naming the holder's pid (ADR-0036). Written with
  * `wx`, so that two processes racing for an absent lock cannot both believe they won it.
  */
 export const createFileRunLock = (): RunLock => ({

@@ -39,7 +39,7 @@ export type WatchBoardDeps = {
     events: EventLog
     /**
      * Who holds the run, which is what says whether a step the log left running is happening at all.
-     * It is read and never taken: watching a run costs that run nothing (ADR-0034).
+     * It is read and never taken: watching a run costs that run nothing (ADR-0036).
      */
     lock: RunLock
     /** The instant each view is derived at, which is what a row's elapsed figure counts to. */

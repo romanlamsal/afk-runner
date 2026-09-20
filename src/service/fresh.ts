@@ -59,7 +59,7 @@ export const createFreshService =
         }
 
         // Taken before the first thing goes, and gone with the run directory at the end: what starts
-        // next in this process takes it again (ADR-0034).
+        // next in this process takes it again (ADR-0036).
         const acquired = await lock.acquire(root, spec, self)
         if (!acquired.ok) {
             const taken = await takeOver(root, spec, acquired.holder)

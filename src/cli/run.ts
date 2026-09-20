@@ -20,7 +20,7 @@ export type RunDeps = {
     start: StartRun
     drive: DriveRun
     finish: FinishRun
-    /** Giving the run lock back, once whatever took it is over (ADR-0034). */
+    /** Giving the run lock back, once whatever took it is over (ADR-0036). */
     release: ReleaseRun
     print: (line: string) => void
     printError: (line: string) => void
@@ -142,7 +142,7 @@ export const createRun = ({
 
         // Before the run directory is touched by anything, because it is never touched at all: the
         // viewer reads the manifest and the log and draws what they say (ADR-0030). Nor is the lock:
-        // a second terminal watching a live run is not a second afk on it (ADR-0034). A spec that was
+        // a second terminal watching a live run is not a second afk on it (ADR-0036). A spec that was
         // never planned is refused as a run that cannot start is, because the arguments were fine
         // and what is missing is on disk.
         const { mode } = invocation

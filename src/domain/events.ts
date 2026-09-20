@@ -143,7 +143,7 @@ export type EventDetails = Pick<
 const runBoundarySchema = z.object({
     /**
      * Which kind of boundary this is. Closed, and it grows only by a deliberate act: a second form is
-     * a new value here rather than a new shape (ADR-0036).
+     * a new value here rather than a new shape (ADR-0037).
      */
     boundary: z.enum(["resumption"]),
     /** When it was appended, as an ISO instant. Never branched on. */
@@ -153,7 +153,7 @@ const runBoundarySchema = z.object({
 /**
  * Where one process's hold on a run ended and the next began. Not a lifecycle event: it has no
  * step, no outcome and no ticket, so no derivation of the log sees one and only a replay reads it
- * (ADR-0036).
+ * (ADR-0037).
  */
 export type RunBoundary = z.infer<typeof runBoundarySchema>
 

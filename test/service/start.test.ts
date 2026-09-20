@@ -44,7 +44,7 @@ type Setup = {
     planned?: Manifest
     /** `--branch`, as an accepted invocation carries it. */
     base?: string
-    /** Who holds the run lock already, if anybody (ADR-0034). */
+    /** Who holds the run lock already, if anybody (ADR-0036). */
     heldBy?: Holder
     /** What the operator said to taking over a live holder, where they were asked (ADR-0035). */
     takesOver?: boolean

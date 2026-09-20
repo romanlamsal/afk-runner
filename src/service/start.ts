@@ -39,7 +39,7 @@ export type StartDeps = {
     environment: CopyEnvironmentFiles
     git: Git
     now: Clock
-    /** One afk per spec: every starting mode takes it (ADR-0034). */
+    /** One afk per spec: every starting mode takes it (ADR-0036). */
     lock: RunLock
     /** This process, as the lock names it. */
     self: Holder
@@ -124,7 +124,7 @@ export const createStartService =
          * What the flags and the records forbid, before a holder is considered. Asked as one
          * question so that it can be asked *before* a takeover and reported *after* one: nothing is
          * killed for a start that would refuse anyway, and a live holder is still what the operator
-         * hears about first (ADR-0034, ADR-0035).
+         * hears about first (ADR-0036, ADR-0035).
          *
          * The `--branch` half is both before the run directory exists and before a planner is
          * spawned: a `--branch` afk cannot honour costs a `show-ref` to find out about, and neither
@@ -159,7 +159,7 @@ export const createStartService =
         const blocked = await blocking()
 
         // Reported before any other refusal, because every other one would send the operator after
-        // the wrong thing: a spec somebody is running is not a spec with the wrong flags (ADR-0034).
+        // the wrong thing: a spec somebody is running is not a spec with the wrong flags (ADR-0036).
         // Taken over or refused, which of the two is the takeover's to say — but never taken over
         // for a start that is going to refuse anyway, which would leave two dead runs (ADR-0035).
         const holder = await lock.holder(root, spec)
@@ -191,7 +191,7 @@ export const createStartService =
         // The run is ours, and nothing has been dispatched: the first thing the log learns of this
         // process is that it took over from one that is gone. Only a start the flag was needed for is
         // one — `--plan-only` then `--implement-only` is a change of phase, and `--plan-only` over a
-        // run resumes nothing (ADR-0036).
+        // run resumes nothing (ADR-0037).
         if (begun && consented && mode !== "plan-only") {
             await events.appendBoundary(root, spec, { boundary: "resumption", at: now().toISOString() })
         }

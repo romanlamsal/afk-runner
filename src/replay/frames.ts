@@ -120,7 +120,7 @@ export const replayMoments = (records: readonly LogRecord[], pacing: Pacing): re
     const moments: ReplayMoment[] = [{ log: [], at: drawnAt([]), event: undefined, live: true, wait: 0 }]
 
     // What the board is derived from: a run boundary is no lifecycle event and no derivation of the
-    // log sees one, so a moment's prefix carries the events alone (ADR-0036).
+    // log sees one, so a moment's prefix carries the events alone (ADR-0037).
     const events: LifecycleEvent[] = []
 
     let previous: Date | undefined
@@ -131,7 +131,7 @@ export const replayMoments = (records: readonly LogRecord[], pacing: Pacing): re
             // The process that held the run is gone, and the log knows nothing of when: the clock
             // stays on the last instant it can vouch for and nothing is ticked across the gap, which
             // is a day the run did not spend. One beat holds the interrupted board before the resume
-            // picks up (ADR-0036).
+            // picks up (ADR-0037).
             moments.push({ log: [...events], at: drawnAt(events), event: undefined, live: false, wait: beatOf(pacing) })
             previous = at ?? previous
             return
