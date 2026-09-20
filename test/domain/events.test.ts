@@ -11,6 +11,7 @@ import {
     prepared,
     progressOf,
     readEvent,
+    readRecord,
     repairableStep,
     running,
     type Step,
@@ -670,5 +671,53 @@ describe("started", () => {
 
         // then
         expect(began).toBe(expected)
+    })
+})
+
+describe("readRecord", () => {
+    it("should read a resumption, which is a run boundary and no lifecycle event", () => {
+        // given
+        const raw = { boundary: "resumption", at: "2026-09-16T09:00:00.000Z" }
+
+        // when
+        const read = readRecord(raw)
+
+        // then
+        expect(read).toEqual(raw)
+    })
+
+    it("should read a lifecycle event as one", () => {
+        // given
+        const raw = { ticket: 10, step: "implement", outcome: "ok", at: "2026-09-15T11:18:38.314Z" }
+
+        // when
+        const read = readRecord(raw)
+
+        // then
+        expect(read).toEqual(raw)
+    })
+
+    it.each([
+        ["a boundary nothing knows", { boundary: "takeover", at: "now" }],
+        ["a boundary with no instant", { boundary: "resumption" }],
+    ] as const)("should drop %s rather than fail the whole log", (_name, raw) => {
+        // given — the line from the table
+
+        // when
+        const read = readRecord(raw)
+
+        // then
+        expect(read).toBeUndefined()
+    })
+
+    it("should leave a run boundary unread by readEvent, so no derivation of the log sees one", () => {
+        // given
+        const raw = { boundary: "resumption", at: "2026-09-16T09:00:00.000Z" }
+
+        // when
+        const read = readEvent(raw)
+
+        // then
+        expect(read).toBeUndefined()
     })
 })

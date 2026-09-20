@@ -1,4 +1,5 @@
 import { specBranch } from "../domain/branches.ts"
+import type { Clock } from "../domain/clock.ts"
 import type { CopyEnvironmentFiles } from "../domain/environment.ts"
 import { type EventLog, started } from "../domain/events.ts"
 import type { Git, ResetRequest } from "../domain/git.ts"
@@ -37,6 +38,7 @@ export type StartDeps = {
     /** The gate runs the operator's own commands, so it needs the operator's own environment. */
     environment: CopyEnvironmentFiles
     git: Git
+    now: Clock
     /** One afk per spec: every starting mode takes it (ADR-0034). */
     lock: RunLock
     /** This process, as the lock names it. */
@@ -94,6 +96,7 @@ export const createStartService =
         environment,
         events,
         git,
+        now,
         lock,
         self,
         manifests,
@@ -109,6 +112,7 @@ export const createStartService =
         }
 
         const stored = await manifests.read(root, spec)
+        const begun = started(await events.read(root, spec))
 
         // What this spec is already based on, where it has been planned before. Read through `baseOf`
         // and never off the field, so that a manifest written before ADR-0032 answers `main` here
@@ -131,7 +135,7 @@ export const createStartService =
                 spec,
                 mode,
                 consented,
-                records: { manifest: stored !== undefined, started: started(await events.read(root, spec)) },
+                records: { manifest: stored !== undefined, started: begun },
             })
             if (refusal !== undefined) {
                 return refusal
@@ -182,6 +186,14 @@ export const createStartService =
         const acquired = await lock.acquire(root, spec, self)
         if (!acquired.ok) {
             return refused(refusalToShare(spec, acquired.holder))
+        }
+
+        // The run is ours, and nothing has been dispatched: the first thing the log learns of this
+        // process is that it took over from one that is gone. Only a start the flag was needed for is
+        // one — `--plan-only` then `--implement-only` is a change of phase, and `--plan-only` over a
+        // run resumes nothing (ADR-0036).
+        if (begun && consented && mode !== "plan-only") {
+            await events.appendBoundary(root, spec, { boundary: "resumption", at: now().toISOString() })
         }
 
         // Planning a spec that was planned before keeps the base it was planned on: `--plan-only` is

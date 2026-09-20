@@ -58,6 +58,7 @@ const harness = ({ base, answer }: { base?: BaseState; answer?: Commands } = {})
                 cwd: "/repo",
                 environment: environment.copy,
                 git: git.git,
+                now: () => new Date(),
                 manifests: manifests.store,
                 operator: operator.operator,
                 plan: createPlanService({

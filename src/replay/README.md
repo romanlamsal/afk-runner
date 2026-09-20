@@ -14,6 +14,9 @@ gaps between them at the speed factor, which is the live board's tick replayed. 
 the elapsed figure and the colour the live row showed. A replay pacing itself (`--interval`) has no
 speed factor and so no gap to tick through: its clock moves with the log and nowhere else.
 
+A resumption in the log (ADR-0036) is where a process's hold on the run ended: the gap before it is drawn
+interrupted and not ticked, because the day between a kill and a resume is not one the run spent.
+
 A log outside a run directory, or a run whose records have been deleted, still replays: the rows
 carry their numbers and their figures, and claim no silence they cannot see.
 

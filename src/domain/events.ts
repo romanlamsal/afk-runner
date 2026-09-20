@@ -140,6 +140,32 @@ export type EventDetails = Pick<
     "sessionId" | "baseSha" | "transcriptPath" | "logPath" | "detail" | "usage"
 >
 
+const runBoundarySchema = z.object({
+    /**
+     * Which kind of boundary this is. Closed, and it grows only by a deliberate act: a second form is
+     * a new value here rather than a new shape (ADR-0036).
+     */
+    boundary: z.enum(["resumption"]),
+    /** When it was appended, as an ISO instant. Never branched on. */
+    at: z.string().min(1),
+})
+
+/**
+ * Where one process's hold on a run ended and the next began. Not a lifecycle event: it has no
+ * step, no outcome and no ticket, so no derivation of the log sees one and only a replay reads it
+ * (ADR-0036).
+ */
+export type RunBoundary = z.infer<typeof runBoundarySchema>
+
+/** One line of the log, whichever it is. */
+export type LogRecord = LifecycleEvent | RunBoundary
+
+/** Narrows a record to a run boundary; a lifecycle event never carries the key. */
+export const isRunBoundary = (record: LogRecord): record is RunBoundary => "boundary" in record
+
+/** Narrows a record to a lifecycle event, which is what every derivation of the log is about. */
+export const isLifecycleEvent = (record: LogRecord): record is LifecycleEvent => !isRunBoundary(record)
+
 /**
  * One line of the log, or nothing. The log is read defensively on purpose: the last line of one a
  * killed run left behind is as likely to be half-written as not, and losing only that line is the
@@ -150,11 +176,26 @@ export const readEvent = (raw: unknown): LifecycleEvent | undefined => {
     return parsed.success ? parsed.data : undefined
 }
 
+/**
+ * One line of the log as whichever record it is, or nothing. Read as defensively as `readEvent`: a
+ * line that is neither is dropped rather than failing the log.
+ */
+export const readRecord = (raw: unknown): LogRecord | undefined => {
+    const event = readEvent(raw)
+    if (event !== undefined) {
+        return event
+    }
+    const parsed = runBoundarySchema.safeParse(raw)
+    return parsed.success ? parsed.data : undefined
+}
+
 /** Where afk keeps the event log. A driven port: the domain says what it needs, never how. */
 export type EventLog = {
     /** Every event for this spec, oldest first. A spec with no log has no events. */
     read: (root: string, spec: number) => Promise<readonly LifecycleEvent[]>
     append: (root: string, spec: number, event: LifecycleEvent) => Promise<void>
+    /** A run boundary, beside the events and never among them: `read` and `follow` do not return it. */
+    appendBoundary: (root: string, spec: number, boundary: RunBoundary) => Promise<void>
     /**
      * The log as it stands, and the whole log again each time it changes. The first value is what
      * `read` would have given, so a follower needs no read of its own.

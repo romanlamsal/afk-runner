@@ -238,6 +238,7 @@ const harness = ({
                 cwd: "/repo",
                 environment: environment.copy,
                 git: git.git,
+                now: now,
                 manifests: manifests.store,
                 operator: operator.operator,
                 plan: async () => ({ ok: true, manifest }),

@@ -112,6 +112,7 @@ export const assembleCli = (): Cli => {
         environment,
         events,
         git,
+        now,
         lock,
         self,
         manifests,

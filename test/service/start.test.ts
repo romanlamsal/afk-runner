@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import type { RunBoundary } from "../../src/domain/events.ts"
 import type { BaseState } from "../../src/domain/git.ts"
 import type { Holder } from "../../src/domain/lock.ts"
 import type { Manifest } from "../../src/domain/manifest.ts"
@@ -59,6 +60,8 @@ type Harness = {
     operator: FakeOperator
     records: FakeRunRecords
     lock: FakeRunLock
+    /** The run boundaries appended to the log. */
+    boundaries: RunBoundary[]
     /** The repositories and specs the planner was asked about, and what it was asked to base them on. */
     planned: { root: string; spec: number; base: string | undefined }[]
 }
@@ -84,6 +87,7 @@ const harness = (setup: Setup = {}): Harness => {
         environment: environment.copy,
         events: events.log,
         git: git.git,
+        now: () => new Date("2026-09-16T09:00:00.000Z"),
         lock: lock.lock,
         self: SELF,
         manifests: manifests.store,
@@ -102,6 +106,7 @@ const harness = (setup: Setup = {}): Harness => {
         operator,
         records,
         lock,
+        boundaries: events.boundaries,
         planned,
         start: () =>
             service({
@@ -502,6 +507,47 @@ describe("createStartService", () => {
         // then
         expect(planned).toEqual([{ root: "/repo", spec: 4, base: "release" }])
     })
+})
+
+describe("createStartService: resuming a run", () => {
+    it("should record a resumption when --implement-only continues a run it was consented to", async () => {
+        // given
+        const { start, boundaries } = harness({
+            mode: "implement-only",
+            stored: MANIFEST,
+            started: true,
+            consented: true,
+        })
+
+        // when
+        await start()
+
+        // then
+        expect(boundaries).toEqual([{ boundary: "resumption", at: "2026-09-16T09:00:00.000Z" }])
+    })
+
+    it.each([
+        ["a first start", { mode: "plan-and-implement" }],
+        ["a change of phase, which needs no consent", { mode: "implement-only", stored: MANIFEST }],
+        ["a --resume on a run that had not begun", { mode: "implement-only", stored: MANIFEST, consented: true }],
+        [
+            "--plan-only over a run that has begun",
+            { mode: "plan-only", stored: MANIFEST, started: true, consented: true },
+        ],
+        ["a start that was refused", { mode: "implement-only", stored: MANIFEST, started: true }],
+    ] as const satisfies readonly (readonly [string, Setup])[])(
+        "should record no resumption for %s",
+        async (_name, setup) => {
+            // given
+            const { start, boundaries } = harness(setup)
+
+            // when
+            await start()
+
+            // then
+            expect(boundaries).toEqual([])
+        },
+    )
 })
 
 describe("createStartService: the run lock", () => {

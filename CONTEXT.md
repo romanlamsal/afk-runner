@@ -176,6 +176,17 @@ that disagrees; a budget no step can be counted for is asserted rather than deri
 made `fix` a step (ADR-0022). Each step counts its own, except a resolve, which spends its rebase's.
 _Avoid_: retry limit, attempt counter, quota
 
+**Run boundary**:
+A record in the event log, beside the lifecycle events, of where one process's hold on a run ended
+and the next began. It is neither a step nor an outcome and names no ticket, so every derivation of
+the log skips it; only a replay reads it. Its one form is a **resumption**: written when a start
+continues a run that had begun and was consented to with `--resume`, before anything is dispatched.
+A start that needed no consent — a plan followed by an implement — is a change of phase, not a
+resumption. It is never written when a run stops, because the stops that matter leave no chance to
+write one (ADR-0016), so the instant the old process went is unknown and the log says only that it
+had.
+_Avoid_: pause, marker, lifecycle marker, resume event
+
 **Status**:
 A ticket's last lifecycle event. Derived on read, never stored. A ticket left `running` is one whose
 step began and never reported back.

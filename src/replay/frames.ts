@@ -1,4 +1,4 @@
-import type { LifecycleEvent } from "../domain/events.ts"
+import { isRunBoundary, type LifecycleEvent, type LogRecord } from "../domain/events.ts"
 import { TICK_MS } from "../service/watch.ts"
 
 /**
@@ -45,7 +45,7 @@ export type Pacing =
  * the domain and is therefore never validated past being a non-empty string, so a replay that paces
  * itself by it treats an unreadable one as no instant rather than as time zero.
  */
-const instantOf = (event: LifecycleEvent): Date | undefined => {
+const instantOf = (event: LogRecord): Date | undefined => {
     const at = new Date(event.at)
     return Number.isNaN(at.getTime()) ? undefined : at
 }
@@ -69,6 +69,10 @@ const gapOf = (pacing: Pacing, from: Date | undefined, to: Date | undefined): nu
     // machine's business rather than a replay's: the gap is never negative.
     return Math.max(0, (to.getTime() - from.getTime()) / pacing.factor)
 }
+
+/** The beat an interrupted board is held for: the pace's own, and nothing at a pace that waits for nothing. */
+const beatOf = (pacing: Pacing): number =>
+    pacing.kind === "fixed" ? Math.max(0, pacing.ms) : pacing.factor <= 0 ? 0 : TICK_MS
 
 /**
  * The moments a wait is filled with: the same log again, drawn at the instants the replayed clock
@@ -112,32 +116,47 @@ const ticksAcross = (log: readonly LifecycleEvent[], from: Date, to: Date, held:
  * — the run has stopped, nothing holds it, and what it left running reads as interrupted, which is
  * what a resume opens on (ADR-0034).
  */
-export const replayMoments = (events: readonly LifecycleEvent[], pacing: Pacing): readonly ReplayMoment[] => {
+export const replayMoments = (records: readonly LogRecord[], pacing: Pacing): readonly ReplayMoment[] => {
     const moments: ReplayMoment[] = [{ log: [], at: drawnAt([]), event: undefined, live: true, wait: 0 }]
 
+    // What the board is derived from: a run boundary is no lifecycle event and no derivation of the
+    // log sees one, so a moment's prefix carries the events alone (ADR-0036).
+    const events: LifecycleEvent[] = []
+
     let previous: Date | undefined
-    events.forEach((event, index) => {
-        const at = instantOf(event)
+    records.forEach(record => {
+        const at = instantOf(record)
+
+        if (isRunBoundary(record)) {
+            // The process that held the run is gone, and the log knows nothing of when: the clock
+            // stays on the last instant it can vouch for and nothing is ticked across the gap, which
+            // is a day the run did not spend. One beat holds the interrupted board before the resume
+            // picks up (ADR-0036).
+            moments.push({ log: [...events], at: drawnAt(events), event: undefined, live: false, wait: beatOf(pacing) })
+            previous = at ?? previous
+            return
+        }
+
         const held = gapOf(pacing, previous, at)
         // Each moment derives from the whole prefix rather than from the one before it, because that
         // is what the board is: a function of the log, never of the last thing drawn (ADR-0030).
-        const before = events.slice(0, index)
+        const before = [...events]
         const ticks =
             previous === undefined || at === undefined || pacing.kind === "fixed"
                 ? []
                 : ticksAcross(before, previous, at, held)
-        const log = events.slice(0, index + 1)
+        events.push(record)
 
         moments.push(...ticks, {
-            log,
-            at: at ?? drawnAt(log),
-            event,
+            log: [...events],
+            at: at ?? drawnAt(events),
+            event: record,
             live: true,
             wait: held - ticks.length * TICK_MS,
         })
         previous = at ?? previous
     })
 
-    moments.push({ log: events, at: drawnAt(events), event: undefined, live: false, wait: 0 })
+    moments.push({ log: [...events], at: drawnAt(events), event: undefined, live: false, wait: 0 })
     return moments
 }

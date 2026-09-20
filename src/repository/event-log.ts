@@ -1,6 +1,6 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
-import { type EventLog, type LifecycleEvent, readEvent } from "../domain/events.ts"
+import { type EventLog, type LifecycleEvent, type RunBoundary, readEvent } from "../domain/events.ts"
 import { eventLogPath } from "../domain/paths.ts"
 
 /** How often a follower looks at the file. Small enough that a frame follows an append, and no more. */
@@ -32,6 +32,12 @@ export const createFileEventLog = ({ pollMs = POLL_MS }: { pollMs?: number } = {
     const contentsOf = (root: string, spec: number): Promise<string | undefined> =>
         readFile(join(root, eventLogPath(spec)), "utf8").catch(() => undefined)
 
+    const appendLine = async (root: string, spec: number, record: LifecycleEvent | RunBoundary): Promise<void> => {
+        const path = join(root, eventLogPath(spec))
+        await mkdir(dirname(path), { recursive: true })
+        await appendFile(path, `${JSON.stringify(record)}\n`, "utf8")
+    }
+
     const eventsIn = (contents: string | undefined): readonly LifecycleEvent[] =>
         contents === undefined
             ? []
@@ -50,11 +56,9 @@ export const createFileEventLog = ({ pollMs = POLL_MS }: { pollMs?: number } = {
     return {
         read: async (root, spec) => eventsIn(await contentsOf(root, spec)),
 
-        append: async (root, spec, event) => {
-            const path = join(root, eventLogPath(spec))
-            await mkdir(dirname(path), { recursive: true })
-            await appendFile(path, `${JSON.stringify(event)}\n`, "utf8")
-        },
+        append: async (root, spec, event) => appendLine(root, spec, event),
+
+        appendBoundary: async (root, spec, boundary) => appendLine(root, spec, boundary),
 
         /**
          * Polling, and not a file watch: a poll is one read of a file nothing else is waiting on, so

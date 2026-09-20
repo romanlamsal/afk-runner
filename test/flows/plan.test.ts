@@ -55,6 +55,7 @@ const harness = (reply: { structuredOutput: unknown } = { structuredOutput: MANI
         cwd: "/repo",
         environment: environment.copy,
         git: git.git,
+        now: () => new Date("2026-09-15T11:18:38.314Z"),
         manifests: manifests.store,
         operator: operator.operator,
         plan: createPlanService({

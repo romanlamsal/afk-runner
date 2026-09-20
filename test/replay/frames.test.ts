@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
-import type { LifecycleEvent, Outcome, Step } from "../../src/domain/events.ts"
+import type { LifecycleEvent, Outcome, RunBoundary, Step } from "../../src/domain/events.ts"
 import { type Pacing, replayMoments } from "../../src/replay/frames.ts"
+import { TICK_MS } from "../../src/service/watch.ts"
 
 /**
  * What a replay makes of a log: the moments it draws, and where its clock stands at each of them.
@@ -16,6 +17,8 @@ const event = (ticket: number, step: Step, outcome: Outcome, minute = 0): Lifecy
     outcome,
     at: at(minute),
 })
+
+const resumption = (minute: number): RunBoundary => ({ boundary: "resumption", at: at(minute) })
 
 const FIXED: Pacing = { kind: "fixed", ms: 150 }
 
@@ -164,5 +167,97 @@ describe("replayMoments", () => {
 
         // then
         expect(moments).toHaveLength(4)
+    })
+})
+
+describe("replayMoments: a resumption", () => {
+    // An implementer whose process was killed at minute 0, and a resume half an hour of the run later.
+    const killed = event(7, "implement", "running", 0)
+    const resumed = event(7, "implement", "running", 31)
+    const log = [killed, resumption(30), resumed] as const
+    const REAL: Pacing = { kind: "real", factor: 60 }
+
+    it("should draw the gap before it as a moment nothing holds, so the step it left running reads as interrupted", () => {
+        // given — the log above
+
+        // when
+        const moments = replayMoments(log, REAL)
+
+        // then
+        expect(moments.map(moment => moment.live)).toEqual([true, true, false, true, false])
+    })
+
+    it("should draw no tick across the gap, which nobody held a step running through", () => {
+        // given — the log above
+
+        // when
+        const moments = replayMoments(log, REAL)
+
+        // then
+        expect(moments).toHaveLength(5)
+    })
+
+    it("should hold one beat on the interrupted moment, so that the stop is seen before the resume", () => {
+        // given — the log above
+
+        // when
+        const moments = replayMoments(log, REAL)
+
+        // then
+        expect(moments.at(2)?.wait).toBe(TICK_MS)
+    })
+
+    it("should draw the moment with the lifecycle events so far, since it is no event of any ticket", () => {
+        // given — the log above
+
+        // when
+        const moments = replayMoments(log, REAL)
+
+        // then
+        expect(moments.at(2)).toMatchObject({ log: [killed], event: undefined })
+    })
+
+    it("should stand its clock on the last instant the log vouches for, since when the process went is unknown", () => {
+        // given — the log above
+
+        // when
+        const moments = replayMoments(log, REAL)
+
+        // then
+        expect(moments.at(2)?.at).toEqual(new Date(at(0)))
+    })
+
+    it("should tick from the resumption on, since the process that wrote the next line was alive", () => {
+        // given
+        const later = event(7, "implement", "ok", 33)
+
+        // when
+        const moments = replayMoments([killed, resumption(30), resumed, later], REAL)
+
+        // then
+        expect(moments.at(4)?.at).toEqual(new Date(at(32)))
+    })
+
+    it("should keep it out of the log a moment draws, for the board is a function of lifecycle events", () => {
+        // given — the log above
+
+        // when
+        const moments = replayMoments(log, REAL)
+
+        // then
+        expect(moments.at(-1)?.log).toEqual([killed, resumed])
+    })
+
+    it.each([
+        ["a pace of its own", FIXED, 150],
+        ["no wait at a factor no time survives", { kind: "real", factor: 0 }, 0],
+    ] as const)("should keep to %s for the beat", (_case, pacing, expected) => {
+        // given — the log above
+
+        // when
+        const moments = replayMoments(log, pacing)
+
+        // then
+        expect(moments.at(2)?.wait).toBe(expected)
     })
 })

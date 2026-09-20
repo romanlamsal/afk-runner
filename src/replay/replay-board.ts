@@ -6,7 +6,7 @@ import { z } from "zod"
 import { createLineBoard, createTerminalBoard } from "../cli/board-writer.ts"
 import { lastWrites } from "../domain/activity.ts"
 import { type Board, boardOf, writers } from "../domain/board.ts"
-import { type LifecycleEvent, readEvent } from "../domain/events.ts"
+import { isLifecycleEvent, type LifecycleEvent, type LogRecord, readRecord } from "../domain/events.ts"
 import { type Manifest, type ManifestRead, readStoredManifest } from "../domain/manifest.ts"
 import { eventLogPath, manifestPath } from "../domain/paths.ts"
 import { createFileActivity } from "../repository/activity.ts"
@@ -41,19 +41,19 @@ const printError = (line: string): void => {
  * rather than borrowed from `repository/event-log.ts` because that adapter is keyed by a repository
  * root and a spec number — a replay is handed a path, which is the whole point of it.
  */
-const readEvents = async (path: string): Promise<readonly LifecycleEvent[] | undefined> => {
+const readRecords = async (path: string): Promise<readonly LogRecord[] | undefined> => {
     const contents = await readFile(path, "utf8").catch(() => undefined)
     if (contents === undefined) {
         return undefined
     }
 
-    return contents.split("\n").flatMap((line): LifecycleEvent[] => {
+    return contents.split("\n").flatMap((line): LogRecord[] => {
         if (line.trim() === "") {
             return []
         }
         try {
-            const event = readEvent(JSON.parse(line))
-            return event === undefined ? [] : [event]
+            const record = readRecord(JSON.parse(line))
+            return record === undefined ? [] : [record]
         } catch {
             return []
         }
@@ -153,8 +153,8 @@ const replay = async (argv: string[]): Promise<number> => {
         return REFUSED
     }
 
-    const events = await readEvents(path)
-    if (events === undefined) {
+    const records = await readRecords(path)
+    if (records === undefined) {
         printError(`afk-replay: there is no readable log at ${path}`)
         return REFUSED
     }
@@ -162,6 +162,8 @@ const replay = async (argv: string[]): Promise<number> => {
     // A manifest is what the rows are: which tickets the run had, and what they were called. A run
     // that never planned has none, and a log carried off a machine tends to arrive without one, so
     // a missing manifest is a note rather than a refusal.
+    // Run boundaries are the replay's alone: everything the board is derived from is a lifecycle event.
+    const events = records.filter(isLifecycleEvent)
     const beside = manifestPathOf(args, path)
     const read = await readManifestFile(beside)
     if (read === undefined) {
@@ -181,7 +183,7 @@ const replay = async (argv: string[]): Promise<number> => {
     const activity = createFileActivity()
 
     const board = boardFor(args)
-    for (const moment of replayMoments(events, pacing)) {
+    for (const moment of replayMoments(records, pacing)) {
         if (moment.wait > 0) {
             await wait(moment.wait)
         }

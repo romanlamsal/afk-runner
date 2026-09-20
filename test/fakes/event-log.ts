@@ -1,9 +1,11 @@
-import type { EventLog, LifecycleEvent } from "../../src/domain/events.ts"
+import type { EventLog, LifecycleEvent, RunBoundary } from "../../src/domain/events.ts"
 
 export type FakeEventLog = {
     log: EventLog
     /** Every event appended, oldest first. The log a test asserts on. */
     appended: LifecycleEvent[]
+    /** Every run boundary appended, oldest first. Kept beside the events, as the log's `read` keeps them apart. */
+    boundaries: RunBoundary[]
 }
 
 export type FakeEventLogOptions = {
@@ -25,12 +27,17 @@ export const createFakeEventLog = (
     { changes = [] }: FakeEventLogOptions = {},
 ): FakeEventLog => {
     const appended = [...existing]
+    const boundaries: RunBoundary[] = []
     return {
         appended,
+        boundaries,
         log: {
             read: async () => [...appended],
             append: async (_root, _spec, event) => {
                 appended.push(event)
+            },
+            appendBoundary: async (_root, _spec, boundary) => {
+                boundaries.push(boundary)
             },
             follow: async function* (_root, _spec, signal) {
                 yield [...appended]
