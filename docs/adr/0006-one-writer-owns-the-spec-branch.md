@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded in part by ADR-0038
 ---
 
 # One writer owns the spec branch
@@ -18,5 +18,9 @@ the merge track is serial — one ticket at a time.**
   handles them.
 - Git refuses to check one branch out in two worktrees, which makes a second writer *unrepresentable*
   rather than something the script has to guard against.
-- Merge-track throughput — one serial track behind a pool of parallel implementers — is untested.
-  It is the known pressure point of this design.
+- ~~Merge-track throughput — one serial track behind a pool of parallel implementers — is untested.
+  It is the known pressure point of this design.~~ **Superseded by ADR-0038.** It was tested, across
+  six runs and two repositories, and it is not the pressure point: `rebase` and `merge` cost 0s,
+  utilisation peaks at 0.50, and queueing across 31 tickets totals 32 seconds. ~90% of a run's
+  critical path is an agent thinking. Seriality costs this design nothing, which is why the first
+  consequence above is the whole of the story.

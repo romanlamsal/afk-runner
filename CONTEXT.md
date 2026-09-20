@@ -123,6 +123,13 @@ is that merge's own proof rather than new work (ADR-0008). A drained run is a pa
 the pull request a partial run opens.
 _Avoid_: graceful shutdown, soft stop, quiesce
 
+**Critical path**:
+The chain of steps whose durations add up to a run's wall-clock — each one waiting on the one before
+it, from the first setup to the pull request. What any claim about a run's speed is measured against:
+a change that does not shorten this shortens no run, however much work it saves beside it (ADR-0038).
+Read back off the log like everything else, and never recorded.
+_Avoid_: bottleneck, longest path, hot path
+
 ## State
 
 A ticket's life is a state machine. The statuses below are its states; the steps are the moves
