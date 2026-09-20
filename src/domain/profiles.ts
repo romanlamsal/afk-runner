@@ -59,5 +59,5 @@ export const PROFILES = {
     preparer: { model: "haiku", effort: "low", subagentModel: "haiku" },
 
     /** Prose from commits afk already has. Nothing downstream depends on it being clever. */
-    pullRequestWriter: { model: "haiku", effort: "low", subagentModel: "haiku" },
+    pullRequestWriter: { model: "haiku", effort: "medium", subagentModel: "haiku" },
 } as const satisfies Record<string, AgentProfile>

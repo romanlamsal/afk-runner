@@ -292,12 +292,14 @@ export const pullRequestWriterPrompt = ({
         `1. Read spec issue #${spec} and the commits on this branch — \`git log ${base}..${branch}\`.`,
         "   There is one commit per ticket that landed, and its body is that ticket's own commit",
         "   messages, plus a conflict resolution note where an agent had to make a judgement call.",
-        "2. Write a title: one line, the change itself rather than the process that produced it.",
+        "2. Write a title: one line, the change itself rather than the process that produced it. " +
+        "Adhere to the repo's conventions, e.g. if commit messages should follow conventional commits, the PR title should, too.",
         "3. Write a summary for whoever has to review it: what changed, why, and what a reviewer",
         "   should look at hardest. Name any conflict resolution the commits mention — an agent",
         "   decided something inside that commit, and this is where a reviewer learns it.",
         "",
         "Report the title and the summary as structured output and nothing else. Do not add closing",
-        "references: afk appends one per verified ticket itself. Change no file, commit nothing, push",
+        "references for tickets: afk appends one per verified ticket itself. Add a close reference for the spec, though." +
+        "Change no file, commit nothing, push",
         "nothing, do not open the pull request, and write nothing to the issue tracker.",
     ].join("\n")
