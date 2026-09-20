@@ -69,6 +69,17 @@ is a separate question, answered from what the step itself wrote and carried by 
   says so — and `boardOf` takes those writes beside the instant, and a row gains `quiet`: running, and nothing written for longer
   than `QUIET_AFTER_MS`, counted from the step's start where it has written nothing yet. A view
   handed no writes claims no silence.
+- **Whether the run is alive at all is the third thing it buys.** `boardOf` takes it as a parameter
+  beside the instant and the writes, and the caller reads it off the run lock (one afk per spec): the
+  watch asks who holds the run on every wake, tick included, since a run ends by letting its lock go
+  and no change to the log says so. With nobody holding it, every step the log left running belongs
+  to a process that went with the run that started it, so `STEP_STATES` takes a fourth weight and the
+  trail draws those steps `interrupted` — CONTEXT.md's own word for them, which ADR-0030 kept in the
+  domain and off the board because only the driver could tell it. The lock is that knowledge written
+  into the run directory, so `--board-only`, the runner and a replay's closing frame all draw it. An
+  interrupted step carries no elapsed figure and claims no silence: both are questions about a step
+  that is going. Liveness stays the run's and never a step's — the lock says a run is alive, not
+  which of its steps is, and the driver's in-flight set is still nothing the board reads.
 - **A replay is a recording rather than an approximation.** Its clock is the replayed instant: it
   stands at each line's own instant and advances across the gap to the next at the speed factor, so
   the replay redraws through a gap exactly where the live watch ticked through it, and the figure a

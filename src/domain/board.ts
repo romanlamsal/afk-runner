@@ -14,13 +14,16 @@ import {
 import type { Manifest } from "./manifest.ts"
 
 /**
- * The board: the view of a run, derived from what the run directory holds — the manifest, the
- * event log and when each running step last wrote — and an instant handed in (ADR-0034). It claims nothing about liveness, so it says what
- * the log says — which is what lets it be drawn by anything that can read the run directory rather
- * than only by the process running it.
+ * The board: the view of a run, derived from what the run directory holds — the manifest, the event
+ * log, when each running step last wrote, and whether the run's lock has a live holder — and an
+ * instant handed in (ADR-0034). Every one of those is a file under `.afk/`, which is what lets the
+ * view be drawn by anything that can read the run directory rather than only by the process running
+ * it.
  *
- * Nothing here is written down. What the driver holds and the log does not — which of its steps has
- * a process behind it — stays the driver's, because scheduling needs it and a view does not.
+ * Liveness is therefore the run's and never a step's: the lock says a run is alive, not which of its
+ * steps is. Nothing here is written down, and what the driver holds and the run directory does not —
+ * which of its steps has a process behind it — stays the driver's, because scheduling needs that and
+ * a view does not.
  */
 
 /**
@@ -50,12 +53,17 @@ export const TRAIL_STEPS: readonly Step[] = ["setup", "implement", ...MERGE_SIDE
  * The weights a step is carried at, which is what makes a row answer three questions at once: what
  * has happened to this ticket, what is happening to it now, and what is still ahead of it.
  *
- * There are three of them and not four. Telling a step that is happening from one whose process is
- * gone takes knowledge only the driver holds, so a board with both in its vocabulary would have to
- * guess for every trailing `running` event; `running` states the fact the log states and leaves the
- * rest to whoever is reading (ADR-0030).
+ * There are four of them, and the fourth is *Interrupted* (CONTEXT.md): a step the log left running
+ * that nothing is behind any more. ADR-0030 refused it because telling it from a step that is
+ * happening took the driver's live action set, which is knowledge no reader of the run directory
+ * has. The run lock is that knowledge written down (ADR-0034): with no live holder of the run, every
+ * trailing `running` event was written by a process that is gone, and a board saying `running` about
+ * one is stating something it can see is not so.
+ *
+ * It stays a reading of the run directory rather than of the driver: the lock is a file under
+ * `.afk/`, so `--board-only` draws the same weights the runner does.
  */
-export const STEP_STATES = ["settled", "running", "ahead"] as const
+export const STEP_STATES = ["settled", "running", "interrupted", "ahead"] as const
 
 export type StepState = (typeof STEP_STATES)[number]
 
@@ -72,7 +80,7 @@ export type SettledOutcome = Exclude<Outcome, "running">
  */
 export type BoardStep =
     | { step: Step; state: "settled"; outcome: SettledOutcome }
-    | { step: Step; state: "running" | "ahead" }
+    | { step: Step; state: "running" | "interrupted" | "ahead" }
 
 /** One ticket's line. Every ticket of the spec has exactly one, from the first frame to the last. */
 export type BoardRow = {
@@ -116,15 +124,18 @@ export type BoardRow = {
      * row does not look busy — and nothing where the start event carried no instant a clock reads.
      *
      * It is read off the log and a clock handed in, never off a process, so a replay handed the
-     * replayed instant reproduces it exactly. It says how long, not whether: a step whose process is
-     * gone counts up like one that is working (ADR-0034).
+     * replayed instant reproduces it exactly. It says how long, not whether: within a live run a
+     * step whose own process is gone counts up like one that is working (ADR-0034). What it never
+     * does is count for a run nothing holds — that step is interrupted, and a figure counting up
+     * beside it would say it is going.
      */
     elapsed: number | undefined
     /**
      * Whether the step the log left running has gone quiet: nothing written for longer than
      * `QUIET_AFTER_MS`. Silence is counted from the step's last write, as its own records carry it,
      * and from its start where it has written nothing yet — a step that has only just begun has not
-     * gone quiet. Never quiet where no step is running, or where the start carried no instant.
+     * gone quiet. Never quiet where no step is running, where the start carried no instant, or where
+     * the run itself is not live — an interrupted step is not a step being waited on.
      *
      * It is the one weight the log alone cannot give, and it is still read off the run directory
      * rather than off a process: a step whose process is gone stops writing, so it goes quiet, which
@@ -209,7 +220,8 @@ const outcomeAt = (events: readonly LifecycleEvent[], ticket: number, step: Step
 
 /**
  * The step the log started for this ticket and has not ended, or nothing where its last event ended.
- * Whether a process is still behind it is not asked and not answerable here (ADR-0030).
+ * Whether a process is still behind this particular step is not asked and not answerable here: the
+ * run's lock answers for the run, and that is as fine-grained as liveness gets (ADR-0034).
  *
  * It is read past a prepare pass, like every other reading of what a run left open: a pass is about
  * the step it was sent to, and that step is the one the trail carries it at (ADR-0012).
@@ -299,33 +311,44 @@ const detailOf = (events: readonly LifecycleEvent[], ticket: number): string | u
     events.findLast(event => event.ticket === ticket && event.outcome !== "running")?.detail
 
 /**
- * A row's trail. A step the log started and has not ended is running; a step the log has already
- * settled has happened, and carries what it came to; everything else is still ahead.
+ * A row's trail. A step the log started and has not ended is running while the run is live and
+ * interrupted where it is not; a step the log has already settled has happened, and carries what it
+ * came to; everything else is still ahead.
  *
- * The remainder of a row picked back up begins at its running step, so the operator reads what a
- * resume is about to do before it does it — and reads the same trail whether the run is alive or
- * long dead.
+ * The remainder of a row picked back up begins at its open step, so the operator reads what a resume
+ * is about to do before it does it — and reads it as a step that is not happening, which is what a
+ * log a dead process left behind is full of.
  */
-const trailOf = (events: readonly LifecycleEvent[], ticket: number, open: Step | undefined): readonly BoardStep[] =>
+const trailOf = (
+    events: readonly LifecycleEvent[],
+    ticket: number,
+    open: Step | undefined,
+    live: boolean,
+): readonly BoardStep[] =>
     TRAIL_STEPS.map((step): BoardStep => {
         if (step === open) {
-            return { step, state: "running" }
+            return { step, state: live ? "running" : "interrupted" }
         }
         const outcome = outcomeAt(events, ticket, step)
         return outcome === undefined ? { step, state: "ahead" } : { step, state: "settled", outcome }
     })
 
 /**
- * The whole view, as a pure function of the manifest, the log, the instant it is derived at and when
- * each running step last wrote, where those are to hand. The instant and the writes are handed in rather than read, so the
- * same inputs are the same view wherever they are drawn — a live run passes the time now, a replay
- * the replayed instant (ADR-0034).
+ * The whole view, as a pure function of the manifest, the log, the instant it is derived at, when
+ * each running step last wrote, where those are to hand, and whether the run is live. Every one of
+ * them is handed in rather than read, so the same inputs are the same view wherever they are drawn —
+ * a live run passes the time now, a replay the replayed instant (ADR-0034).
+ *
+ * @param live Whether anything holds the run's lock. The caller reads it off the lock and hands the
+ * answer down: the domain says what a live run's board looks like, never how a process is found.
+ * With nothing holding the run, every step the log left running belongs to a process that is gone.
  */
 export const boardOf = (
     manifest: Manifest,
     events: readonly LifecycleEvent[],
     now: Date,
     writes: LastWrites | undefined,
+    live: boolean,
 ): BoardView => ({
     // The log is append-only, so its last line is the last thing that happened: the order it was
     // written in is the order it happened in, and no event is ever rewritten (ADR-0011).
@@ -338,12 +361,14 @@ export const boardOf = (
             ticket: ticket.number,
             title: ticket.title,
             track,
-            steps: trailOf(events, ticket.number, open),
+            steps: trailOf(events, ticket.number, open, live),
             waiting: track === "implement" && implemented(events, ticket.number) && open === undefined,
             conclusion: cameTo(events, ticket.number),
             detail: detailOf(events, ticket.number),
-            elapsed: elapsedOf(events, ticket.number, now),
-            quiet: quietOf(events, ticket.number, now, writes),
+            // Both are about a step that is going: an interrupted one is not, so it counts up
+            // towards nothing and its silence is the silence of a step that has stopped.
+            elapsed: live ? elapsedOf(events, ticket.number, now) : undefined,
+            quiet: live && quietOf(events, ticket.number, now, writes),
         }
     }),
 })

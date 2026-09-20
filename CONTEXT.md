@@ -251,10 +251,13 @@ thinking and may be dead, and the board says which it looks like rather than whi
 _Avoid_: stalled, hung, idle, dead
 
 **Interrupted**:
-A step the log left `running` whose action the driver does not hold: the step's process is gone, and
-it is not happening. Only the live action set tells it from a step that is (ADR-0019), which is what
-a resumed run is full of. It is the driver's distinction, drawn to decide what to dispatch; the
-board does not draw it (ADR-0030).
+A step the log left `running` that is not happening: its process is gone, and a resumed run's log is
+full of them. The driver tells one from a step that is happening by its live action set (ADR-0019),
+because it has to decide what to dispatch. **The board draws it too** (ADR-0034), and from the run
+directory rather than from that set: with nobody holding the run's lock, every step the log left
+running was started by a process that went with the run, so the board says so instead of saying
+`running`. The two readings are of different grain and neither is the other's — the lock says a run
+is alive, never which of its steps is.
 _Avoid_: stale, orphaned, hung, zombie
 
 **`.afk/`**:
@@ -265,7 +268,8 @@ _Avoid_: cache, workspace, scratch
 **Run lock**:
 The run directory's claim that one afk process is running this spec, naming that process. A second
 start refuses while its holder is live; a lock whose holder no longer exists is absent. Drawing the
-board takes none (ADR-0034).
+board takes none and reads it: whether anything holds the run is what tells a step that is happening
+from an *Interrupted* one (ADR-0034).
 _Avoid_: mutex, pidfile, session
 
 **Takeover**:

@@ -9,10 +9,12 @@ import type { Step } from "../../src/domain/events.ts"
  * one is news for.
  */
 
-const trail = (steps: Readonly<Record<string, SettledOutcome | "running" | "ahead">>): readonly BoardStep[] =>
+const trail = (
+    steps: Readonly<Record<string, SettledOutcome | "running" | "interrupted" | "ahead">>,
+): readonly BoardStep[] =>
     Object.entries(steps).map(([name, weight]) => {
         const step = name as Step
-        return weight === "running" || weight === "ahead"
+        return weight === "running" || weight === "interrupted" || weight === "ahead"
             ? { step, state: weight }
             : { step, state: "settled", outcome: weight }
     })
@@ -35,6 +37,9 @@ const UNTOUCHED = row(trail({ setup: "ahead", implement: "ahead" }))
 
 const SETTING_UP = row(trail({ setup: "running", implement: "ahead" }))
 
+/** The same setup, in a run nothing holds any more: the step is open and nobody is doing it. */
+const SETUP_INTERRUPTED = row(trail({ setup: "interrupted", implement: "ahead" }))
+
 describe("boardLines", () => {
     it("should say nothing for the first view it is given", () => {
         // given
@@ -53,6 +58,28 @@ describe("boardLines", () => {
 
         // when
         const lines = boardLines(before, view(SETTING_UP))
+
+        // then
+        expect(lines).toEqual([])
+    })
+
+    it("should name a step the run stopped being held under", () => {
+        // given
+        const before = view(SETTING_UP)
+
+        // when
+        const lines = boardLines(before, view(SETUP_INTERRUPTED))
+
+        // then
+        expect(lines).toEqual(["#7 setup interrupted"])
+    })
+
+    it("should say nothing for a step that was interrupted already", () => {
+        // given
+        const before = view(SETUP_INTERRUPTED)
+
+        // when
+        const lines = boardLines(before, view(SETUP_INTERRUPTED))
 
         // then
         expect(lines).toEqual([])

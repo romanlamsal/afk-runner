@@ -127,12 +127,13 @@ export const assembleCli = (): Cli => {
 
     // The one thing that redraws the board, handed to the runner and the viewer alike so that both
     // redraw on the same terms: a change to the log, and a tick while nothing settles. It reads when
-    // each running step last wrote off the run directory, so both draw the same colour for the same
-    // step (ADR-0034).
+    // each running step last wrote off the run directory, and who holds the run, so both draw the
+    // same colour for the same step and neither calls a dead run's steps live (ADR-0034).
     const watch = createWatchBoardService({
         activity: createFileActivity(),
         board,
         events,
+        lock,
         now,
         ticker: createIntervalTicker(),
     })

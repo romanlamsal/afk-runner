@@ -53,6 +53,28 @@ describe("replayMoments", () => {
         expect(moments.at(-1)?.log).toEqual(log)
     })
 
+    it("should hold every moment but the last live, since a process wrote the line it stands at", () => {
+        // given
+        const log = [event(7, "setup", "running", 0), event(7, "setup", "ok", 1)]
+
+        // when
+        const moments = replayMoments(log, FIXED)
+
+        // then
+        expect(moments.slice(0, -1).map(moment => moment.live)).toEqual([true, true, true])
+    })
+
+    it("should close on a moment nothing holds, so that what the log left running reads as interrupted", () => {
+        // given
+        const log = [event(7, "implement", "running")]
+
+        // when
+        const moments = replayMoments(log, FIXED)
+
+        // then
+        expect(moments.at(-1)?.live).toBe(false)
+    })
+
     it("should stand its clock at the instant the line was written, which is what an elapsed figure counts to", () => {
         // given
         const log = [event(7, "implement", "running", 1), event(8, "setup", "running", 4)]

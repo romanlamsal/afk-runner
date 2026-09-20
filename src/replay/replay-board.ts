@@ -187,7 +187,7 @@ const replay = async (argv: string[]): Promise<number> => {
         }
         const writes =
             root === undefined ? undefined : await lastWrites(activity, root, writers(manifest, moment.log), moment.at)
-        board.show(boardOf(manifest, moment.log, moment.at, writes))
+        board.show(boardOf(manifest, moment.log, moment.at, writes, moment.live))
     }
 
     return 0

@@ -47,9 +47,10 @@ const SETTLED_ROLES: Record<SettledOutcome, Role> = {
 
 /**
  * Where a step stands in the run, as the role it is read as: a step not reached yet is ahead, a step
- * the log started and has not ended is running — or quiet, where its row says it has stopped writing
- * — and a settled one is whatever it settled on. The words stay the step's name either way: the
- * colour carries the silence, and the text keeps meaning what it always has (ADR-0031).
+ * the log started and has not ended is running — or quiet, where its row says it has stopped writing,
+ * or interrupted, where nothing holds the run it was started by — and a settled one is whatever it
+ * settled on. The words stay the step's name in every case: the colour carries the liveness, and the
+ * text keeps meaning what it always has (ADR-0031).
  */
 const roleOf = (entry: BoardStep, quiet: boolean): Role => {
     switch (entry.state) {
@@ -57,6 +58,8 @@ const roleOf = (entry: BoardStep, quiet: boolean): Role => {
             return SETTLED_ROLES[entry.outcome]
         case "running":
             return quiet ? "quiet" : "running"
+        case "interrupted":
+            return "interrupted"
         case "ahead":
             return "ahead"
     }

@@ -23,7 +23,7 @@ import type { Conclusion, Step } from "../../src/domain/events.ts"
  */
 
 /** Where one step of a trail stands: what it came to, or that it is running or still ahead. */
-type Standing = SettledOutcome | "running" | "ahead"
+type Standing = SettledOutcome | "running" | "interrupted" | "ahead"
 
 /**
  * A trail written the short way: every step of the run, in order, where it stands. A step left
@@ -32,7 +32,7 @@ type Standing = SettledOutcome | "running" | "ahead"
 const trail = (steps: Partial<Record<Step, Standing>>): readonly BoardStep[] =>
     TRAIL_STEPS.map((step): BoardStep => {
         const standing = steps[step] ?? "ahead"
-        return standing === "running" || standing === "ahead"
+        return standing === "running" || standing === "interrupted" || standing === "ahead"
             ? { step, state: standing }
             : { step, state: "settled", outcome: standing }
     })
@@ -336,6 +336,19 @@ describe("boardFrame: a step gone quiet", () => {
         expect(spanFor(line, "58s")?.role).toBe(role)
     })
 
+    it("should write an interrupted row in the words a running one is written in", () => {
+        // given
+        const rows = [IMPLEMENTING, trail({ setup: "ok", implement: "interrupted" })].map(steps =>
+            row(7, "A ticket", "implement", steps),
+        )
+
+        // when
+        const [running, interrupted] = rows.map(one => boardFrame({ at: undefined, rows: [one] }, WIDE).map(textOf)[0])
+
+        // then
+        expect(interrupted).toBe(running)
+    })
+
     it("should write a quiet row in the words a writing one is written in", () => {
         // given
         const rows = [false, true].map(quiet =>
@@ -484,6 +497,7 @@ describe("boardFrame: what a row asks to be read at", () => {
     it.each([
         ["a step still ahead", "ahead", "ahead"],
         ["a step the log started and has not ended", "running", "running"],
+        ["a step a run nothing holds left open", "interrupted", "interrupted"],
         ["a settled step that went well", "ok", "plain"],
         ["a settled conflicted step", "conflicted", "conflicted"],
         ["a settled failed step", "failed", "failed"],

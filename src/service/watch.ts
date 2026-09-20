@@ -2,6 +2,7 @@ import { type Activity, lastWrites } from "../domain/activity.ts"
 import { type Board, boardOf, writers } from "../domain/board.ts"
 import type { Clock, Ticker } from "../domain/clock.ts"
 import type { EventLog, LifecycleEvent } from "../domain/events.ts"
+import type { RunLock } from "../domain/lock.ts"
 import type { Manifest } from "../domain/manifest.ts"
 
 /** How often the board is redrawn while nothing settles: often enough that an elapsed figure counts. */
@@ -36,6 +37,11 @@ export type WatchBoardDeps = {
     /** Where each frame is shown (ADR-0029). */
     board: Board
     events: EventLog
+    /**
+     * Who holds the run, which is what says whether a step the log left running is happening at all.
+     * It is read and never taken: watching a run costs that run nothing (ADR-0034).
+     */
+    lock: RunLock
     /** The instant each view is derived at, which is what a row's elapsed figure counts to. */
     now: Clock
     /** What wakes the watch while the log stands still. */
@@ -59,7 +65,7 @@ type Woke =
  * was attempted (ADR-0011).
  */
 export const createWatchBoardService =
-    ({ activity, board, events, now, ticker }: WatchBoardDeps): WatchBoard =>
+    ({ activity, board, events, lock, now, ticker }: WatchBoardDeps): WatchBoard =>
     async ({ root, spec, manifest }, { until = () => false, signal } = {}) => {
         // One abort stops both sources, whether the caller asked or the log said enough.
         const stopping = new AbortController()
@@ -69,11 +75,13 @@ export const createWatchBoardService =
         }
         signal?.addEventListener("abort", stop, { once: true })
 
-        // A tick re-reads the writes too: a step goes quiet by writing nothing, so no change to the
-        // log ever says so.
+        // A tick re-reads the writes and the lock too: a step goes quiet by writing nothing and a
+        // run ends by letting its lock go, so no change to the log ever says either.
         const draw = async (log: readonly LifecycleEvent[]): Promise<void> => {
             const at = now()
-            board.show(boardOf(manifest, log, at, await lastWrites(activity, root, writers(manifest, log), at)))
+            const writes = await lastWrites(activity, root, writers(manifest, log), at)
+            const live = (await lock.holder(root, spec)) !== undefined
+            board.show(boardOf(manifest, log, at, writes, live))
         }
 
         const logs = events.follow(root, spec, stopping.signal)[Symbol.asyncIterator]()

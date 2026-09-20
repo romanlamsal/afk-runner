@@ -5,6 +5,7 @@ import { createWatchBoardService } from "../../src/service/watch.ts"
 import { createFakeActivity, type FakeActivity } from "../fakes/activity.ts"
 import { createFakeBoard } from "../fakes/board.ts"
 import { createFakeEventLog, type FakeEventLog } from "../fakes/event-log.ts"
+import { createFakeRunLock, type FakeRunLock } from "../fakes/run-lock.ts"
 import { createFakeTicker } from "../fakes/ticker.ts"
 import { manifestOf, ticket } from "../fixtures/manifest.ts"
 
@@ -16,6 +17,9 @@ import { manifestOf, ticket } from "../fixtures/manifest.ts"
 const MANIFEST = manifestOf([ticket(5)])
 
 const TARGET = { root: "/repo", spec: 4, manifest: MANIFEST }
+
+/** The afk process holding the run, which is what makes its open steps steps that are happening. */
+const HOLDER = { pid: 4242 }
 
 const at = (second: number): string => `2026-01-01T10:00:0${second}.000Z`
 
@@ -39,24 +43,29 @@ const harness = ({
     log = [],
     changes = [],
     beats = 0,
+    held = true,
     board = createFakeBoard().board,
     activity = createFakeActivity(),
 }: {
     log?: readonly LifecycleEvent[]
     changes?: readonly (readonly LifecycleEvent[])[]
     beats?: number
+    /** Whether a live afk holds the run the watch is drawing. */
+    held?: boolean
     board?: Board
     activity?: FakeActivity
 } = {}) => {
     const events = createFakeEventLog(log, { changes })
+    const lock = createFakeRunLock(held ? { heldBy: HOLDER } : {})
     const watch = createWatchBoardService({
         activity: activity.activity,
         board,
         events: events.log,
+        lock: lock.lock,
         now: advancing(),
         ticker: createFakeTicker(beats),
     })
-    return { watch, events }
+    return { watch, events, lock }
 }
 
 describe("createWatchBoardService", () => {
@@ -122,6 +131,56 @@ describe("createWatchBoardService", () => {
 
         // then
         expect(board.shown.map(view => view.rows[0]?.quiet)).toEqual([quiet, quiet])
+    })
+
+    it.each([
+        ["running", "somebody holds the run", true],
+        ["interrupted", "nothing holds the run", false],
+    ] as const)("should draw a step the log left running as %s where %s", async (state, _case, held) => {
+        // given
+        const board = createFakeBoard()
+        const { watch } = harness({ board: board.board, held, log: [event("running", 0)] })
+
+        // when
+        await watch(TARGET)
+
+        // then
+        expect(board.shown[0]?.rows[0]?.steps.find(entry => entry.step === "implement")?.state).toBe(state)
+    })
+
+    it("should draw the run as dead from the tick after its holder went", async () => {
+        // given: a run whose holder dies while the first frame of it is on screen
+        const shown: BoardView[] = []
+        let holding: FakeRunLock | undefined
+        const board: Board = {
+            show: view => {
+                shown.push(view)
+                holding?.die(HOLDER.pid)
+            },
+            notice: () => undefined,
+        }
+        const run = harness({ board, log: [event("running", 0)], beats: 1 })
+        holding = run.lock
+
+        // when
+        await run.watch(TARGET)
+
+        // then
+        expect(shown.map(view => view.rows[0]?.steps.find(entry => entry.step === "implement")?.state)).toEqual([
+            "running",
+            "interrupted",
+        ])
+    })
+
+    it("should take no lock of its own, because watching a run costs that run nothing", async () => {
+        // given
+        const { watch, lock } = harness({ log: [event("running", 0)] })
+
+        // when
+        await watch(TARGET)
+
+        // then
+        expect([...lock.held.values()]).toEqual([HOLDER])
     })
 
     it("should append nothing to the log on a tick", async () => {

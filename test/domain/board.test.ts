@@ -36,7 +36,7 @@ const MANIFEST = manifestOf([ticket(7), ticket(8, [7]), ticket(9, [7])])
 
 /** The track a ticket's row sits in, which is the whole of what a row says about it for now. */
 const trackOf = (events: readonly LifecycleEvent[], number: number): Track | undefined =>
-    boardOf(MANIFEST, events, NOW, undefined).rows.find(row => row.ticket === number)?.track
+    boardOf(MANIFEST, events, NOW, undefined, true).rows.find(row => row.ticket === number)?.track
 
 /** A ticket whose implementer reported back: everything the merge track draws from starts here. */
 const implemented = (number: number): readonly LifecycleEvent[] => [
@@ -50,7 +50,7 @@ describe("boardOf: the rows", () => {
         const events = [...implemented(7), event(7, "rebase", "running")]
 
         // when
-        const view = boardOf(MANIFEST, events, NOW, undefined)
+        const view = boardOf(MANIFEST, events, NOW, undefined, true)
 
         // then
         expect(view.rows.map(row => row.ticket)).toEqual([7, 8, 9])
@@ -61,7 +61,7 @@ describe("boardOf: the rows", () => {
         const events: readonly LifecycleEvent[] = []
 
         // when
-        const view = boardOf(MANIFEST, events, NOW, undefined)
+        const view = boardOf(MANIFEST, events, NOW, undefined, true)
 
         // then
         expect(view.rows.map(row => row.title)).toEqual(["ticket 7", "ticket 8", "ticket 9"])
@@ -78,7 +78,7 @@ describe("boardOf: the rows", () => {
         const log = events
 
         // when
-        const view = boardOf(MANIFEST, log, NOW, undefined)
+        const view = boardOf(MANIFEST, log, NOW, undefined, true)
 
         // then
         expect(view.rows).toHaveLength(MANIFEST.tickets.length)
@@ -134,12 +134,12 @@ describe("boardOf: which track a ticket is on", () => {
 
 /** The weight one step of a ticket's trail is read at, which is the whole of what a trail says. */
 const weightOf = (events: readonly LifecycleEvent[], number: number, step: Step): StepState | undefined =>
-    boardOf(MANIFEST, events, NOW, undefined)
+    boardOf(MANIFEST, events, NOW, undefined, true)
         .rows.find(row => row.ticket === number)
         ?.steps.find(entry => entry.step === step)?.state
 
 const rowOf = (events: readonly LifecycleEvent[], number: number) =>
-    boardOf(MANIFEST, events, NOW, undefined).rows.find(row => row.ticket === number)
+    boardOf(MANIFEST, events, NOW, undefined, true).rows.find(row => row.ticket === number)
 
 describe("boardOf: the steps a row covers", () => {
     const EVERY_STEP = ["setup", "implement", "rebase", "resolve", "merge", "gate", "fix", "revert"]
@@ -161,9 +161,9 @@ describe("boardOf: the steps a row covers", () => {
 })
 
 /**
- * The three weights, and the whole of what tells them apart: the log holds an end event for the
- * step, the log holds a start event and no end, or the log holds nothing about it. Nothing here asks
- * whether a process is behind the step, because nothing here could answer it (ADR-0030).
+ * The weights, and what tells them apart: the log holds an end event for the step, the log holds a
+ * start event and no end, or the log holds nothing about it. Whether an open step is happening is
+ * the run's liveness, which is handed in and asserted in its own suite below.
  */
 describe("boardOf: what a step is read at", () => {
     it.each([
@@ -221,17 +221,6 @@ describe("boardOf: what a step is read at", () => {
         expect(weight).toBe("ahead")
     })
 
-    it("should read every step a killed run left open as running", () => {
-        // given: a log full of steps a previous process began, with nothing alive to have begun them
-        const events = [event(7, "setup", "running"), event(8, "implement", "running")]
-
-        // when
-        const view = boardOf(MANIFEST, events, NOW, undefined)
-
-        // then
-        expect(view.rows.flatMap(row => row.steps).filter(entry => entry.state === "running")).toHaveLength(2)
-    })
-
     it("should give a ticket at most one running step", () => {
         // given: the ticket's whole implement track begun and only its last step left open
         const events = [event(7, "setup", "ok"), event(7, "implement", "running")]
@@ -241,6 +230,82 @@ describe("boardOf: what a step is read at", () => {
 
         // then
         expect(row?.steps.filter(entry => entry.state === "running")).toHaveLength(1)
+    })
+})
+
+/**
+ * Whether the run is live, which the caller reads off its lock and hands in: with somebody holding
+ * the run a trailing `running` event is a step that is happening, and with nobody holding it that
+ * same event is a step whose process went with the run that started it (ADR-0034).
+ */
+describe("boardOf: a step the log left running in a run nothing holds", () => {
+    /** The transcript a running implementer writes to, which is what its silence would be read off. */
+    const TRANSCRIPT = ".afk/4/transcripts/t7-implement-1.jsonl"
+
+    /** A step a previous process began ten minutes ago and never ended. */
+    const OPEN: readonly LifecycleEvent[] = [
+        { ...event(7, "implement", "running"), at: "2026-09-15T11:09:36.314Z", transcriptPath: TRANSCRIPT },
+    ]
+
+    const rowIn = (live: boolean) => boardOf(MANIFEST, OPEN, NOW, new Map(), live).rows[0]
+
+    it.each([
+        ["running", "somebody holds the run", true],
+        ["interrupted", "nothing holds the run", false],
+    ] as const)("should read it as %s where %s", (expected, _case, live) => {
+        // given
+        const holding = live
+
+        // when
+        const row = rowIn(holding)
+
+        // then
+        expect(row?.steps.find(entry => entry.step === "implement")?.state).toBe(expected)
+    })
+
+    it("should read every step a dead run left open as interrupted", () => {
+        // given: a log full of steps a previous process began, with nothing alive to have begun them
+        const events = [event(7, "setup", "running"), event(8, "implement", "running")]
+
+        // when
+        const view = boardOf(MANIFEST, events, NOW, undefined, false)
+
+        // then
+        expect(view.rows.flatMap(row => row.steps).filter(entry => entry.state === "interrupted")).toHaveLength(2)
+    })
+
+    it("should leave what the log already settled alone", () => {
+        // given: a ticket whose every step the log ended, drawn as a live run draws it
+        const events = [...implemented(7), event(7, "gate", "failed")]
+        const held = boardOf(MANIFEST, events, NOW, undefined, true).rows[0]?.steps
+
+        // when
+        const view = boardOf(MANIFEST, events, NOW, undefined, false)
+
+        // then
+        expect(view.rows[0]?.steps).toEqual(held)
+    })
+
+    it("should count no elapsed time for it, because it is not going", () => {
+        // given
+        const holding = false
+
+        // when
+        const row = rowIn(holding)
+
+        // then
+        expect(row?.elapsed).toBeUndefined()
+    })
+
+    it("should not read it as quiet, because silence is a question about a step being waited on", () => {
+        // given
+        const holding = false
+
+        // when
+        const row = rowIn(holding)
+
+        // then
+        expect(row?.quiet).toBe(false)
     })
 })
 
@@ -277,7 +342,7 @@ describe("boardOf: a ticket the merge track has not taken yet", () => {
         const events = [...implemented(7), ...implemented(8), ...implemented(9)]
 
         // when
-        const view = boardOf(MANIFEST, events, NOW, undefined)
+        const view = boardOf(MANIFEST, events, NOW, undefined, true)
 
         // then
         expect(view.rows.map(row => ({ ...row, ticket: 0, title: "" }))).toEqual([
@@ -415,7 +480,7 @@ describe("boardOf: a ticket nothing more will happen to", () => {
         const events = [7, 8, 9].flatMap(number => [...implemented(number), event(number, "gate", "ok")])
 
         // when
-        const view = boardOf(MANIFEST, events, NOW, undefined)
+        const view = boardOf(MANIFEST, events, NOW, undefined, true)
 
         // then
         expect(view.rows.map(row => row.ticket)).toEqual([7, 8, 9])
@@ -562,7 +627,7 @@ describe("boardOf: how long the running step has been going", () => {
         const events = [started("implement", "2026-09-15T10:00:00.000Z")]
 
         // when
-        const view = boardOf(MANIFEST, events, new Date("2026-09-15T10:20:00.000Z"), undefined)
+        const view = boardOf(MANIFEST, events, new Date("2026-09-15T10:20:00.000Z"), undefined, true)
 
         // then
         expect(view.rows[0]?.elapsed).toBe(20 * 60_000)
@@ -582,7 +647,7 @@ describe("boardOf: when the last thing happened", () => {
         const events = [at("2026-09-15T11:18:38.314Z"), at("2026-09-15T11:42:07.001Z")]
 
         // when
-        const view = boardOf(MANIFEST, events, NOW, undefined)
+        const view = boardOf(MANIFEST, events, NOW, undefined, true)
 
         // then
         expect(view.at).toBe("2026-09-15T11:42:07.001Z")
@@ -593,7 +658,7 @@ describe("boardOf: when the last thing happened", () => {
         const events: readonly LifecycleEvent[] = []
 
         // when
-        const view = boardOf(MANIFEST, events, NOW, undefined)
+        const view = boardOf(MANIFEST, events, NOW, undefined, true)
 
         // then
         expect(view.at).toBeUndefined()
@@ -604,7 +669,7 @@ describe("boardOf: when the last thing happened", () => {
         const events = [at("2026-09-15T10:00:00.000Z")]
 
         // when
-        const view = boardOf(MANIFEST, events, NOW, undefined)
+        const view = boardOf(MANIFEST, events, NOW, undefined, true)
 
         // then
         expect(view.at).toBe("2026-09-15T10:00:00.000Z")
@@ -615,7 +680,7 @@ describe("boardOf: when the last thing happened", () => {
         const events = [at("2026-09-15T10:00:00.000Z"), at("2026-09-15T10:00:04.000Z")]
 
         // when
-        const views = [boardOf(MANIFEST, events, NOW, undefined), boardOf(MANIFEST, events, NOW, undefined)]
+        const views = [boardOf(MANIFEST, events, NOW, undefined, true), boardOf(MANIFEST, events, NOW, undefined, true)]
 
         // then
         expect(views.map(view => view.at)).toEqual(["2026-09-15T10:00:04.000Z", "2026-09-15T10:00:04.000Z"])
@@ -652,7 +717,7 @@ describe("boardOf: whether the running step is still writing", () => {
         const writes = new Map([[path, written]])
 
         // when
-        const view = boardOf(MANIFEST, events, NOW, writes)
+        const view = boardOf(MANIFEST, events, NOW, writes, true)
 
         // then
         expect(view.rows[0]?.quiet).toBe(quiet)
@@ -666,7 +731,7 @@ describe("boardOf: whether the running step is still writing", () => {
         const events = [{ ...event(7, "implement", "running"), at: start.toISOString(), transcriptPath: TRANSCRIPT }]
 
         // when
-        const view = boardOf(MANIFEST, events, NOW, new Map())
+        const view = boardOf(MANIFEST, events, NOW, new Map(), true)
 
         // then
         expect(view.rows[0]?.quiet).toBe(quiet)
@@ -680,7 +745,7 @@ describe("boardOf: whether the running step is still writing", () => {
         const writes = new Map([[TRANSCRIPT, agoBy(QUIET_AFTER_MS * 2)]])
 
         // when
-        const view = boardOf(MANIFEST, events, NOW, writes)
+        const view = boardOf(MANIFEST, events, NOW, writes, true)
 
         // then
         expect(view.rows[0]?.quiet).toBe(false)
@@ -699,7 +764,7 @@ describe("boardOf: whether the running step is still writing", () => {
         const log = events
 
         // when
-        const view = boardOf(MANIFEST, log, NOW, writes)
+        const view = boardOf(MANIFEST, log, NOW, writes, true)
 
         // then
         expect(view.rows[0]?.quiet).toBe(false)

@@ -23,6 +23,8 @@ export type ReplayMoment = {
     at: Date
     /** The event the moment is about, and nothing for the edges and for a moment only the clock made. */
     event: LifecycleEvent | undefined
+    /** Whether a process held the run at this moment, which is what tells a running step from a dead one. */
+    live: boolean
     /** How long to hold before drawing it, in milliseconds of the replay's own time. */
     wait: number
 }
@@ -88,6 +90,7 @@ const ticksAcross = (log: readonly LifecycleEvent[], from: Date, to: Date, held:
             log,
             at: new Date(from.getTime() + (to.getTime() - from.getTime()) * through),
             event: undefined,
+            live: true,
             wait: TICK_MS,
         }
     })
@@ -102,9 +105,15 @@ const ticksAcross = (log: readonly LifecycleEvent[], from: Date, to: Date, held:
  *
  * The closing moment is the whole log again with no event beside it: the replay ends on what a
  * resume would open on rather than on the last line's own news.
+ *
+ * Liveness is the one thing a replay knows for certain rather than has to read: every moment but the
+ * last stands at an instant a process was alive to have written the log's last line at, so its open
+ * steps were running then. The closing moment is the exception, and it is the whole reason it exists
+ * — the run has stopped, nothing holds it, and what it left running reads as interrupted, which is
+ * what a resume opens on (ADR-0034).
  */
 export const replayMoments = (events: readonly LifecycleEvent[], pacing: Pacing): readonly ReplayMoment[] => {
-    const moments: ReplayMoment[] = [{ log: [], at: drawnAt([]), event: undefined, wait: 0 }]
+    const moments: ReplayMoment[] = [{ log: [], at: drawnAt([]), event: undefined, live: true, wait: 0 }]
 
     let previous: Date | undefined
     events.forEach((event, index) => {
@@ -123,11 +132,12 @@ export const replayMoments = (events: readonly LifecycleEvent[], pacing: Pacing)
             log,
             at: at ?? drawnAt(log),
             event,
+            live: true,
             wait: held - ticks.length * TICK_MS,
         })
         previous = at ?? previous
     })
 
-    moments.push({ log: events, at: drawnAt(events), event: undefined, wait: 0 })
+    moments.push({ log: events, at: drawnAt(events), event: undefined, live: false, wait: 0 })
     return moments
 }

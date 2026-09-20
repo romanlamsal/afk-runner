@@ -114,3 +114,9 @@ A running step that has gone quiet takes the `quiet` role: still underlined, bec
 the live edge of the run, and amber, because silence is a warning rather than a failure. The step's
 name and its elapsed figure both take it. A step still writing keeps `running`, and its figure stays
 plain.
+
+A step a run nothing holds any more left open takes the `interrupted` role: amber, because it did
+not go clean and nothing broke, and *not* underlined, because it is not the live edge — nothing is.
+It is what `quiet` is a suspicion of, and the underline is the whole of the difference between
+wondering whether a step is still going and reading that it is not. The row's words are unchanged
+again, and the row ends in no figure at all: an interrupted step is not counting towards anything.
