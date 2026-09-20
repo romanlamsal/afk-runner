@@ -48,7 +48,7 @@ describe("commandLine", () => {
     it.each([
         ["fixer", PROFILES.fixer, "high"],
         ["resolver", PROFILES.resolver, "medium"],
-        ["pullRequestWriter", PROFILES.pullRequestWriter, "low"],
+        ["pullRequestWriter", PROFILES.pullRequestWriter, "medium"],
     ] as const)("should invoke the %s at its profile's effort", (_role, profile, effort) => {
         // given
         const invoked = invocation(profile)
