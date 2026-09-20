@@ -298,7 +298,7 @@ export const pullRequestWriterPrompt = ({
         "   decided something inside that commit, and this is where a reviewer learns it.",
         "",
         "Report the title and the summary as structured output and nothing else. Do not add closing",
-        "references for tickets: afk appends one per verified ticket itself. Add a close reference for the spec, though." +
-            "Change no file, commit nothing, push",
-        "nothing, do not open the pull request, and write nothing to the issue tracker.",
+        "references for tickets: afk appends one per verified ticket itself. Add a close reference for",
+        "the spec, though. Change no file, commit nothing, push nothing, do not open the pull request,",
+        "and write nothing to the issue tracker.",
     ].join("\n")
