@@ -66,11 +66,10 @@ export const implementerPrompt = ({
         "before you write any.",
         "",
         "Then:",
-        `1. Implement the ticket per the skill, and commit your work on ${branch}. `
-        + "mattpocock-skills:code-review is the correct skill to run a code review. "
-        + "Fix the findings you can autonomously fix - comment the unfixable findings in the ticket's issue on the issue tracker. "
-        + "Several commits are fine."
-        ,
+        `1. Implement the ticket per the skill, and commit your work on ${branch}. ` +
+            "mattpocock-skills:code-review is the correct skill to run a code review. " +
+            "Fix the findings you can autonomously fix - comment the unfixable findings in the ticket's issue on the issue tracker. " +
+            "Several commits are fine.",
         `2. Run \`${verify}\` and act on what it says. Fix what you broke, and commit the fix.`,
         "3. Report what you did.",
         "",
@@ -293,13 +292,13 @@ export const pullRequestWriterPrompt = ({
         "   There is one commit per ticket that landed, and its body is that ticket's own commit",
         "   messages, plus a conflict resolution note where an agent had to make a judgement call.",
         "2. Write a title: one line, the change itself rather than the process that produced it. " +
-        "Adhere to the repo's conventions, e.g. if commit messages should follow conventional commits, the PR title should, too.",
+            "Adhere to the repo's conventions, e.g. if commit messages should follow conventional commits, the PR title should, too.",
         "3. Write a summary for whoever has to review it: what changed, why, and what a reviewer",
         "   should look at hardest. Name any conflict resolution the commits mention — an agent",
         "   decided something inside that commit, and this is where a reviewer learns it.",
         "",
         "Report the title and the summary as structured output and nothing else. Do not add closing",
         "references for tickets: afk appends one per verified ticket itself. Add a close reference for the spec, though." +
-        "Change no file, commit nothing, push",
+            "Change no file, commit nothing, push",
         "nothing, do not open the pull request, and write nothing to the issue tracker.",
     ].join("\n")
