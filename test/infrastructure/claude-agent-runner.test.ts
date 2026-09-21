@@ -33,7 +33,8 @@ describe("commandLine", () => {
     it.each([
         ["implementer", PROFILES.implementer, "opus"],
         ["planner", PROFILES.planner, "sonnet"],
-        ["preparer", PROFILES.preparer, "haiku"],
+        ["preparer", PROFILES.preparer, "sonnet"],
+        ["pullRequestWriter", PROFILES.pullRequestWriter, "sonnet"],
     ] as const)("should invoke the %s at its profile's model", (_role, profile, model) => {
         // given
         const invoked = invocation(profile)

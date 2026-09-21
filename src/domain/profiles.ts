@@ -55,9 +55,16 @@ export const PROFILES = {
      */
     fixer: { model: "opus", effort: "high", subagentModel: "opus" },
 
-    /** Makes a wrecked ticket fit for the normal track. It lands no work, so the cheapest model. */
-    preparer: { model: "haiku", effort: "low", subagentModel: "haiku" },
+    /**
+     * Makes a wrecked ticket fit for the normal track. It lands no work, so the cheapest model that
+     * still runs in auto mode: on Haiku the CLI silently falls back to default, where with no one to
+     * prompt it cannot run the check or read its issue.
+     */
+    preparer: { model: "sonnet", effort: "low", subagentModel: "haiku" },
 
-    /** Prose from commits afk already has. Nothing downstream depends on it being clever. */
-    pullRequestWriter: { model: "haiku", effort: "medium", subagentModel: "haiku" },
+    /**
+     * Prose from commits afk already has. Nothing downstream depends on it being clever; Sonnet rather
+     * than Haiku only for auto mode, without which it cannot read the spec issue it summarises.
+     */
+    pullRequestWriter: { model: "sonnet", effort: "medium", subagentModel: "haiku" },
 } as const satisfies Record<string, AgentProfile>
