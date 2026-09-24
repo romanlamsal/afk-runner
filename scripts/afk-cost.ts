@@ -27,6 +27,7 @@ import { z } from "zod"
 type ModelPrice = { readonly input: number; readonly output: number }
 
 const PRICES: Readonly<Record<string, ModelPrice>> = {
+    "claude-opus-5-5": { input: 4, output: 20 },
     "claude-opus-5": { input: 5, output: 25 },
     "claude-sonnet-5": { input: 2, output: 10 },
     "claude-haiku-4-5": { input: 1, output: 5 },
@@ -37,6 +38,7 @@ const CACHE_WRITE_5M = 1.25
 const CACHE_WRITE_1H = 2
 const CACHE_READ = 0.1
 
+/** `claude-haiku-4-5-20251001` → `claude-haiku-4-5`, which is how the table above is keyed. */
 /** `claude-haiku-4-5-20251001` → `claude-haiku-4-5`, which is how the table above is keyed. */
 const canonicalModel = (model: string): string => model.replace(/-\d{8}$/, "")
 
