@@ -9,7 +9,8 @@ import {
     type Track,
     writers,
 } from "../../src/domain/board.ts"
-import type { LifecycleEvent, Outcome, Step } from "../../src/domain/events.ts"
+import { type LifecycleEvent, type Outcome, type Step, skipped } from "../../src/domain/events.ts"
+import type { Manifest } from "../../src/domain/manifest.ts"
 import { manifestOf, ticket } from "../fixtures/manifest.ts"
 
 /**
@@ -521,6 +522,7 @@ describe("boardOf: what a row is made of", () => {
 
         // then
         expect(Object.keys(row ?? {}).sort()).toEqual([
+            "blockedBy",
             "conclusion",
             "detail",
             "elapsed",
@@ -631,6 +633,67 @@ describe("boardOf: how long the running step has been going", () => {
 
         // then
         expect(view.rows[0]?.elapsed).toBe(20 * 60_000)
+    })
+})
+
+/**
+ * What a ticket not yet attempted is blocked by: each blocker of the spec whose gate has not gone
+ * green, as the manifest names it (CONTEXT.md, *Blocked*).
+ */
+describe("boardOf: what a ticket is blocked by", () => {
+    const blockedBy = (manifest: Manifest, events: readonly LifecycleEvent[], number: number, live = true) =>
+        boardOf(manifest, events, NOW, undefined, live).rows.find(row => row.ticket === number)?.blockedBy
+
+    it.each([
+        ["whose blocker nothing has happened to", [], [7]],
+        ["whose blocker is implemented", implemented(7), [7]],
+        ["whose blocker is merged but not gated", [...implemented(7), event(7, "merge", "ok")], [7]],
+        ["whose blocker is verified", [...implemented(7), event(7, "gate", "ok")], []],
+        ["that has been attempted", [...implemented(7), event(7, "gate", "ok"), event(8, "setup", "running")], []],
+        ["skipped because its blocker failed", [event(7, "implement", "failed"), skipped(8, NOW)], []],
+    ] as const)("should read a ticket %s as blocked by %j", (_case, events, expected) => {
+        // given
+        const log = events
+
+        // when
+        const blockers = blockedBy(MANIFEST, log, 8)
+
+        // then
+        expect(blockers).toEqual(expected)
+    })
+
+    it("should name every blocker not yet verified, in the manifest's order", () => {
+        // given
+        const manifest = manifestOf([ticket(7), ticket(8), ticket(9), ticket(10, [9, 7, 8])])
+        const events = [...implemented(8), event(8, "gate", "ok")]
+
+        // when
+        const blockers = blockedBy(manifest, events, 10)
+
+        // then
+        expect(blockers).toEqual([9, 7])
+    })
+
+    it("should not name a blocker that is not a ticket of the spec", () => {
+        // given
+        const manifest = manifestOf([ticket(7), ticket(8, [99, 7])])
+
+        // when
+        const blockers = blockedBy(manifest, [], 8)
+
+        // then
+        expect(blockers).toEqual([7])
+    })
+
+    it("should name the blockers of a run nothing holds", () => {
+        // given
+        const events = implemented(7)
+
+        // when
+        const blockers = blockedBy(MANIFEST, events, 8, false)
+
+        // then
+        expect(blockers).toEqual([7])
     })
 })
 

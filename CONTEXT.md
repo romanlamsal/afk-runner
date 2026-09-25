@@ -228,6 +228,12 @@ red through the one fix attempt. It is a failed ticket: nothing more happens to 
 dependents are skipped.
 _Avoid_: rolled back, undone, backed out
 
+**Blocked**:
+A ticket not yet attempted that has a blocker whose gate has not gone green — a blocker not yet
+verified. What its board row ends with, naming each such blocker, in place of an elapsed figure. A
+ticket whose blocker failed is skipped, not blocked.
+_Avoid_: waiting, pending, queued
+
 **Skipped**:
 A ticket that will not land, because a blocker failed or was reverted.
 _Avoid_: cancelled, dropped, blocked
@@ -246,12 +252,13 @@ _Avoid_: result, final status, verdict
 **Board**:
 What a run shows while it runs: every ticket of the spec at once, one row each, so its height is the
 ticket count. A row is the ticket's number, its trail, and — where a step is running — how long that
-step has been going (`| 58s`); a row with nothing running ends at its trail. Derived from the run
-directory and an instant handed in, never from the driver's in-flight set: a step the log left
-`running` is one whose end event is not written rather than one that is certainly happening, and the
-elapsed figure counts up either way (ADR-0030, ADR-0034). Whether that step is still writing is
-carried by colour: a step gone *quiet* draws as a warning. Nothing about it is written down, and
-`afk <spec> --board-only` and a replay draw the same board from the same run directory.
+step has been going (`| 58s`); where its ticket is blocked, what it is blocked by; a row with
+neither ends at its trail. Derived from the run directory and an instant handed in, never from the
+driver's in-flight set: a step the log left `running` is one whose end event is not written rather
+than one that is certainly happening, and the elapsed figure counts up either way (ADR-0030,
+ADR-0034). Whether that step is still writing is carried by colour: a step gone *quiet* draws as a
+warning. Nothing about it is written down, and `afk <spec> --board-only` and a replay draw the same
+board from the same run directory.
 _Avoid_: dashboard, monitor, progress view, TUI
 
 **Trail**:

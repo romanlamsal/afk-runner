@@ -42,7 +42,13 @@ const row = (
     title: string,
     track: Track,
     steps: readonly BoardStep[],
-    rest: { waiting?: boolean; conclusion?: Conclusion; elapsed?: number; quiet?: boolean } = {},
+    rest: {
+        waiting?: boolean
+        conclusion?: Conclusion
+        elapsed?: number
+        quiet?: boolean
+        blockedBy?: readonly number[]
+    } = {},
 ): BoardRow => ({
     ticket,
     title,
@@ -54,6 +60,7 @@ const row = (
     detail: undefined,
     elapsed: rest.elapsed,
     quiet: rest.quiet ?? false,
+    blockedBy: rest.blockedBy ?? [],
 })
 
 const IMPLEMENTING = trail({ setup: "ok", implement: "running" })
@@ -304,6 +311,34 @@ describe("boardFrame: the elapsed figure", () => {
             expect(lines).toHaveLength(3)
         },
     )
+})
+
+/** What a ticket not yet attempted is blocked by, at the end of its row where the elapsed figure goes. */
+describe("boardFrame: what a ticket is blocked by", () => {
+    it.each([
+        ["one blocker", [12], "blocked by #12"],
+        ["several blockers", [12, 15], "blocked by #12 #15"],
+    ] as const)("should end a row with %s in them", (_case, blockedBy, expected) => {
+        // given
+        const blocked = row(14, "A ticket", "implement", trail({}), { blockedBy })
+
+        // when
+        const [line] = boardFrame({ at: undefined, rows: [blocked] }, WIDE).map(textOf)
+
+        // then
+        expect(line).toBe(`   14  ${TRAIL} | ${expected}`)
+    })
+
+    it("should read the blockers as plain", () => {
+        // given
+        const blocked = row(14, "A ticket", "implement", trail({}), { blockedBy: [12] })
+
+        // when
+        const [line] = boardFrame({ at: undefined, rows: [blocked] }, WIDE)
+
+        // then
+        expect(spanFor(line, "blocked by #12")?.role).toBe("plain")
+    })
 })
 
 /** Whether the running step is still writing, carried by colour and never by the words (ADR-0031). */

@@ -29,6 +29,7 @@ const row = (steps: readonly BoardStep[], rest: { track?: Track; detail?: string
     detail: rest.detail,
     elapsed: undefined,
     quiet: false,
+    blockedBy: [],
 })
 
 const view = (...rows: readonly BoardRow[]): BoardView => ({ rows, at: undefined })
@@ -58,6 +59,17 @@ describe("boardLines", () => {
 
         // when
         const lines = boardLines(before, view(SETTING_UP))
+
+        // then
+        expect(lines).toEqual([])
+    })
+
+    it("should say nothing for a ticket that stopped being blocked", () => {
+        // given
+        const before = view({ ...UNTOUCHED, blockedBy: [5] })
+
+        // when
+        const lines = boardLines(before, view(UNTOUCHED))
 
         // then
         expect(lines).toEqual([])

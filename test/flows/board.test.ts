@@ -153,6 +153,7 @@ describe("afk <spec> --board-only", () => {
                         conclusion: undefined,
                         detail: undefined,
                         quiet: false,
+                        blockedBy: [],
                     },
                     {
                         ticket: 6,
@@ -163,6 +164,7 @@ describe("afk <spec> --board-only", () => {
                         conclusion: undefined,
                         detail: undefined,
                         quiet: false,
+                        blockedBy: [5],
                     },
                 ],
             },

@@ -202,8 +202,8 @@ const trail = (row: BoardRow): Line =>
         // and what a step is read as reaches no space beside it.
         .flatMap((span, index): Span[] => (index === 0 ? [span] : [plain(" "), span]))
 
-/** What sets a row's elapsed figure off from the trail it is about. */
-const ELAPSED = "|"
+/** What sets a row's end — its elapsed figure, or its blockers — off from the trail it is about. */
+const ROW_END = "|"
 
 /**
  * How long a step has been going, in the fewest units that still count it: seconds under a minute,
@@ -223,31 +223,38 @@ export const elapsedText = (ms: number): string => {
     return `${Math.floor(minutes / 60)}h${two(minutes % 60)}m`
 }
 
+/** What a row ends with, after the separator: a figure or its blockers, and no more than one. */
+const rowEndSpan = (row: BoardRow): Span | undefined => {
+    if (row.elapsed !== undefined) {
+        return { text: elapsedText(row.elapsed), role: row.quiet ? "quiet" : "plain" }
+    }
+    // A blocked ticket has never been attempted, so it has no running step and no figure beside it
+    // to give way to (CONTEXT.md, *Blocked*).
+    return row.blockedBy.length === 0
+        ? undefined
+        : plain(`blocked by ${row.blockedBy.map(blocker => `#${blocker}`).join(" ")}`)
+}
+
 /**
- * The end of a row: how long its running step has been going, and nothing at all where no step is
- * running. It goes after everything else on the row, so that its width changing as it counts moves
- * nothing but itself, and the trail's words stay what they were (ADR-0031, ADR-0034). A step gone
- * quiet has its figure drawn at the same warning as its name, since the figure is where the eye goes
- * to ask whether the step is still alive.
+ * The end of a row: how long its running step has been going, or what its ticket is blocked by, and
+ * nothing at all where neither is so. It goes after everything else on the row, so that its width
+ * changing as it counts moves nothing but itself, and the trail's words stay what they were
+ * (ADR-0031, ADR-0034). A step gone quiet has its figure drawn at the same warning as its name,
+ * since the figure is where the eye goes to ask whether the step is still alive.
  */
-const elapsedSpans = (row: BoardRow): Span[] =>
-    row.elapsed === undefined
-        ? []
-        : [
-              plain(" "),
-              plain(ELAPSED),
-              plain(" "),
-              { text: elapsedText(row.elapsed), role: row.quiet ? "quiet" : "plain" },
-          ]
+const rowEndSpans = (row: BoardRow): Span[] => {
+    const end = rowEndSpan(row)
+    return end === undefined ? [] : [plain(" "), plain(ROW_END), plain(" "), end]
+}
 
 /** A column's worth of padding, and no span at all where a column needs none. */
 const padding = (columns: number): Span[] => (columns > 0 ? [plain(" ".repeat(columns))] : [])
 
 /**
- * One ticket's line: its number, its trail, and how long its running step has been going. The issue title is not on it — a
- * fixed trail leaves it twenty-one columns on an eighty-column terminal, which is enough for
- * `refactor: one cl...` and nothing worth reading, and the number already identifies the row
- * (ADR-0031).
+ * One ticket's line: its number, its trail, and how long its running step has been going or what it
+ * is blocked by. The issue title is not on it — a fixed trail leaves it twenty-one columns on an
+ * eighty-column terminal, which is enough for `refactor: one cl...` and nothing worth reading, and
+ * the number already identifies the row (ADR-0031).
  *
  * Every column of padding is a span of its own, because padding says nothing and a span that says
  * nothing is what keeps the number and each step treatable on their own.
@@ -256,7 +263,7 @@ const rowLine = (row: BoardRow, width: number): Line => {
     const number = numberSpan(row)
 
     return fitted(
-        [...padding(LABEL - number.text.length), number, plain("  "), ...trail(row), ...elapsedSpans(row)],
+        [...padding(LABEL - number.text.length), number, plain("  "), ...trail(row), ...rowEndSpans(row)],
         width,
     )
 }

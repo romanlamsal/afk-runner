@@ -10,8 +10,10 @@ import {
     running,
     type Step,
     statusOf,
+    unattempted,
+    verified,
 } from "./events.ts"
-import type { Manifest } from "./manifest.ts"
+import type { Manifest, Ticket } from "./manifest.ts"
 
 /**
  * The board: the view of a run, derived from what the run directory holds — the manifest, the event
@@ -142,6 +144,16 @@ export type BoardRow = {
      * is the thing an operator watching the elapsed figure count up could not tell (ADR-0034).
      */
     quiet: boolean
+    /**
+     * What a ticket not yet attempted is blocked by: each ticket of the spec it is blocked
+     * by whose gate has not gone green, in the order the manifest lists them (CONTEXT.md, *Blocked*).
+     * Empty for a ticket the run has attempted, a skipped one included — its step is what the row
+     * ends with, or its death — and for one whose every blocker is verified.
+     *
+     * It is read off the manifest and the log alone, so it says the same thing whether or not the
+     * run is live: what a ticket waits on is not a question about a process.
+     */
+    blockedBy: readonly number[]
 }
 
 /**
@@ -311,6 +323,18 @@ const detailOf = (events: readonly LifecycleEvent[], ticket: number): string | u
     events.findLast(event => event.ticket === ticket && event.outcome !== "running")?.detail
 
 /**
+ * What the ticket is blocked by: nothing once the run has attempted it, and otherwise each of its
+ * blockers that is a ticket of the spec and is not verified. A blocker the spec does not hold is one
+ * the run never waits on (`schedule.ts`), so the row does not name it either.
+ */
+const blockersOf = (manifest: Manifest, events: readonly LifecycleEvent[], ticket: Ticket): readonly number[] =>
+    unattempted(events, ticket.number)
+        ? ticket.blockedBy.filter(
+              blocker => manifest.tickets.some(candidate => candidate.number === blocker) && !verified(events, blocker),
+          )
+        : []
+
+/**
  * A row's trail. A step the log started and has not ended is running while the run is live and
  * interrupted where it is not; a step the log has already settled has happened, and carries what it
  * came to; everything else is still ahead.
@@ -369,6 +393,7 @@ export const boardOf = (
             // towards nothing and its silence is the silence of a step that has stopped.
             elapsed: live ? elapsedOf(events, ticket.number, now) : undefined,
             quiet: live && quietOf(events, ticket.number, now, writes),
+            blockedBy: blockersOf(manifest, events, ticket),
         }
     }),
 })

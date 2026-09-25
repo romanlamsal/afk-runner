@@ -28,6 +28,7 @@ const VIEW: BoardView = {
             detail: undefined,
             elapsed: undefined,
             quiet: false,
+            blockedBy: [],
         },
     ],
 }
