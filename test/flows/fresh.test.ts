@@ -6,6 +6,7 @@ import type { Manifest } from "../../src/domain/manifest.ts"
 import { createFreshService } from "../../src/service/fresh.ts"
 import { createPlanService } from "../../src/service/plan.ts"
 import { createStartService } from "../../src/service/start.ts"
+import { createStubConfig, createStubReadAfkonfig } from "../fakes/afkonfig.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
 import { createStubDrive } from "../fakes/drive.ts"
 import { createFakeEnvironment } from "../fakes/environment.ts"
@@ -62,9 +63,11 @@ const harness = () => {
 
     const cli = createCli({
         isInteractive: () => true,
+        config: createStubConfig(),
         printError: line => errors.push(line),
         run: createRun({
             release: createStubRelease(),
+            readAfkonfig: createStubReadAfkonfig(),
             showBoard: createStubShowBoard(),
             fresh: createFreshService({
                 cwd: "/repo",

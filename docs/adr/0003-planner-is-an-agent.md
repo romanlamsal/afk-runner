@@ -46,3 +46,10 @@ opposite responses.
   set of tickets that cannot start. What afk cannot check is whether an edge is *true*.
 - Whether a repository documents its conventions well is not a checkable predicate, so it is a
   documented precondition rather than a refusal.
+
+## Amendment: pinned commands are not derived
+
+A repository can pin `setup`, `verify` or both in its afkonfig (ADR-0039). The planner is asked
+only for the commands that are not pinned — the pinned ones are absent from the schema it answers
+and named in its prompt as context — and afk writes the pinned values into the manifest itself.
+With both pinned, the planner still runs: the tickets and their edges are still its to recover.

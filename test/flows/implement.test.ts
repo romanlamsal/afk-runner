@@ -21,6 +21,7 @@ import { createResolveService, type ResolveTicket } from "../../src/service/reso
 import { createRevertService, type RevertTicket } from "../../src/service/revert.ts"
 import { createSetupService, type SetupTicket } from "../../src/service/setup.ts"
 import { createStartService } from "../../src/service/start.ts"
+import { createStubConfig, createStubReadAfkonfig } from "../fakes/afkonfig.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
 import { createFakeCommands } from "../fakes/commands.ts"
 import { createFakeEnvironment } from "../fakes/environment.ts"
@@ -228,9 +229,11 @@ const harness = ({
 
     const cli = createCli({
         isInteractive: () => true,
+        config: createStubConfig(),
         printError: line => errors.push(line),
         run: createRun({
             release: createStubRelease(),
+            readAfkonfig: createStubReadAfkonfig(),
             showBoard: createStubShowBoard(),
             fresh: createStubFresh(),
             start: createStartService({

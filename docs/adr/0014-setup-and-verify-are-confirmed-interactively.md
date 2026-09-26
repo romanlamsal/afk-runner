@@ -50,3 +50,10 @@ for, and simulating a run would be a second execution path that nothing else exe
 
 - **This confirmation is the only thing standing between a planner-authored string and execution.**
   Accepted risk, not a solved problem.
+
+## Amendment: pinned commands are confirmed too
+
+A command pinned in the afkonfig (ADR-0039) is shown on the confirmation screen exactly as a
+derived one is, unmarked, and the no-TTY refusal stands even when both are pinned. An edit made on
+the screen reaches the manifest and never the afkonfig: afk writes that file only through
+`afk config`.

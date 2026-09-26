@@ -1,4 +1,4 @@
-import type { Mode } from "../domain/mode.ts"
+import { type Mode, plans as modePlans } from "../domain/mode.ts"
 import type { ParsedArgs } from "./args.ts"
 
 export type Invocation = {
@@ -133,7 +133,7 @@ export const resolveInvocation = (args: ParsedArgs, env: { interactive: boolean 
     // The base is decided when a spec is planned, so a mode that does not plan has nothing to do
     // with the flag. Ignoring it loudly beats refusing an invocation that is otherwise exactly
     // right, and beats silence, which would let an operator believe they had moved the base.
-    const plans = asked !== "implement-only" && asked !== "board-only"
+    const plans = modePlans(asked)
     const warnings =
         branch !== undefined && !plans
             ? [`--branch ${branch} is ignored by --${asked}: the base is decided when a spec is planned`]

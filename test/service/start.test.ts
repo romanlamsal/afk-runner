@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import type { Pinned } from "../../src/domain/afkonfig.ts"
 import type { RunBoundary } from "../../src/domain/events.ts"
 import type { BaseState } from "../../src/domain/git.ts"
 import type { Holder } from "../../src/domain/lock.ts"
@@ -44,6 +45,8 @@ type Setup = {
     planned?: Manifest
     /** `--branch`, as an accepted invocation carries it. */
     base?: string
+    /** What the afkonfig pins, as the run read it before starting (ADR-0039). */
+    pinned?: Pinned
     /** Who holds the run lock already, if anybody (ADR-0036). */
     heldBy?: Holder
     /** What the operator said to taking over a live holder, where they were asked (ADR-0035). */
@@ -64,6 +67,8 @@ type Harness = {
     boundaries: RunBoundary[]
     /** The repositories and specs the planner was asked about, and what it was asked to base them on. */
     planned: { root: string; spec: number; base: string | undefined }[]
+    /** What the planner was told the afkonfig pins, once per plan. */
+    pinnedAsked: Pinned[]
 }
 
 const harness = (setup: Setup = {}): Harness => {
@@ -81,6 +86,7 @@ const harness = (setup: Setup = {}): Harness => {
             : [],
     )
     const planned: { root: string; spec: number; base: string | undefined }[] = []
+    const pinnedAsked: Pinned[] = []
 
     const service = createStartService({
         cwd: "/repo/packages/thing",
@@ -94,6 +100,7 @@ const harness = (setup: Setup = {}): Harness => {
         operator: operator.operator,
         plan: async (root, spec, asked) => {
             planned.push({ root, spec, base: asked.base })
+            pinnedAsked.push(asked.pinned)
             return { ok: true, manifest: setup.planned ?? MANIFEST }
         },
         records: records.records,
@@ -108,12 +115,14 @@ const harness = (setup: Setup = {}): Harness => {
         lock,
         boundaries: events.boundaries,
         planned,
+        pinnedAsked,
         start: () =>
             service({
                 spec: 4,
                 mode: setup.mode ?? "plan-and-implement",
                 consented: setup.consented ?? false,
                 base: setup.base,
+                pinned: setup.pinned ?? {},
             }),
     }
 }
@@ -454,6 +463,17 @@ describe("createStartService", () => {
 
         // then
         expect(planned).toEqual([{ root: "/repo", spec: 4, base: "release" }])
+    })
+
+    it("should hand the planner what the afkonfig pins", async () => {
+        // given
+        const { start, pinnedAsked } = harness({ pinned: { verify: "pnpm check" } })
+
+        // when
+        await start()
+
+        // then
+        expect(pinnedAsked).toEqual([{ verify: "pnpm check" }])
     })
 
     it("should cut the spec branch from the base the manifest records", async () => {

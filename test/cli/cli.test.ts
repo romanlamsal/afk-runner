@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest"
 import { type Cli, createCli } from "../../src/cli/cli.ts"
 import { EXIT, type ExitCode } from "../../src/cli/exit-codes.ts"
 import type { Invocation } from "../../src/cli/invocation.ts"
+import type { ConfigureAction } from "../../src/service/configure.ts"
 
-type Harness = { cli: Cli; started: Invocation[]; errors: string[] }
+type Harness = { cli: Cli; started: Invocation[]; configured: ConfigureAction[]; errors: string[] }
 
 const harness = ({
     interactive = true,
@@ -13,8 +14,13 @@ const harness = ({
     exitCode?: ExitCode
 } = {}): Harness => {
     const started: Invocation[] = []
+    const configured: ConfigureAction[] = []
     const errors: string[] = []
     const cli = createCli({
+        config: async action => {
+            configured.push(action)
+            return exitCode
+        },
         isInteractive: () => interactive,
         printError: line => errors.push(line),
         run: async invocation => {
@@ -22,7 +28,7 @@ const harness = ({
             return exitCode
         },
     })
-    return { cli, started, errors }
+    return { cli, started, configured, errors }
 }
 
 /** Two modes at once: the refusal every test below that needs one reaches for. */
@@ -128,5 +134,42 @@ describe("createCli", () => {
 
         // then
         expect(errors.join("\n")).toContain("Pass --plan-only or --implement-only")
+    })
+
+    it.each([
+        [["config", "--init"], "init"],
+        [["config", "--check"], "check"],
+        [["config"], "init-or-check"],
+    ] as const)("should hand %o to afk config as %s", async (argv, action) => {
+        // given
+        const { cli, configured } = harness()
+
+        // when
+        await cli([...argv])
+
+        // then
+        expect(configured).toEqual([action])
+    })
+
+    it("should start no run for afk config", async () => {
+        // given
+        const { cli, started } = harness()
+
+        // when
+        await cli(["config", "--check"])
+
+        // then
+        expect(started).toEqual([])
+    })
+
+    it("should exit 2 for afk config's refused arguments", async () => {
+        // given
+        const { cli } = harness()
+
+        // when
+        const code = await cli(["config", "--init", "--check"])
+
+        // then
+        expect(code).toBe(EXIT.misuse)
     })
 })

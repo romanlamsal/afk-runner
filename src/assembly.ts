@@ -1,8 +1,10 @@
 import { createLineBoard, createTerminalBoard } from "./cli/board-writer.ts"
 import { type Cli, createCli } from "./cli/cli.ts"
+import { createConfig } from "./cli/config.ts"
 import { EXIT } from "./cli/exit-codes.ts"
 import { createTerminalOperator } from "./cli/operator.ts"
 import { createRun } from "./cli/run.ts"
+import { createFileAfkonfig } from "./infrastructure/afkonfig.ts"
 import { createClaudeAgentRunner } from "./infrastructure/claude-agent-runner.ts"
 import { createShellCommandRunner } from "./infrastructure/commands.ts"
 import { createEnvironmentFiles } from "./infrastructure/environment-files.ts"
@@ -16,7 +18,9 @@ import { createFileEventLog } from "./repository/event-log.ts"
 import { createFileManifestStore } from "./repository/manifest-store.ts"
 import { createFileRunLock } from "./repository/run-lock.ts"
 import { createFileRunRecordStore } from "./repository/run-records.ts"
+import { createReadAfkonfigService } from "./service/afkonfig.ts"
 import { createShowBoardService } from "./service/board.ts"
+import { createConfigureService } from "./service/configure.ts"
 import { createDriveService } from "./service/drive.ts"
 import { createFinishService } from "./service/finish.ts"
 import { createFixService } from "./service/fix.ts"
@@ -155,10 +159,21 @@ export const assembleCli = (): Cli => {
         watch,
     })
 
+    // Read by a run that plans and by `afk config` alike, so that the two cannot disagree about
+    // whether an afkonfig is valid (ADR-0039).
+    const afkonfig = createFileAfkonfig()
+    const readAfkonfig = createReadAfkonfigService({ cwd, git, afkonfig })
+
     return createCli({
         isInteractive: () => interactive,
         printError,
+        config: createConfig({
+            configure: createConfigureService({ cwd, git, afkonfig, read: readAfkonfig }),
+            print,
+            printError,
+        }),
         run: createRun({
+            readAfkonfig,
             fresh: createFreshService({ cwd, git, lock, self, records, tracker, takeOver }),
             showBoard: createShowBoardService({ cwd, git, manifests, watch }),
             start,

@@ -1,10 +1,13 @@
-import type { StartMode } from "../domain/mode.ts"
+import { NOTHING_PINNED, type Pinned } from "../domain/afkonfig.ts"
+import { plans, type StartMode } from "../domain/mode.ts"
+import type { ReadAfkonfig } from "../service/afkonfig.ts"
 import type { ShowBoard } from "../service/board.ts"
 import type { DriveRun } from "../service/drive.ts"
 import type { FinishRun } from "../service/finish.ts"
 import type { StartFresh } from "../service/fresh.ts"
 import type { ReleaseRun } from "../service/release.ts"
 import type { StartRun } from "../service/start.ts"
+import { invalidAfkonfigOutput } from "./afkonfig-output.ts"
 import { EXIT, type ExitCode } from "./exit-codes.ts"
 import { freshOutput } from "./fresh-output.ts"
 import type { Invocation } from "./invocation.ts"
@@ -14,6 +17,8 @@ import { progressOutput } from "./progress-output.ts"
 import { pullRequestOutput } from "./pull-request-output.ts"
 
 export type RunDeps = {
+    /** What the afkonfig pins, read by a mode that plans before anything else is done (ADR-0039). */
+    readAfkonfig: ReadAfkonfig
     fresh: StartFresh
     /** The read-only view of a run, which is the whole of what `--board-only` does. */
     showBoard: ShowBoard
@@ -45,6 +50,7 @@ export type RunDeps = {
  * failure mode this whole rewrite exists to remove.
  */
 export const createRun = ({
+    readAfkonfig,
     fresh,
     showBoard,
     start,
@@ -57,6 +63,25 @@ export const createRun = ({
 }: RunDeps) => {
     /** Everything but the board, which is the one mode that takes no lock and so has none to give back. */
     const runLocked = async (invocation: Invocation & { mode: StartMode }): Promise<ExitCode> => {
+        // Before anything at all, starting over included: a faulty afkonfig refuses the invocation,
+        // and finding that out after the run was thrown away would leave the operator with neither.
+        // Only a mode that plans reads it — the commands of one that does not are in its manifest.
+        let pinned: Pinned = NOTHING_PINNED
+        if (plans(invocation.mode)) {
+            const read = await readAfkonfig()
+            if (read.outcome === "refused") {
+                printError(`afk: ${read.reason}`)
+                return EXIT.halted
+            }
+            if (read.outcome === "invalid") {
+                for (const line of invalidAfkonfigOutput(read.problems)) {
+                    printError(line)
+                }
+                return EXIT.halted
+            }
+            pinned = read.outcome === "pinned" ? read.pinned : NOTHING_PINNED
+        }
+
         // Before anything is read, because what starting over throws away is what starting would
         // otherwise refuse over. A run that cannot be thrown away whole is not started on top of.
         if (invocation.forceFresh) {
@@ -75,6 +100,7 @@ export const createRun = ({
             mode: invocation.mode,
             consented: invocation.consented,
             base: invocation.base,
+            pinned,
         })
 
         switch (started.outcome) {

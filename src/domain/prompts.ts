@@ -1,3 +1,4 @@
+import type { Pinned } from "./afkonfig.ts"
 import type { BrokenStep, Progress } from "./events.ts"
 
 /**
@@ -5,12 +6,43 @@ import type { BrokenStep, Progress } from "./events.ts"
  * asserted for shape: a test over wording pins the wording rather than the behaviour.
  */
 
+const COMMANDS = {
+    setup: "`setup`, which prepares a fresh checkout for use",
+    verify: "`verify`, which proves a checkout's integrity",
+} as const
+
+/**
+ * The planner's last step, which is the commands the afkonfig leaves to it. A pinned one is named
+ * rather than left out, so that the one it does derive fits it — the same package manager, the same
+ * workspace — and so that it is not derived a second time (ADR-0039).
+ */
+const commandsStep = (pinned: Pinned): string[] => {
+    const derived = (["setup", "verify"] as const).filter(name => pinned[name] === undefined)
+    const named = (["setup", "verify"] as const).flatMap(name => {
+        const command = pinned[name]
+        return command === undefined ? [] : [`   \`${name}\` is pinned by the repository as \`${command}\`.`]
+    })
+
+    if (derived.length === 0) {
+        return ["5. Derive no commands. Both are pinned by the repository and are not yours to report:", ...named]
+    }
+
+    return [
+        `5. Derive ${derived.length === 1 ? "one command" : "two commands"} from this repository itself — its package`,
+        "   manifest, its scripts, its continuous integration configuration:",
+        `   ${derived.map(name => COMMANDS[name]).join(", and ")}.`,
+        "   Run unattended from the repository root: no watch mode, no prompt, no flag that needs a",
+        "   terminal.",
+        ...(named.length > 0 ? [...named, "   Derive only what is not pinned, and make it fit what is."] : []),
+    ]
+}
+
 /**
  * The planner recovers what the repository already recorded — which issues are the spec's tickets,
  * how they block each other, and how the repository is set up and checked. It decides nothing about
  * scope or granularity: those were decided when the spec was ticketed (ADR-0002, ADR-0003).
  */
-export const plannerPrompt = (spec: number): string =>
+export const plannerPrompt = (spec: number, pinned: Pinned): string =>
     [
         `Produce the implementation manifest for spec issue #${spec} in this repository.`,
         "",
@@ -29,10 +61,7 @@ export const plannerPrompt = (spec: number): string =>
         "   an agent must not take.",
         "4. Recover each remaining ticket's blockers by the same conventions, and keep only the ones",
         "   that are themselves tickets of this spec. A ticket stating none is blocked by nothing.",
-        "5. Derive two commands from this repository itself — its package manifest, its scripts, its",
-        "   continuous integration configuration: `setup`, which prepares a fresh checkout for use,",
-        "   and `verify`, which proves a checkout's integrity. Both run unattended from the",
-        "   repository root: no watch mode, no prompt, no flag that needs a terminal.",
+        ...commandsStep(pinned),
         "",
         "Report the manifest as structured output and nothing else. Change no file, and write",
         "nothing to the issue tracker.",

@@ -1,4 +1,5 @@
 import { cli } from "cleye"
+import { CONFIG_USAGE } from "./config-args.ts"
 
 /**
  * The argument vector as typed, before any rule is applied to it. Values stay strings: cleye
@@ -69,7 +70,7 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
                     placeholder: "<n>",
                 },
             },
-            help: { description: "Runs a whole spec's tickets unattended.", usage: USAGE },
+            help: { description: "Runs a whole spec's tickets unattended.", usage: [USAGE, CONFIG_USAGE] },
         },
         undefined,
         // cleye takes the flags it recognises out of the array it is handed. It gets a copy, so

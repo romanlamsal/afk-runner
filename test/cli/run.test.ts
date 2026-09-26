@@ -6,6 +6,7 @@ import type { Progress } from "../../src/domain/events.ts"
 import type { Manifest } from "../../src/domain/manifest.ts"
 import type { Mode } from "../../src/domain/mode.ts"
 import type { PreparedRun } from "../../src/domain/run.ts"
+import type { AfkonfigResult } from "../../src/service/afkonfig.ts"
 import type { DriveResult } from "../../src/service/drive.ts"
 import type { FinishResult } from "../../src/service/finish.ts"
 import type { FreshResult } from "../../src/service/fresh.ts"
@@ -54,7 +55,14 @@ const harness = (
         finished = OPENED,
         cleared = CLEARED,
         boardDrawn = false,
-    }: { driven?: DriveResult; finished?: FinishResult; cleared?: FreshResult; boardDrawn?: boolean } = {},
+        afkonfig = { outcome: "absent" },
+    }: {
+        driven?: DriveResult
+        finished?: FinishResult
+        cleared?: FreshResult
+        boardDrawn?: boolean
+        afkonfig?: AfkonfigResult
+    } = {},
 ) => {
     const printed: string[] = []
     const errors: string[] = []
@@ -62,7 +70,12 @@ const harness = (
     const ended: Progress[] = []
     const freshened: number[] = []
     const released: number[] = []
+    let afkonfigsRead = 0
     const run = createRun({
+        readAfkonfig: async () => {
+            afkonfigsRead += 1
+            return afkonfig
+        },
         showBoard: createStubShowBoard(),
         fresh: async spec => {
             freshened.push(spec)
@@ -84,7 +97,7 @@ const harness = (
         printError: line => errors.push(line),
         boardDrawn,
     })
-    return { run, printed, errors, started, ended, freshened, released }
+    return { run, printed, errors, started, ended, freshened, released, afkonfigsRead: () => afkonfigsRead }
 }
 
 const worked = (
@@ -134,7 +147,7 @@ describe("createRun", () => {
         await run(invocation("plan-only"))
 
         // then
-        expect(started).toEqual([{ spec: 4, mode: "plan-only", consented: false }])
+        expect(started).toEqual([{ spec: 4, mode: "plan-only", consented: false, pinned: {} }])
     })
 
     it("should print the execution order of the manifest it planned", async () => {
@@ -407,7 +420,7 @@ describe("createRun: --force-fresh", () => {
         await run(startingOver("plan-only"))
 
         // then
-        expect(started).toEqual([{ spec: 4, mode: "plan-only", consented: false }])
+        expect(started).toEqual([{ spec: 4, mode: "plan-only", consented: false, pinned: {} }])
     })
 
     it("should say what is gone, because the flag asks nothing", async () => {
@@ -516,5 +529,85 @@ describe("createRun: the run lock", () => {
 
         // then
         expect(released).toEqual([])
+    })
+})
+
+describe("createRun: the afkonfig", () => {
+    const INVALID: AfkonfigResult = { outcome: "invalid", problems: ["verify: must not be empty"] }
+
+    it("should hand the start what the afkonfig pins", async () => {
+        // given
+        const { run, started } = harness(undefined, {
+            afkonfig: { outcome: "pinned", pinned: { verify: "pnpm check" } },
+        })
+
+        // when
+        await run(invocation("plan-only"))
+
+        // then
+        expect(started[0]?.pinned).toEqual({ verify: "pnpm check" })
+    })
+
+    it.each([
+        ["plan-only", 1],
+        ["plan-and-implement", 1],
+        ["implement-only", 0],
+        ["board-only", 0],
+    ] as const)("should read it under %s %i times, being read only by a mode that plans", async (mode, times) => {
+        // given
+        const { run, afkonfigsRead } = harness()
+
+        // when
+        await run(invocation(mode))
+
+        // then
+        expect(afkonfigsRead()).toBe(times)
+    })
+
+    it("should exit 3 over an invalid afkonfig", async () => {
+        // given
+        const { run } = harness(undefined, { afkonfig: INVALID })
+
+        // when
+        const code = await run(invocation("plan-only"))
+
+        // then
+        expect(code).toBe(EXIT.halted)
+    })
+
+    it("should name every correction an invalid afkonfig needs", async () => {
+        // given
+        const { run, errors } = harness(undefined, { afkonfig: INVALID })
+
+        // when
+        await run(invocation("plan-only"))
+
+        // then
+        expect(errors).toEqual(["afk: afkonfig.ts is invalid. Correct:", "  - verify: must not be empty"])
+    })
+
+    it.each([
+        ["invalid", INVALID],
+        ["refused", { outcome: "refused", reason: "this is not a git worktree" }],
+    ] as const)("should throw nothing away over an afkonfig read as %s", async (_, afkonfig) => {
+        // given
+        const { run, freshened } = harness(undefined, { afkonfig })
+
+        // when
+        await run({ ...invocation("plan-only"), forceFresh: true })
+
+        // then
+        expect(freshened).toEqual([])
+    })
+
+    it("should start nothing over an invalid afkonfig", async () => {
+        // given
+        const { run, started } = harness(undefined, { afkonfig: INVALID })
+
+        // when
+        await run(invocation("plan-and-implement"))
+
+        // then
+        expect(started).toEqual([])
     })
 })

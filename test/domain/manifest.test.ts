@@ -86,7 +86,63 @@ describe("readPlannedManifest", () => {
     })
 })
 
+describe("readPlannedManifest, with commands pinned", () => {
+    it.each([
+        [{ setup: "pnpm install" }, { setup: "pnpm install", verify: "npm run check" }],
+        [{ verify: "pnpm check" }, { setup: "npm ci", verify: "pnpm check" }],
+        [
+            { setup: "pnpm install", verify: "pnpm check" },
+            { setup: "pnpm install", verify: "pnpm check" },
+        ],
+    ] as const)("should carry %o over whatever the planner said", (pinned, commands) => {
+        // given
+        const raw = planned()
+
+        // when
+        const result = readPlannedManifest(raw, 4, pinned)
+
+        // then
+        expect(result).toEqual({ ok: true, manifest: { ...raw, ...commands } })
+    })
+
+    it("should accept a manifest missing the commands the planner was not asked for", () => {
+        // given
+        const { setup, verify, ...raw } = planned()
+
+        // when
+        const result = readPlannedManifest(raw, 4, { setup: "pnpm install", verify: "pnpm check" })
+
+        // then
+        expect(result).toEqual({ ok: true, manifest: { ...raw, setup: "pnpm install", verify: "pnpm check" } })
+    })
+
+    it("should still refuse a manifest missing a command that is not pinned", () => {
+        // given
+        const { verify, ...raw } = planned()
+
+        // when
+        const result = readPlannedManifest(raw, 4, { setup: "pnpm install" })
+
+        // then
+        expect(result).toEqual({ ok: false, reason: expect.stringContaining("verify") })
+    })
+})
+
 describe("manifestJsonSchema", () => {
+    it.each([
+        [{ setup: "pnpm install" }, ["spec", "verify", "tickets"]],
+        [{ verify: "pnpm check" }, ["spec", "setup", "tickets"]],
+        [{ setup: "pnpm install", verify: "pnpm check" }, ["spec", "tickets"]],
+    ] as const)("should not ask the planner for what %o pins", (pinned, fields) => {
+        // given — the schema the planner is handed inline
+
+        // when
+        const schema = manifestJsonSchema(pinned)
+
+        // then
+        expect(Object.keys(schema.properties ?? {})).toEqual(fields)
+    })
+
     it("should describe every field the manifest carries", () => {
         // given — the schema the planner is handed inline
 

@@ -8,6 +8,7 @@ import { createShowBoardService } from "../../src/service/board.ts"
 import type { StartRun } from "../../src/service/start.ts"
 import { createWatchBoardService } from "../../src/service/watch.ts"
 import { createFakeActivity } from "../fakes/activity.ts"
+import { createStubConfig, createStubReadAfkonfig } from "../fakes/afkonfig.ts"
 import { createFakeBoard } from "../fakes/board.ts"
 import { createStubDrive } from "../fakes/drive.ts"
 import { createFakeEventLog } from "../fakes/event-log.ts"
@@ -71,9 +72,11 @@ const harness = ({
     const errors: string[] = []
     const cli = createCli({
         isInteractive: () => false,
+        config: createStubConfig(),
         printError: line => errors.push(line),
         run: createRun({
             release: createStubRelease(),
+            readAfkonfig: createStubReadAfkonfig(),
             fresh: createStubFresh(),
             showBoard: createShowBoardService({
                 cwd: "/repo",

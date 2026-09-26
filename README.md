@@ -57,11 +57,40 @@ recorded one, and only `--force-fresh` re-plans.
 A bare invocation needs a terminal: with nobody there to answer the confirmation, afk refuses rather
 than continuing unsupervised. With no TTY, pass `--plan-only` or `--implement-only`.
 
+## Pinning setup and verify
+
+`afkonfig.ts` at the repository's top level pins either command, or both, so the planner stops
+deriving them — and stops deriving different ones from run to run:
+
+```ts
+export default {
+    setup: "pnpm install --frozen-lockfile",
+    verify: "pnpm run check",
+} satisfies { setup?: string; verify?: string }
+```
+
+The planner is asked only for what is not pinned, and told what is, so what it derives fits. A pinned
+command is still shown on the confirmation screen; an edit there reaches the manifest, never the
+file. Only an invocation that plans reads it, before anything else — `--force-fresh` included — and
+an afkonfig that will not import, has no default export, exports anything else, has a key besides
+these two, or has an empty command refuses the invocation with `3`. No afkonfig pins nothing. It is
+imported, so it is executed: it is your repository's own file.
+
+```
+afk config [--init | --check]
+```
+
+| invocation | |
+| --- | --- |
+| bare | check the afkonfig if there is one, write the template if there is not |
+| `--init` | write the template, over whatever is there. No prompt: the flag is the consent |
+| `--check` | say what the afkonfig pins, or every correction it needs, exiting `3` for those |
+
 ## What a run does
 
 1. **Plan.** An agent reads the repository's own documentation to work out which issues are the
    spec's tickets, how they block each other, and what this repository's `setup` and `verify`
-   commands are. The result is the manifest.
+   commands are, where `afkonfig.ts` does not pin them. The result is the manifest.
 2. **Confirm.** One screen, one decision: anything worth knowing about the branch this spec is
    based on and about your working tree, then `setup` and then `verify`, pre-filled and editable
    in place. Empty input keeps the proposal.
@@ -170,7 +199,7 @@ live one is watched to its end. There is no timeout and no idle threshold: a run
 must never look finished, so a run that was killed is followed until you stop it.
 
 A refusal to *start* — no manifest to implement, a run that already exists, nothing that is a git
-worktree, a confirmation the operator closed — is `3` rather than `2`: the arguments were fine, and
+worktree, an invalid afkonfig, a confirmation the operator closed — is `3` rather than `2`: the arguments were fine, and
 what went wrong is on disk.
 
 ## Preconditions, documented rather than checked
@@ -186,7 +215,7 @@ would help. They are stated here instead:
 - `setup` and `verify` can run unattended from the repository root: no watch mode, no prompt, no
   flag that needs a terminal.
 - The confirmation screen is the only thing between a planner-authored command and your machine.
-  Read it.
+  Read it. A pinned command is authored by you, and shown there all the same.
 
 ## Developing afk
 

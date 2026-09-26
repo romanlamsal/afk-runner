@@ -1,3 +1,4 @@
+import type { Pinned } from "../domain/afkonfig.ts"
 import type { AgentRunner } from "../domain/agent.ts"
 import type { Clock } from "../domain/clock.ts"
 import type { EventDetails, EventLog, Outcome } from "../domain/events.ts"
@@ -9,7 +10,13 @@ import { plannerPrompt } from "../domain/prompts.ts"
 import { attemptWithAgent } from "./attempt.ts"
 
 /** The driving port: plan a spec in the target repository, leaving a manifest behind. */
-export type PlanSpec = (root: string, spec: number, asked: { base: string | undefined }) => Promise<PlanResult>
+export type PlanSpec = (root: string, spec: number, asked: PlanRequest) => Promise<PlanResult>
+
+export type PlanRequest = {
+    base: string | undefined
+    /** What the afkonfig pins: never asked of the planner, and written over its answer (ADR-0039). */
+    pinned: Pinned
+}
 
 export type PlanResult = { ok: true; manifest: Manifest } | { ok: false; reason: string }
 
@@ -30,6 +37,9 @@ export type PlanDeps = {
  * an agent and its output a claim (ADR-0003), so the one field afk states rather than believes is
  * written here, over whatever came back. Deciding it anywhere else would build the same manifest in
  * two places, and the two would drift (ADR-0032).
+ *
+ * The commands the afkonfig pins are the same kind of field: afk states them, so the planner is
+ * neither asked for them nor believed about them (ADR-0039).
  *
  * It is resolved before the agent is spawned. A repository that names no base is a refusal the
  * operator can act on, and finding that out after a planner has run costs one for nothing.
@@ -58,12 +68,12 @@ export const createPlanService =
         const attempt = await attemptWithAgent(
             agent,
             {
-                prompt: plannerPrompt(spec),
+                prompt: plannerPrompt(spec, asked.pinned),
                 root,
                 cwd: ".",
                 transcriptPath: transcript,
                 resumeSessionId: undefined,
-                outputSchema: manifestJsonSchema(),
+                outputSchema: manifestJsonSchema(asked.pinned),
                 profile: PROFILES.planner,
             },
             sessionId => record("running", { sessionId, transcriptPath: transcript }),
@@ -80,7 +90,7 @@ export const createPlanService =
             return recordFailure(`the planner failed: ${attempt.detail}`)
         }
 
-        const read = readPlannedManifest(attempt.structuredOutput, spec)
+        const read = readPlannedManifest(attempt.structuredOutput, spec, asked.pinned)
         if (!read.ok) {
             return recordFailure(read.reason)
         }

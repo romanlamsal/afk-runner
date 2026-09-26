@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest"
 import { createCli } from "../../src/cli/cli.ts"
 import { EXIT } from "../../src/cli/exit-codes.ts"
 import { createRun } from "../../src/cli/run.ts"
+import type { AfkonfigLoad } from "../../src/domain/afkonfig.ts"
 import { started } from "../../src/domain/events.ts"
 import type { Manifest } from "../../src/domain/manifest.ts"
+import { createReadAfkonfigService } from "../../src/service/afkonfig.ts"
 import { createPlanService } from "../../src/service/plan.ts"
 import { createStartService } from "../../src/service/start.ts"
+import { createFakeAfkonfigFile, createStubConfig } from "../fakes/afkonfig.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
 import { createStubDrive } from "../fakes/drive.ts"
 import { createFakeEnvironment } from "../fakes/environment.ts"
@@ -39,7 +42,10 @@ const MANIFEST: Manifest = {
     ],
 }
 
-const harness = (reply: { structuredOutput: unknown } = { structuredOutput: MANIFEST }) => {
+const harness = (
+    reply: { structuredOutput: unknown } = { structuredOutput: MANIFEST },
+    afkonfig: AfkonfigLoad = { kind: "absent" },
+) => {
     const agent = createFakeAgent(reply)
     const manifests = createFakeManifestStore()
     const environment = createFakeEnvironment()
@@ -72,9 +78,15 @@ const harness = (reply: { structuredOutput: unknown } = { structuredOutput: MANI
     })
     const cli = createCli({
         isInteractive: () => true,
+        config: createStubConfig(),
         printError: line => errors.push(line),
         run: createRun({
             release: createStubRelease(),
+            readAfkonfig: createReadAfkonfigService({
+                cwd: "/repo",
+                git: git.git,
+                afkonfig: createFakeAfkonfigFile(afkonfig).file,
+            }),
             showBoard: createStubShowBoard(),
             start,
             fresh: createStubFresh(),
@@ -183,5 +195,30 @@ describe("afk <spec> --plan-only, then --implement-only", () => {
 
         // then
         expect(started(events.appended)).toBe(false)
+    })
+
+    it("should write what the afkonfig pins into the manifest", async () => {
+        // given
+        const { cli, manifests } = harness(
+            { structuredOutput: { ...MANIFEST, verify: undefined } },
+            { kind: "loaded", exports: { default: { verify: "pnpm check" } } },
+        )
+
+        // when
+        await cli(["4", "--plan-only"])
+
+        // then
+        expect(manifests.written[0]?.manifest.verify).toBe("pnpm check")
+    })
+
+    it("should spawn no planner over an invalid afkonfig", async () => {
+        // given
+        const { cli, agent } = harness(undefined, { kind: "loaded", exports: { default: { verify: "" } } })
+
+        // when
+        await cli(["4", "--plan-only"])
+
+        // then
+        expect(agent.invocations).toEqual([])
     })
 })

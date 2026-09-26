@@ -57,7 +57,7 @@ describe("createPlanService", () => {
         const { plan } = harness()
 
         // when
-        const result = await plan(ROOT, 4, { base: undefined })
+        const result = await plan(ROOT, 4, { base: undefined, pinned: {} })
 
         // then
         expect(result).toEqual({ ok: true, manifest: { ...MANIFEST, base: "main" } })
@@ -68,7 +68,7 @@ describe("createPlanService", () => {
         const { plan, manifests } = harness()
 
         // when
-        await plan(ROOT, 4, { base: undefined })
+        await plan(ROOT, 4, { base: undefined, pinned: {} })
 
         // then
         expect(manifests.written).toEqual([{ root: ROOT, spec: 4, manifest: { ...MANIFEST, base: "main" } }])
@@ -79,10 +79,37 @@ describe("createPlanService", () => {
         const { plan, agent } = harness()
 
         // when
-        await plan(ROOT, 4, { base: undefined })
+        await plan(ROOT, 4, { base: undefined, pinned: {} })
 
         // then
         expect(agent.invocations[0]?.outputSchema).toEqual(manifestJsonSchema())
+    })
+
+    it("should not ask the planner for what the afkonfig pins", async () => {
+        // given
+        const { plan, agent } = harness()
+
+        // when
+        await plan(ROOT, 4, { base: undefined, pinned: { verify: "pnpm check" } })
+
+        // then
+        expect(agent.invocations[0]?.outputSchema).toEqual(manifestJsonSchema({ verify: "pnpm check" }))
+    })
+
+    it("should write what the afkonfig pins into the manifest, over whatever the planner said", async () => {
+        // given
+        const { plan, manifests } = harness()
+
+        // when
+        await plan(ROOT, 4, { base: undefined, pinned: { setup: "pnpm install", verify: "pnpm check" } })
+
+        // then
+        expect(manifests.written[0]?.manifest).toEqual({
+            ...MANIFEST,
+            setup: "pnpm install",
+            verify: "pnpm check",
+            base: "main",
+        })
     })
 
     it("should run the planner in the target repository", async () => {
@@ -90,7 +117,7 @@ describe("createPlanService", () => {
         const { plan, agent } = harness()
 
         // when
-        await plan(ROOT, 4, { base: undefined })
+        await plan(ROOT, 4, { base: undefined, pinned: {} })
 
         // then
         expect(agent.invocations[0]?.root).toBe(ROOT)
@@ -101,7 +128,7 @@ describe("createPlanService", () => {
         const { plan, agent } = harness()
 
         // when
-        await plan(ROOT, 4, { base: undefined })
+        await plan(ROOT, 4, { base: undefined, pinned: {} })
 
         // then
         expect(agent.invocations[0]?.transcriptPath).toBe(".afk/4/transcripts/20260915T111838314Z-planner.jsonl")
@@ -112,7 +139,7 @@ describe("createPlanService", () => {
         const { plan, agent } = harness()
 
         // when
-        await plan(ROOT, 4, { base: undefined })
+        await plan(ROOT, 4, { base: undefined, pinned: {} })
 
         // then
         expect(agent.invocations[0]?.resumeSessionId).toBeUndefined()
@@ -123,7 +150,7 @@ describe("createPlanService", () => {
         const { plan } = harness({ outcome: "failed", detail: "timed out after 60m" })
 
         // when
-        const result = await plan(ROOT, 4, { base: undefined })
+        const result = await plan(ROOT, 4, { base: undefined, pinned: {} })
 
         // then
         expect(result).toEqual({ ok: false, reason: expect.stringContaining("timed out after 60m") })
@@ -134,7 +161,7 @@ describe("createPlanService", () => {
         const { plan } = harness({ structuredOutput: { spec: 4 } })
 
         // when
-        const result = await plan(ROOT, 4, { base: undefined })
+        const result = await plan(ROOT, 4, { base: undefined, pinned: {} })
 
         // then
         expect(result).toEqual({ ok: false, reason: expect.stringContaining("manifest") })
@@ -145,7 +172,7 @@ describe("createPlanService", () => {
         const { plan, manifests } = harness({ structuredOutput: { spec: 4 } })
 
         // when
-        await plan(ROOT, 4, { base: undefined })
+        await plan(ROOT, 4, { base: undefined, pinned: {} })
 
         // then
         expect(manifests.written).toEqual([])
@@ -156,7 +183,7 @@ describe("createPlanService", () => {
         const { plan, agent } = harness()
 
         // when
-        await plan(ROOT, 4, { base: undefined })
+        await plan(ROOT, 4, { base: undefined, pinned: {} })
 
         // then
         expect(agent.invocations.at(0)?.profile).toBe(PROFILES.planner)
@@ -174,7 +201,7 @@ describe("createPlanService: the plan step", () => {
         const { plan, events } = harness()
 
         // when
-        await plan(ROOT, 4, { base: undefined })
+        await plan(ROOT, 4, { base: undefined, pinned: {} })
 
         // then
         expect(events.appended.map(event => `${event.step} ${event.outcome}`)).toEqual(["plan running", "plan ok"])
@@ -185,7 +212,7 @@ describe("createPlanService: the plan step", () => {
         const { plan, events } = harness()
 
         // when
-        await plan(ROOT, 4, { base: undefined })
+        await plan(ROOT, 4, { base: undefined, pinned: {} })
 
         // then
         expect(events.appended.every(event => event.ticket === undefined)).toBe(true)
@@ -196,7 +223,7 @@ describe("createPlanService: the plan step", () => {
         const { plan, events } = harness()
 
         // when
-        await plan(ROOT, 4, { base: undefined })
+        await plan(ROOT, 4, { base: undefined, pinned: {} })
 
         // then
         expect(started(events.appended)).toBe(false)
@@ -208,7 +235,7 @@ describe("createPlanService: the plan step", () => {
         const { plan, events } = harness({ structuredOutput: MANIFEST, usage })
 
         // when
-        await plan(ROOT, 4, { base: undefined })
+        await plan(ROOT, 4, { base: undefined, pinned: {} })
 
         // then
         expect(events.appended.at(-1)?.usage).toEqual(usage)
@@ -219,7 +246,7 @@ describe("createPlanService: the plan step", () => {
         const { plan, events } = harness({ outcome: "failed", detail: "the session died" })
 
         // when
-        await plan(ROOT, 4, { base: undefined })
+        await plan(ROOT, 4, { base: undefined, pinned: {} })
 
         // then
         expect(events.appended.at(-1)).toMatchObject({
@@ -233,7 +260,7 @@ describe("createPlanService: the plan step", () => {
         const { plan, events } = harness({ structuredOutput: { nonsense: true } })
 
         // when
-        await plan(ROOT, 4, { base: undefined })
+        await plan(ROOT, 4, { base: undefined, pinned: {} })
 
         // then
         expect(events.appended.at(-1)?.outcome).toBe("failed")
@@ -244,7 +271,7 @@ describe("createPlanService: the plan step", () => {
         const { plan, manifests } = harness()
 
         // when
-        await plan(ROOT, 4, { base: "release" })
+        await plan(ROOT, 4, { base: "release", pinned: {} })
 
         // then
         expect(manifests.written[0]?.manifest.base).toBe("release")
@@ -255,7 +282,7 @@ describe("createPlanService: the plan step", () => {
         const { plan, manifests } = harness()
 
         // when
-        await plan(ROOT, 4, { base: undefined })
+        await plan(ROOT, 4, { base: undefined, pinned: {} })
 
         // then
         expect(manifests.written[0]?.manifest.base).toBe("main")
@@ -266,7 +293,7 @@ describe("createPlanService: the plan step", () => {
         const { plan } = harness({ structuredOutput: MANIFEST }, { defaultBase: undefined })
 
         // when
-        const result = await plan(ROOT, 4, { base: undefined })
+        const result = await plan(ROOT, 4, { base: undefined, pinned: {} })
 
         // then
         expect(result).toEqual({ ok: false, reason: expect.stringContaining("no branch to base this spec on") })
@@ -277,7 +304,7 @@ describe("createPlanService: the plan step", () => {
         const { plan, agent } = harness({ structuredOutput: MANIFEST }, { defaultBase: undefined })
 
         // when
-        await plan(ROOT, 4, { base: undefined })
+        await plan(ROOT, 4, { base: undefined, pinned: {} })
 
         // then
         expect(agent.invocations).toEqual([])
@@ -288,7 +315,7 @@ describe("createPlanService: the plan step", () => {
         const { plan, manifests } = harness({ structuredOutput: { ...MANIFEST, base: "whatever-it-claimed" } })
 
         // when
-        await plan(ROOT, 4, { base: "release" })
+        await plan(ROOT, 4, { base: "release", pinned: {} })
 
         // then
         expect(manifests.written[0]?.manifest.base).toBe("release")

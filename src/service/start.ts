@@ -1,3 +1,4 @@
+import type { Pinned } from "../domain/afkonfig.ts"
 import { specBranch } from "../domain/branches.ts"
 import type { Clock } from "../domain/clock.ts"
 import type { CopyEnvironmentFiles } from "../domain/environment.ts"
@@ -5,7 +6,7 @@ import { type EventLog, started } from "../domain/events.ts"
 import type { Git, ResetRequest } from "../domain/git.ts"
 import { type Holder, heldByAnother, type RunLock, refusalToShare } from "../domain/lock.ts"
 import { baseOf, type Manifest, type ManifestStore } from "../domain/manifest.ts"
-import type { StartMode } from "../domain/mode.ts"
+import { plans, type StartMode } from "../domain/mode.ts"
 import type { Commands, ConfirmationScreen, Operator } from "../domain/operator.ts"
 import { gateWorktree } from "../domain/paths.ts"
 import { baseNotices } from "../domain/preflight.ts"
@@ -27,6 +28,12 @@ export type StartRequest = {
     consented: boolean
     /** `--branch`, already known to name no remote. Whether this checkout has it is asked here. */
     base: string | undefined
+    /**
+     * What the afkonfig pins, read before anything ran so that a faulty one refused the invocation
+     * before `--force-fresh` threw anything away (ADR-0039). Read by a mode that plans, and only
+     * handed to the planner.
+     */
+    pinned: Pinned
 }
 
 /** The driving port: get from an accepted invocation to a run that is ready to implement. */
@@ -105,7 +112,7 @@ export const createStartService =
         records,
         takeOver,
     }: StartDeps): StartRun =>
-    async ({ spec, mode, consented, base: asked }) => {
+    async ({ spec, mode, consented, base: asked, pinned }) => {
         const root = await git.topLevel(cwd)
         if (root === undefined) {
             return refused("this is not a git worktree: run afk from inside the repository whose spec this is")
@@ -199,7 +206,7 @@ export const createStartService =
         // Planning a spec that was planned before keeps the base it was planned on: `--plan-only` is
         // the one mode an existing manifest does not stop, and resolving afresh there would rewrite
         // a base the spec branch was already cut from — the drift ADR-0032 records it to prevent.
-        const read = mode === "implement-only" ? stored : await plan(root, spec, { base: asked ?? recorded })
+        const read = plans(mode) ? await plan(root, spec, { base: asked ?? recorded, pinned }) : stored
         if (read === undefined) {
             return refused(`spec #${spec} has no manifest to implement`)
         }

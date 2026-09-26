@@ -14,3 +14,9 @@ export type StartMode = "plan-and-implement" | "plan-only" | "implement-only"
  * exits.
  */
 export type Mode = StartMode | "board-only"
+
+/**
+ * Whether a mode runs the planner. The one reading of it: the afkonfig is read, `--branch` honoured
+ * and a manifest made only where this holds (ADR-0032, ADR-0039).
+ */
+export const plans = (mode: Mode): boolean => mode === "plan-and-implement" || mode === "plan-only"

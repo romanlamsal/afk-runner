@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { NOTHING_PINNED, type Pinned } from "./afkonfig.ts"
 import { manifestPath } from "./paths.ts"
 import { deadlocked } from "./schedule.ts"
 import { inlineJsonSchema } from "./schema.ts"
@@ -68,9 +69,19 @@ export type ManifestStore = {
 
 /**
  * What the planner is asked to return, which is the manifest without the base: the field afk fills
- * in is not one the agent is shown, so there is nothing for it to invent (ADR-0032).
+ * in is not one the agent is shown, so there is nothing for it to invent (ADR-0032). A command the
+ * afkonfig pins is left out the same way, so that the planner spends nothing deriving it (ADR-0039).
  */
-export const manifestJsonSchema = (): z.core.JSONSchema.BaseSchema => inlineJsonSchema(plannedManifestSchema)
+export const manifestJsonSchema = (pinned: Pinned = NOTHING_PINNED): z.core.JSONSchema.BaseSchema => {
+    const mask: { setup?: true; verify?: true } = {}
+    if (pinned.setup !== undefined) {
+        mask.setup = true
+    }
+    if (pinned.verify !== undefined) {
+        mask.verify = true
+    }
+    return inlineJsonSchema(plannedManifestSchema.omit(mask))
+}
 
 const duplicate = (tickets: readonly Ticket[]): Ticket | undefined =>
     tickets.find((ticket, index) => tickets.findIndex(other => other.number === ticket.number) !== index)
@@ -114,9 +125,18 @@ const readManifest = <T extends PlannedManifest>(
     return { ok: true, manifest }
 }
 
-/** A planner is an agent, so its output is read as a claim and never as a fact (ADR-0003). */
-export const readPlannedManifest = (raw: unknown, spec: number): PlannedManifestRead =>
-    readManifest(plannedManifestSchema, raw, spec, "the planner's manifest")
+/**
+ * A planner is an agent, so its output is read as a claim and never as a fact (ADR-0003). What the
+ * afkonfig pins is laid over it before it is read: the planner was not asked for those commands, and
+ * a pinned one wins over anything it said regardless (ADR-0039).
+ */
+export const readPlannedManifest = (raw: unknown, spec: number, pinned: Pinned = NOTHING_PINNED): PlannedManifestRead =>
+    readManifest(
+        plannedManifestSchema,
+        typeof raw === "object" && raw !== null ? { ...raw, ...pinned } : raw,
+        spec,
+        "the planner's manifest",
+    )
 
 /**
  * A manifest afk wrote itself is read back through the same rules: it was edited by hand, or written
