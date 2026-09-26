@@ -19,7 +19,7 @@ const repository = (afkonfig?: string): string => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "afk-config-")))
     execFileSync("git", ["init", "-q", "-b", "main"], { cwd: root })
     if (afkonfig !== undefined) {
-        writeFileSync(join(root, "afkonfig.ts"), afkonfig, "utf8")
+        writeFileSync(join(root, "afkonfig.mts"), afkonfig, "utf8")
     }
     return root
 }
@@ -78,7 +78,7 @@ describe("afk", () => {
             afk(["config"], root)
 
             // then
-            expect(readFileSync(join(root, "afkonfig.ts"), "utf8")).toContain("export default")
+            expect(readFileSync(join(root, "afkonfig.mts"), "utf8")).toContain("export default")
         })
 
         it("should find the afkonfig it wrote valid, under node's own type stripping", () => {
@@ -90,7 +90,20 @@ describe("afk", () => {
             const result = afk(["config", "--check"], root)
 
             // then
-            expect(result.stdout).toContain("afkonfig.ts is valid")
+            expect(result.stdout).toContain("afkonfig.mts is valid")
+        })
+
+        it("should find the afkonfig it wrote valid in a repository that declares itself commonjs", () => {
+            // given
+            const root = repository()
+            writeFileSync(join(root, "package.json"), '{ "type": "commonjs" }\n', "utf8")
+            afk(["config", "--init"], root)
+
+            // when
+            const result = afk(["config", "--check"], root)
+
+            // then
+            expect(result.status).toBe(0)
         })
 
         it.each(INVALID_AFKONFIGS)("should exit 3 for an afkonfig with %s", (_, afkonfig) => {
@@ -123,7 +136,7 @@ describe("afk", () => {
             const result = afk(["4", "--plan-only"], root)
 
             // then
-            expect(result.stderr).toContain("afkonfig.ts is invalid")
+            expect(result.stderr).toContain("afkonfig.mts is invalid")
         })
     })
 })

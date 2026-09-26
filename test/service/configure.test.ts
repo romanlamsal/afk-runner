@@ -46,7 +46,7 @@ describe("createConfigureService", () => {
         const result = await configure("init")
 
         // then
-        expect(result).toEqual({ outcome: "written", path: "/repo/afkonfig.ts" })
+        expect(result).toEqual({ outcome: "written", path: "/repo/afkonfig.mts" })
     })
 
     it.each([
@@ -55,7 +55,7 @@ describe("createConfigureService", () => {
         ["check", INVALID, { outcome: "invalid", problems: [expect.stringContaining("verify")] }],
         ["init-or-check", VALID, { outcome: "pinned", pinned: { verify: "pnpm check" } }],
         ["init-or-check", INVALID, { outcome: "invalid", problems: [expect.stringContaining("verify")] }],
-        ["init-or-check", { kind: "absent" }, { outcome: "written", path: "/repo/afkonfig.ts" }],
+        ["init-or-check", { kind: "absent" }, { outcome: "written", path: "/repo/afkonfig.mts" }],
     ] as const)("should answer %s over %o with %o", async (action, load, expected) => {
         // given
         const { configure } = harness(load)

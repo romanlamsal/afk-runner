@@ -31,7 +31,7 @@ describe("createConfig", () => {
     })
 
     it.each([
-        [{ outcome: "written", path: "/repo/afkonfig.ts" }, EXIT.complete],
+        [{ outcome: "written", path: "/repo/afkonfig.mts" }, EXIT.complete],
         [{ outcome: "absent" }, EXIT.complete],
         [{ outcome: "pinned", pinned: { verify: "pnpm check" } }, EXIT.complete],
         [{ outcome: "invalid", problems: ["verify: must not be empty"] }, EXIT.halted],
@@ -59,7 +59,7 @@ describe("createConfig", () => {
 
         // then
         expect(errors).toEqual([
-            "afk: afkonfig.ts is invalid. Correct:",
+            "afk: afkonfig.mts is invalid. Correct:",
             "  - setup: must not be empty",
             '  - "install": not a key afk reads',
         ])
@@ -74,15 +74,15 @@ describe("createConfig", () => {
 
         // then
         expect(printed).toEqual([
-            "afk: afkonfig.ts is valid",
+            "afk: afkonfig.mts is valid",
             "  setup:  derived by the planner",
             "  verify: pnpm check",
         ])
     })
 
     it.each([
-        [{ outcome: "written", path: "/repo/afkonfig.ts" }, "/repo/afkonfig.ts"],
-        [{ outcome: "absent" }, "no afkonfig.ts"],
+        [{ outcome: "written", path: "/repo/afkonfig.mts" }, "/repo/afkonfig.mts"],
+        [{ outcome: "absent" }, "no afkonfig.mts"],
     ] as const)("should say what %o came to", async (result, said) => {
         // given
         const { config, printed } = harness(result)

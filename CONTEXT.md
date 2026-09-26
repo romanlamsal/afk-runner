@@ -85,15 +85,16 @@ The command that proves a checkout's integrity — pinned in the afkonfig, or el
 _Avoid_: test, check, CI
 
 **Afkonfig**:
-`afkonfig.ts` at the repository's top level, checked in, pinning setup, verify, or both. Read only
-by an invocation that plans; one that does not match its shape refuses the invocation (ADR-0039).
-_Avoid_: config, settings, afk.config
+`afkonfig.mts` at the repository's top level, checked in, pinning setup, verify, or both — afk's
+config file, and "config" is a fine word for it: `afk config` is its command. Read only by an
+invocation that plans; one that does not match its shape refuses the invocation (ADR-0039).
+_Avoid_: settings, afk.config
 
 **Pinned**:
 A command set in the afkonfig, so the planner is not asked for it. It is still shown on the
 confirmation screen like a derived one, and an edit there reaches the manifest, never the afkonfig
 (ADR-0014).
-_Avoid_: configured, fixed, overridden
+_Avoid_: fixed, overridden
 
 **Self-verify**:
 An implementer running verify on its own work, inside its own session, before it reports back.

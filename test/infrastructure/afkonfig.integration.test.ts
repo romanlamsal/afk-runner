@@ -14,7 +14,7 @@ const afkonfig = createFileAfkonfig()
 const directory = async (contents?: string): Promise<string> => {
     const root = await realpath(await mkdtemp(join(tmpdir(), "afk-afkonfig-")))
     if (contents !== undefined) {
-        await writeFile(join(root, "afkonfig.ts"), contents, "utf8")
+        await writeFile(join(root, "afkonfig.mts"), contents, "utf8")
     }
     return root
 }

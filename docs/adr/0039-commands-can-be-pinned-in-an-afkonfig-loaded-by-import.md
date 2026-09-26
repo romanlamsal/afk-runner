@@ -7,7 +7,7 @@ status: accepted
 The planner derived `setup` and `verify` afresh every run (ADR-0003), and came back with different
 ones from run to run on the same repository — and spent planner time doing it.
 
-**Decision: a repository may pin either command, or both, in `afkonfig.ts` at its top level —
+**Decision: a repository may pin either command, or both, in `afkonfig.mts` at its top level —
 `export default { setup?: string, verify?: string }`. afk loads it with a dynamic `import()` and
 validates the default export strictly. The planner is asked only for what is not pinned: a pinned
 field is removed from the schema it must answer, afk writes the pinned value into the manifest
@@ -33,7 +33,11 @@ does not.
 - **Look up the afkonfig in the invoking directory.** Rejected. afk plans, sets up and verifies at
   the repository's top level, so an afkonfig in a subdirectory would pin commands that then run
   somewhere else.
-- **Near-miss detection** (`afkconfig.ts`, `.js`, `.mts`). Rejected: one name, nothing else.
+- **`afkonfig.ts`.** Rejected. Node takes a `.ts` file's module type from the nearest package
+  manifest, so in a repository declaring `"type": "commonjs"` the `export default` is a syntax
+  error — and `afk config --init` would write a file its own `--check` refuses. `.mts` is ESM
+  whatever the repository declares.
+- **Near-miss detection** (`afkonfig.ts`, `afkconfig.mts`, `.js`). Rejected: one name, nothing else.
 
 ## Consequences
 

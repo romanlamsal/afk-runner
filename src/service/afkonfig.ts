@@ -41,7 +41,7 @@ export const createReadAfkonfigService =
             return { outcome: "absent" }
         }
         if (loaded.kind === "failed") {
-            return { outcome: "invalid", problems: [`afkonfig.ts could not be imported: ${loaded.reason}`] }
+            return { outcome: "invalid", problems: [`afkonfig.mts could not be imported: ${loaded.reason}`] }
         }
 
         const read = readAfkonfig(loaded.exports)

@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 /**
- * The afkonfig: `afkonfig.ts` at the repository's top level, checked in, pinning setup, verify or
+ * The afkonfig: `afkonfig.mts` at the repository's top level, checked in, pinning setup, verify or
  * both, so that the planner is asked only for what it does not pin (ADR-0039).
  *
  * The schema is a rule, so it lives here. It is strict because a faulty afkonfig fails loudly: a key
@@ -10,7 +10,7 @@ import { z } from "zod"
  */
 
 /** Where the afkonfig lives, relative to the repository's top level. One name, and no near miss. */
-export const AFKONFIG_FILE = "afkonfig.ts"
+export const AFKONFIG_FILE = "afkonfig.mts"
 
 /** Holds something besides whitespace: an empty command pins nothing, and is a mistake. */
 const command = z.string({ error: "must be a string" }).regex(/\S/, { error: "must not be empty" }).optional()
@@ -73,12 +73,12 @@ const problemsOf = (error: z.ZodError): string[] =>
 export const readAfkonfig = (exports: Readonly<Record<string, unknown>>): AfkonfigRead => {
     const named = Object.keys(exports)
         .filter(name => name !== "default")
-        .map(name => `afkonfig.ts exports "${name}": only the default export is read`)
+        .map(name => `afkonfig.mts exports "${name}": only the default export is read`)
 
     if (!("default" in exports)) {
         return {
             ok: false,
-            problems: ["afkonfig.ts has no default export: export default { setup, verify }", ...named],
+            problems: ["afkonfig.mts has no default export: export default { setup, verify }", ...named],
         }
     }
 

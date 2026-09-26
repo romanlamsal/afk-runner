@@ -59,7 +59,7 @@ than continuing unsupervised. With no TTY, pass `--plan-only` or `--implement-on
 
 ## Pinning setup and verify
 
-`afkonfig.ts` at the repository's top level pins either command, or both, so the planner stops
+`afkonfig.mts` at the repository's top level pins either command, or both, so the planner stops
 deriving them — and stops deriving different ones from run to run:
 
 ```ts
@@ -90,7 +90,7 @@ afk config [--init | --check]
 
 1. **Plan.** An agent reads the repository's own documentation to work out which issues are the
    spec's tickets, how they block each other, and what this repository's `setup` and `verify`
-   commands are, where `afkonfig.ts` does not pin them. The result is the manifest.
+   commands are, where `afkonfig.mts` does not pin them. The result is the manifest.
 2. **Confirm.** One screen, one decision: anything worth knowing about the branch this spec is
    based on and about your working tree, then `setup` and then `verify`, pre-filled and editable
    in place. Empty input keeps the proposal.

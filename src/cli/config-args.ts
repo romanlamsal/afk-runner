@@ -23,18 +23,18 @@ export const parseConfigArgs = (argv: string[]): ParsedConfigArgs => {
             flags: {
                 init: {
                     type: Boolean,
-                    description: "Write a fresh afkonfig.ts at the repository's top level, over any there",
+                    description: "Write a fresh afkonfig.mts at the repository's top level, over any there",
                     default: false,
                 },
                 check: {
                     type: Boolean,
-                    description: "Say whether afkonfig.ts is valid, and what to correct where it is not",
+                    description: "Say whether afkonfig.mts is valid, and what to correct where it is not",
                     default: false,
                 },
             },
             help: {
                 description:
-                    "Pins setup and verify in afkonfig.ts. Bare, it checks an afkonfig that exists and writes one that does not.",
+                    "Pins setup and verify in afkonfig.mts. Bare, it checks an afkonfig that exists and writes one that does not.",
                 usage: CONFIG_USAGE,
             },
         },

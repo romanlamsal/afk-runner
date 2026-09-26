@@ -583,7 +583,7 @@ describe("createRun: the afkonfig", () => {
         await run(invocation("plan-only"))
 
         // then
-        expect(errors).toEqual(["afk: afkonfig.ts is invalid. Correct:", "  - verify: must not be empty"])
+        expect(errors).toEqual(["afk: afkonfig.mts is invalid. Correct:", "  - verify: must not be empty"])
     })
 
     it.each([

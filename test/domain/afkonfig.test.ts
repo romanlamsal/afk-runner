@@ -33,7 +33,7 @@ describe("readAfkonfig", () => {
     })
 
     it.each([
-        ["no default export", {}, "afkonfig.ts has no default export"],
+        ["no default export", {}, "afkonfig.mts has no default export"],
         ["a named export beside the default", { default: {}, setup: "npm ci" }, 'exports "setup"'],
         ["a default export that is not an object", { default: "npm ci" }, "default export"],
         ["an unknown key", { default: { setup: "npm ci", install: "npm i" } }, '"install"'],

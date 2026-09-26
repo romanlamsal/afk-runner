@@ -11,7 +11,7 @@ export type ConfigDeps = {
 }
 
 const pinnedLines = (pinned: Pinned): string[] => [
-    "afk: afkonfig.ts is valid",
+    "afk: afkonfig.mts is valid",
     `  setup:  ${pinned.setup ?? "derived by the planner"}`,
     `  verify: ${pinned.verify ?? "derived by the planner"}`,
 ]
@@ -31,7 +31,7 @@ export const createConfig =
                 return EXIT.complete
 
             case "absent":
-                print("afk: no afkonfig.ts, so the planner derives setup and verify")
+                print("afk: no afkonfig.mts, so the planner derives setup and verify")
                 return EXIT.complete
 
             case "pinned":
