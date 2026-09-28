@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest"
 import type { Progress } from "../../src/domain/events.ts"
 import {
+    composeDraftPullRequest,
     composePullRequest,
+    type FoundPullRequest,
     noPullRequestReason,
+    pullRequestMove,
     readPullRequestSummary,
     wholeSpec,
 } from "../../src/domain/pull-request.ts"
@@ -13,12 +16,10 @@ const progress = (some: Partial<Progress>): Progress => ({ ...nothing, ...some }
 
 const SUMMARY = { title: "Layerless afk", summary: "The runner stops batching tickets into layers." }
 
-const compose = (tickets: readonly number[], some: Partial<Progress>) =>
-    composePullRequest({ spec: 4, tickets, progress: progress(some), summary: SUMMARY })
+const compose = (worked: Progress) => composePullRequest({ spec: 4, progress: worked, summary: SUMMARY })
 
 /** The same, for a writer that reported nothing afk could use. */
-const composeUnwritten = (tickets: readonly number[], some: Partial<Progress>) =>
-    composePullRequest({ spec: 4, tickets, progress: progress(some), summary: undefined })
+const composeUnwritten = (worked: Progress) => composePullRequest({ spec: 4, progress: worked, summary: undefined })
 
 describe("readPullRequestSummary", () => {
     it("should read what the writer reported", () => {
@@ -90,10 +91,10 @@ describe("wholeSpec", () => {
 describe("composePullRequest", () => {
     it("should take the title the writer wrote", () => {
         // given
-        const tickets = [5]
+        const worked = progress({ verified: [5] })
 
         // when
-        const pullRequest = compose(tickets, { verified: [5] })
+        const pullRequest = compose(worked)
 
         // then
         expect(pullRequest.title).toBe("Layerless afk")
@@ -101,10 +102,10 @@ describe("composePullRequest", () => {
 
     it("should title the spec itself where the writer produced nothing", () => {
         // given
-        const tickets = [5]
+        const worked = progress({ verified: [5] })
 
         // when
-        const pullRequest = composeUnwritten(tickets, { verified: [5] })
+        const pullRequest = composeUnwritten(worked)
 
         // then
         expect(pullRequest.title).toBe("Spec #4")
@@ -112,10 +113,10 @@ describe("composePullRequest", () => {
 
     it("should open with the summary the writer wrote", () => {
         // given
-        const tickets = [5]
+        const worked = progress({ verified: [5] })
 
         // when
-        const pullRequest = compose(tickets, { verified: [5] })
+        const pullRequest = compose(worked)
 
         // then
         expect(pullRequest.body.startsWith("The runner stops batching tickets into layers.")).toBe(true)
@@ -123,10 +124,10 @@ describe("composePullRequest", () => {
 
     it("should say the writer produced no summary rather than inventing one", () => {
         // given
-        const tickets = [5]
+        const worked = progress({ verified: [5] })
 
         // when
-        const pullRequest = composeUnwritten(tickets, { verified: [5] })
+        const pullRequest = composeUnwritten(worked)
 
         // then
         expect(pullRequest.body).toContain("afk's pull request writer produced no summary")
@@ -134,10 +135,10 @@ describe("composePullRequest", () => {
 
     it("should close one ticket per verified ticket", () => {
         // given
-        const tickets = [5, 6]
+        const worked = progress({ verified: [5, 6] })
 
         // when
-        const pullRequest = compose(tickets, { verified: [5, 6] })
+        const pullRequest = compose(worked)
 
         // then
         expect(pullRequest.body.endsWith("Closes #5\nCloses #6")).toBe(true)
@@ -150,54 +151,68 @@ describe("composePullRequest", () => {
         { what: "never attempted", some: { verified: [5] } },
     ] as const)("should close no ticket that was $what", ({ some }) => {
         // given
-        const tickets = [5, 6]
+        const worked = progress(some)
 
         // when
-        const pullRequest = compose(tickets, some)
+        const pullRequest = compose(worked)
 
         // then
         expect(pullRequest.body).not.toContain("Closes #6")
     })
 
-    it("should be ready for review when every ticket was verified", () => {
+    it("should be ready for review", () => {
         // given
-        const tickets = [5, 6]
+        const worked = progress({ verified: [5] })
 
         // when
-        const pullRequest = compose(tickets, { verified: [5, 6] })
+        const pullRequest = compose(worked)
 
         // then
         expect(pullRequest.draft).toBe(false)
     })
+})
 
-    it("should say nothing about a shortfall when every ticket was verified", () => {
+describe("composeDraftPullRequest", () => {
+    const draft = (tickets: readonly number[], some: Partial<Progress>) =>
+        composeDraftPullRequest({ spec: 4, tickets, progress: progress(some) })
+
+    it("should title the spec itself, no writer having run", () => {
         // given
         const tickets = [5, 6]
 
         // when
-        const pullRequest = compose(tickets, { verified: [5, 6] })
+        const pullRequest = draft(tickets, { verified: [5] })
 
         // then
-        expect(pullRequest.body).not.toContain("not the whole of spec #4")
+        expect(pullRequest.title).toBe("Spec #4")
     })
 
-    it.each([
-        { what: "a ticket that failed", some: { verified: [5], failed: [6] } },
-        { what: "a ticket that was skipped", some: { verified: [5], skipped: [6] } },
-        { what: "a ticket the gate never proved", some: { verified: [5], unverified: [6] } },
-        { what: "a ticket nothing happened to", some: { verified: [5] } },
-    ] as const)("should be a draft for a run with $what", ({ some }) => {
+    it("should say it is a backup of a spec afk has not finished", () => {
         // given
         const tickets = [5, 6]
 
         // when
-        const pullRequest = compose(tickets, some)
+        const pullRequest = draft(tickets, { verified: [5] })
+
+        // then
+        expect(
+            pullRequest.body.startsWith("afk has not finished spec #4; this draft is a backup of its spec branch."),
+        ).toBe(true)
+    })
+
+    it("should be a draft", () => {
+        // given
+        const tickets = [5, 6]
+
+        // when
+        const pullRequest = draft(tickets, { verified: [5] })
 
         // then
         expect(pullRequest.draft).toBe(true)
     })
 
     it.each([
+        { what: "verified", some: { verified: [5, 6] }, names: "- verified: #5, #6" },
         { what: "failed", some: { verified: [5], failed: [6, 7] }, names: "- failed: #6, #7" },
         { what: "skipped", some: { verified: [5], skipped: [6, 7] }, names: "- skipped: #6, #7" },
         { what: "unverified", some: { verified: [5], unverified: [6] }, names: "- not proven by the gate: #6" },
@@ -207,21 +222,72 @@ describe("composePullRequest", () => {
         const tickets = [5, 6, 7]
 
         // when
-        const pullRequest = compose(tickets, some)
+        const pullRequest = draft(tickets, some)
 
         // then
         expect(pullRequest.body).toContain(names)
     })
 
-    it("should say which spec the shortfall is against", () => {
+    it("should close no ticket, a draft being rewritten before it can be merged", () => {
         // given
         const tickets = [5, 6]
 
         // when
-        const pullRequest = compose(tickets, { verified: [5], failed: [6] })
+        const pullRequest = draft(tickets, { verified: [5] })
 
         // then
-        expect(pullRequest.body).toContain("This pull request is not the whole of spec #4:")
+        expect(pullRequest.body).not.toContain("Closes")
+    })
+})
+
+describe("pullRequestMove", () => {
+    const found = (state: FoundPullRequest["state"], draft: boolean, number = 1): FoundPullRequest => ({
+        number,
+        url: `https://example.invalid/pull/${number}`,
+        state,
+        draft,
+    })
+
+    it.each([
+        { what: "a whole spec with nothing found", existing: [], whole: true },
+        { what: "a partial spec with nothing found", existing: [], whole: false },
+        { what: "a whole spec whose draft was closed", existing: [found("closed", true)], whole: true },
+        { what: "a whole spec whose pull request was merged", existing: [found("merged", false)], whole: true },
+    ] as const)("should open a new pull request for $what", ({ existing, whole }) => {
+        // given — what the tracker found for the spec branch, from the table above
+
+        // when
+        const move = pullRequestMove(existing, whole)
+
+        // then
+        expect(move).toEqual({ move: "open" })
+    })
+
+    it.each([
+        { what: "a draft over a partial spec", existing: found("open", true), whole: false, markAs: undefined },
+        { what: "a draft over a whole spec", existing: found("open", true), whole: true, markAs: "ready" },
+        { what: "a ready one over a whole spec", existing: found("open", false), whole: true, markAs: undefined },
+        { what: "a ready one over a partial spec", existing: found("open", false), whole: false, markAs: "draft" },
+    ] as const)("should update the open pull request for $what", ({ existing, whole, markAs }) => {
+        // given — the open pull request the tracker found, from the table above, beside a closed one
+        const listed = [found("closed", true, 7), existing]
+
+        // when
+        const move = pullRequestMove(listed, whole)
+
+        // then
+        expect(move).toEqual({ move: "update", number: 1, url: "https://example.invalid/pull/1", markAs })
+    })
+
+    it("should leave a closed draft closed over a partial spec", () => {
+        // given
+        const existing = [found("closed", true, 7)]
+
+        // when
+        const move = pullRequestMove(existing, false)
+
+        // then
+        expect(move).toEqual({ move: "leave", url: "https://example.invalid/pull/7" })
     })
 })
 

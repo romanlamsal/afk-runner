@@ -45,9 +45,9 @@ export type RunDeps = {
  * that failed.
  *
  * A draft pull request is what a partial run comes to, and the exit code says the same thing in a
- * number: `0` is a ready pull request over a whole spec, `1` is a draft over part of one, and
- * anything else opened nothing. Success is never printed over a failure that happened, which is the
- * failure mode this whole rewrite exists to remove.
+ * number: `0` is a ready pull request over a whole spec, `1` is part of one — a draft, or a draft the
+ * operator closed and afk left closed — and anything else opened nothing. Success is never printed
+ * over a failure that happened, which is the failure mode this whole rewrite exists to remove.
  */
 export const createRun = ({
     readAfkonfig,
@@ -126,8 +126,9 @@ export const createRun = ({
                 const driven = await drive(started.run, { maxParallel: invocation.maxParallel })
                 // An interrupted run is a partial one: it drained, so what follows is everything
                 // that was in flight when the operator stopped it and nothing that came after. It
-                // still opens its pull request, because a draft naming what is missing is what a
-                // partial run is worth — and what did not land is the next start's work either way.
+                // still opens or updates its pull request, because a draft backing the branch up is
+                // what a partial run is worth — and what did not land is the next start's work
+                // either way.
                 if (driven.outcome === "interrupted") {
                     print("afk: the run was interrupted, so it stopped at what was already in flight")
                 }

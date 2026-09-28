@@ -7,12 +7,12 @@ import { createFinishService } from "../../src/service/finish.ts"
 import { createFakeAgent } from "../fakes/agent.ts"
 import { createFakeEventLog } from "../fakes/event-log.ts"
 import { createFakeGit, type FakeRepository } from "../fakes/git.ts"
-import { createFakeTracker, type FakeTrackerSetup } from "../fakes/tracker.ts"
+import { createFakeTracker, type FakeTracker, type FakeTrackerSetup } from "../fakes/tracker.ts"
 import { manifestOf, ticket } from "../fixtures/manifest.ts"
 
 /**
- * The finish service: the branch is pushed, an agent writes the prose, and the one pull request a
- * run opens is opened. What is asserted is what reached the remote and what the tracker was asked
+ * The finish service: the branch is pushed, an agent writes a ready pull request's prose, and
+ * the one pull request a spec has is opened or updated. What is asserted is what reached the remote and what the tracker was asked
  * for — the body's composition is the domain's, and it is asserted there.
  */
 
@@ -127,12 +127,12 @@ describe("the finish service: a run that verified something", () => {
         expect(tracker.opened.at(0)?.title).toBe("Layerless afk")
     })
 
-    it("should close every verified ticket and no other", async () => {
+    it("should close every verified ticket", async () => {
         // given
         const { finish, tracker } = harness()
 
         // when
-        await finish({ verified: [5], failed: [6] })
+        await finish({ verified: [5, 6] })
 
         // then
         expect(tracker.opened.at(0)?.body).toContain("Closes #5")
@@ -183,6 +183,143 @@ describe("the finish service: a run that verified something", () => {
 
         // then
         expect(tracker.opened.at(0)?.title).toBe("Spec #4")
+    })
+})
+
+describe("the finish service: a partial spec", () => {
+    it("should open a draft titled for the spec itself", async () => {
+        // given
+        const { finish, tracker } = harness()
+
+        // when
+        await finish({ verified: [5], failed: [6] })
+
+        // then
+        expect(tracker.opened.at(0)?.title).toBe("Spec #4")
+    })
+
+    it("should run no writer, a draft carrying no prose", async () => {
+        // given
+        const { finish, agent } = harness()
+
+        // when
+        await finish({ verified: [5], failed: [6] })
+
+        // then
+        expect(agent.invocations).toEqual([])
+    })
+
+    it("should write no pull-request step, no writer having run", async () => {
+        // given
+        const { finish, events } = harness()
+
+        // when
+        await finish({ verified: [5], failed: [6] })
+
+        // then
+        expect(events.appended).toEqual([])
+    })
+})
+
+/**
+ * A spec has one spec PR across all its runs (ADR-0040): what is found for the spec branch decides
+ * whether this run opens one, updates the one there is, or leaves a closed draft closed.
+ */
+describe("the finish service: a spec branch that already had a pull request", () => {
+    const OPEN_DRAFT = { number: 3, url: "https://example.invalid/pull/3", state: "open", draft: true } as const
+    const CLOSED_DRAFT = { ...OPEN_DRAFT, state: "closed" } as const
+
+    it("should update an open draft ready for review once the spec is whole", async () => {
+        // given
+        const { finish, tracker } = harness({ tracker: { found: [OPEN_DRAFT] } })
+
+        // when
+        await finish({ verified: [5, 6] })
+
+        // then
+        expect(tracker.updated).toEqual([
+            expect.objectContaining({ number: 3, title: "Layerless afk", markAs: "ready" }),
+        ])
+    })
+
+    it("should update an open draft and keep it a draft while the spec is partial", async () => {
+        // given
+        const { finish, tracker } = harness({ tracker: { found: [OPEN_DRAFT] } })
+
+        // when
+        await finish({ verified: [5], failed: [6] })
+
+        // then
+        expect(tracker.updated).toEqual([expect.objectContaining({ number: 3, title: "Spec #4", markAs: undefined })])
+    })
+
+    it("should open nothing beside the one it updated", async () => {
+        // given
+        const { finish, tracker } = harness({ tracker: { found: [OPEN_DRAFT] } })
+
+        // when
+        await finish({ verified: [5, 6] })
+
+        // then
+        expect(tracker.opened).toEqual([])
+    })
+
+    it("should report the one it updated", async () => {
+        // given
+        const { finish } = harness({ tracker: { found: [OPEN_DRAFT] } })
+
+        // when
+        const finished = await finish({ verified: [5, 6] })
+
+        // then
+        expect(finished).toEqual({ outcome: "updated", draft: false, url: "https://example.invalid/pull/3" })
+    })
+
+    it("should open a ready one over a draft the operator closed once the spec is whole", async () => {
+        // given
+        const { finish, tracker } = harness({ tracker: { found: [CLOSED_DRAFT] } })
+
+        // when
+        await finish({ verified: [5, 6] })
+
+        // then
+        expect(tracker.opened).toEqual([expect.objectContaining({ draft: false })])
+    })
+
+    it.each([
+        { what: "open nothing", read: (tracker: FakeTracker) => tracker.opened },
+        { what: "update nothing", read: (tracker: FakeTracker) => tracker.updated },
+    ] as const)("should $what where the operator closed the draft and the spec is still partial", async ({ read }) => {
+        // given
+        const { finish, tracker } = harness({ tracker: { found: [CLOSED_DRAFT] } })
+
+        // when
+        await finish({ verified: [5], failed: [6] })
+
+        // then
+        expect(read(tracker)).toEqual([])
+    })
+
+    it("should still push the branch where it leaves the closed draft closed", async () => {
+        // given
+        const { finish, git } = harness({ tracker: { found: [CLOSED_DRAFT] } })
+
+        // when
+        await finish({ verified: [5], failed: [6] })
+
+        // then
+        expect(git.pushed).toEqual(["afk/4/spec"])
+    })
+
+    it("should report the closed draft it left closed", async () => {
+        // given
+        const { finish } = harness({ tracker: { found: [CLOSED_DRAFT] } })
+
+        // when
+        const finished = await finish({ verified: [5], failed: [6] })
+
+        // then
+        expect(finished).toEqual({ outcome: "left", draft: true, url: "https://example.invalid/pull/3" })
     })
 })
 
@@ -263,6 +400,37 @@ describe("the finish service: what it does not report success over", () => {
             reason:
                 "the pull request for afk/4/spec could not be opened: " +
                 "a pull request for afk/4/spec already exists",
+        })
+    })
+})
+
+describe("the finish service: what the tracker would not answer", () => {
+    it("should name the branch when its pull requests could not be looked up", async () => {
+        // given
+        const { finish } = harness({ tracker: { unfindable: "gh is not authenticated" } })
+
+        // when
+        const finished = await finish({ verified: [5, 6] })
+
+        // then
+        expect(finished).toEqual({
+            outcome: "failed",
+            reason: "the pull requests for afk/4/spec could not be looked up: gh is not authenticated",
+        })
+    })
+
+    it("should name the branch when its pull request could not be updated", async () => {
+        // given
+        const found = [{ number: 3, url: "https://example.invalid/pull/3", state: "open", draft: true }] as const
+        const { finish } = harness({ tracker: { found, unupdatable: "gh timed out" } })
+
+        // when
+        const finished = await finish({ verified: [5, 6] })
+
+        // then
+        expect(finished).toEqual({
+            outcome: "failed",
+            reason: "the pull request for afk/4/spec could not be updated: gh timed out",
         })
     })
 })

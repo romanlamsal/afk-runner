@@ -4,7 +4,8 @@ Runs a whole spec's tickets unattended.
 
 afk plans a flat DAG from a spec issue's tickets, implements the ready ones in parallel, squashes
 each onto one spec branch, proves that branch after every single merge, and opens one pull request
-at the end. Everything but the claim and that pull request happens on your machine.
+at the end — or updates the one an earlier run opened. Everything but the claim and that pull
+request happens on your machine.
 
 ## Requirements
 
@@ -116,9 +117,12 @@ afk config [--init | --check]
    killed costs its budget and goes back to the gate rather than buying a second one. Still red and
    the merge is reverted, the ticket failed, its dependents skipped, and the reverted tip gated
    again. Red there halts the run.
-7. **Finish.** Push the spec branch and open one pull request against the default branch: ready
-   when every ticket verified, a draft naming what is missing when not, and none at all when
-   nothing was verified. afk opens it and stops — merging it is yours.
+7. **Finish.** Push the spec branch and open one pull request against the default branch, or
+   update the open one an earlier run of the spec opened: ready when every ticket of the manifest
+   is verified, a draft when not, and none at all when nothing was verified. A draft is a backup of
+   the spec branch — titled `Spec #<n>`, its body where each ticket stands, no agent-written prose.
+   A draft you closed stays closed until the spec is whole. afk opens it and stops — merging it is
+   yours.
 
 Every external invocation — agent, `setup`, `verify` — times out after an hour, and a timeout is an
 ordinary failure.
@@ -142,8 +146,8 @@ Exactly two writes, both through `gh`:
 
 - **the claim** — the ticket is assigned to you when its setup starts, so a colleague can see it is
   taken;
-- **the spec PR** — opened at the end, with one `Closes #<n>` per verified ticket appended by the
-  script rather than by an agent.
+- **the spec PR** — opened at the end, or updated where an earlier run opened it, with one
+  `Closes #<n>` per verified ticket appended by the script rather than by an agent once it is ready.
 
 A failed claim halts the run: it is a collision guard, not bookkeeping. A ticket that is set up
 twice is claimed twice, which changes nothing on the tracker. A claim is never released,
@@ -186,7 +190,7 @@ clone.
 | | |
 | --- | --- |
 | `0` | complete — every ticket verified, a ready pull request opened. `--plan-only` exits `0` too, having planned what it was asked to |
-| `1` | partial — a draft pull request naming what did not land |
+| `1` | partial — a draft pull request opened or updated, or left closed where you closed it |
 | `2` | misuse — the arguments were refused: a bad flag combination, or no terminal without an explicit mode |
 | `3` | halted — afk refused to start, or the run stopped itself, or it opened no pull request |
 | `130` | a second interrupt killed the run |

@@ -1,4 +1,14 @@
-import type { ClaimResult, CloseResult, OpenResult, PullRequestRequest, Tracker } from "../../src/domain/tracker.ts"
+import type { FoundPullRequest } from "../../src/domain/pull-request.ts"
+import type {
+    ClaimResult,
+    CloseResult,
+    FindResult,
+    OpenResult,
+    PullRequestRequest,
+    Tracker,
+    UpdateRequest,
+    UpdateResult,
+} from "../../src/domain/tracker.ts"
 
 /**
  * The tracker port's fake. It has no real counterpart in the contract suite knowingly: a real run
@@ -12,6 +22,8 @@ export type FakeTracker = {
     opened: PullRequestRequest[]
     /** Every branch a pull request was closed for, in the order it was asked. */
     closed: string[]
+    /** Every pull request rewritten, in the order it was asked. */
+    updated: UpdateRequest[]
 }
 
 export type FakeTrackerSetup = {
@@ -27,6 +39,12 @@ export type FakeTrackerSetup = {
     openFor?: readonly string[] | undefined
     /** Why closing a pull request fails. Undefined is a tracker that closes it. */
     unclosable?: string | undefined
+    /** What the tracker finds for any head it is asked about. Undefined is none. */
+    found?: readonly FoundPullRequest[] | undefined
+    /** Why looking pull requests up fails. Undefined is a tracker that answers. */
+    unfindable?: string | undefined
+    /** Why rewriting a pull request fails. Undefined is a tracker that rewrites it. */
+    unupdatable?: string | undefined
 }
 
 export const createFakeTracker = ({
@@ -35,9 +53,13 @@ export const createFakeTracker = ({
     unopenable,
     openFor,
     unclosable,
+    found = [],
+    unfindable,
+    unupdatable,
     url = "https://example.invalid/pull/1",
 }: FakeTrackerSetup = {}): FakeTracker => {
     const claimed: number[] = []
+    const updated: UpdateRequest[] = []
     const opened: PullRequestRequest[] = []
     const closed: string[] = []
     const open = new Set(openFor ?? [])
@@ -45,6 +67,7 @@ export const createFakeTracker = ({
         claimed,
         opened,
         closed,
+        updated,
         tracker: {
             claim: async (_root, ticket): Promise<ClaimResult> => {
                 claimed.push(ticket)
@@ -58,6 +81,12 @@ export const createFakeTracker = ({
                 }
                 open.add(request.head)
                 return { ok: true, url }
+            },
+            findPullRequests: async (): Promise<FindResult> =>
+                unfindable === undefined ? { ok: true, found } : { ok: false, reason: unfindable },
+            updatePullRequest: async (_root, request): Promise<UpdateResult> => {
+                updated.push(request)
+                return unupdatable === undefined ? { ok: true } : { ok: false, reason: unupdatable }
             },
             closePullRequest: async (_root, head): Promise<CloseResult> => {
                 closed.push(head)

@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted, amended in part by ADR-0040
 ---
 
 # The run's records are machine-local; GitHub receives exactly two writes
@@ -7,7 +7,7 @@ status: accepted
 **Decision: `.afk/`** — state, worktrees, agent transcripts — **is machine-local and deliberately
 not portable.** It lives on one machine and is never expected anywhere else. **GitHub is written to
 exactly twice:** the ticket is claimed when its implementer starts, and the spec PR is opened at the
-end.
+end. *(ADR-0040: opened or updated — a spec has one spec PR across all its runs.)*
 
 ## Amendment: the run directory ignores itself
 

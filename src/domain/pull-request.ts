@@ -3,8 +3,9 @@ import type { Progress } from "./events.ts"
 import { inlineJsonSchema } from "./schema.ts"
 
 /**
- * The one pull request a run opens, and the division of labour inside it: an agent writes the prose,
- * and the script composes everything a machine or a tracker reads from what the run came to.
+ * The one pull request a spec has, and the division of labour inside it: an agent writes a ready
+ * one's prose, and the script composes everything a machine or a tracker reads from what the run
+ * came to — and the whole of a draft (ADR-0040).
  *
  * The closing references are the script's for the same reason the squash trailer is — they are a
  * statement about what the gate proved, and an agent recollecting which tickets those were is a
@@ -48,7 +49,7 @@ export const readPullRequestSummary = (raw: unknown): PullRequestSummary => {
 export type PullRequest = {
     title: string
     body: string
-    /** A run that is not the whole spec opens a draft, so that nobody mistakes it for one (ADR-0007). */
+    /** A spec that is not whole is a draft, so nobody mistakes it for one (ADR-0007, ADR-0040). */
     draft: boolean
 }
 
@@ -64,49 +65,111 @@ const unattempted = (tickets: readonly number[], progress: Progress): readonly n
     return tickets.filter(ticket => !accounted.has(ticket))
 }
 
-/** What became of everything the gate did not prove, label by label, and only where there is any. */
+/** What became of the tickets, label by label, and only where there is any. */
 const listed = (labelled: readonly (readonly [string, readonly number[]])[]): readonly string[] =>
     labelled.filter(([, some]) => some.length > 0).map(([label, some]) => `${label}: ${named(some)}`)
 
-/** The three a run wrote down, which is everything it has to say without the manifest beside it. */
+/** The three a run wrote down short of verified: everything it has to say without the manifest. */
 const recorded = (progress: Progress): readonly (readonly [string, readonly number[]])[] => [
     ["failed", progress.failed],
     ["skipped", progress.skipped],
     ["not proven by the gate", progress.unverified],
 ]
 
-/** What a reviewer is told the pull request is missing, where it is missing anything. */
-const missing = (spec: number, tickets: readonly number[], progress: Progress): readonly string[] => {
-    const lines = listed([...recorded(progress), ["never attempted", unattempted(tickets, progress)]])
-    return lines.length === 0
-        ? []
-        : [[`This pull request is not the whole of spec #${spec}:`, ...lines.map(line => `- ${line}`)].join("\n")]
-}
-
 /** One per verified ticket, composed from what the gate proved rather than from what an agent recalls. */
 const closes = (progress: Progress): readonly string[] =>
     progress.verified.length === 0 ? [] : [progress.verified.map(ticket => `Closes #${ticket}`).join("\n")]
 
+/** A ready pull request: the writer's prose, and the tickets it closes. Only a whole spec is one. */
 export const composePullRequest = ({
     spec,
-    tickets,
     progress,
     summary,
 }: {
     spec: number
-    /** Every ticket of the spec, so that one the run never reached is named rather than forgotten. */
-    tickets: readonly number[]
     progress: Progress
     summary: PullRequestSummary | undefined
 }): PullRequest => ({
     title: summary?.title ?? `Spec #${spec}`,
     body: [
         summary?.summary ?? "afk's pull request writer produced no summary, so this body carries none.",
-        ...missing(spec, tickets, progress),
         ...closes(progress),
     ].join("\n\n"),
-    draft: !wholeSpec(tickets, progress),
+    draft: false,
 })
+
+/**
+ * A draft: a backup of the spec branch, not a review. Without the run directory beside it there is
+ * nothing a reviewer can act on, so it carries no prose and no writer is run for it — only where
+ * every ticket of the manifest stands. It closes nothing, being rewritten before it can be merged
+ * (ADR-0040).
+ */
+export const composeDraftPullRequest = ({
+    spec,
+    tickets,
+    progress,
+}: {
+    spec: number
+    /** Every ticket of the spec, so that one the run never reached is named rather than forgotten. */
+    tickets: readonly number[]
+    progress: Progress
+}): PullRequest => ({
+    title: `Spec #${spec}`,
+    body: [
+        `afk has not finished spec #${spec}; this draft is a backup of its spec branch.`,
+        listed([
+            ["verified", progress.verified],
+            ["not proven by the gate", progress.unverified],
+            ["failed", progress.failed],
+            ["skipped", progress.skipped],
+            ["never attempted", unattempted(tickets, progress)],
+        ])
+            .map(line => `- ${line}`)
+            .join("\n"),
+    ].join("\n\n"),
+    draft: true,
+})
+
+/** A pull request the tracker holds for the spec branch, whatever became of it. */
+export type FoundPullRequest = {
+    number: number
+    url: string
+    state: "open" | "closed" | "merged"
+    draft: boolean
+}
+
+/** Where an open pull request's draft flag has to move to agree with the spec; undefined is nowhere. */
+export type DraftMark = "ready" | "draft" | undefined
+
+export type PullRequestMove =
+    /** Nothing open to update, and nothing the operator closed that a new one would override. */
+    | { move: "open" }
+    /** The open one is rewritten; `markAs` is where its draft flag disagrees with the spec. */
+    | { move: "update"; number: number; url: string; markAs: DraftMark }
+    /** A partial spec whose pull request the operator closed: it is not replaced by another draft. */
+    | { move: "leave"; url: string }
+
+/**
+ * What the one spec PR a spec has calls for (ADR-0040). An open one is updated. With none open, a
+ * whole spec opens a ready one whatever came before it, and a partial one opens a draft only where the
+ * spec branch never had a pull request — a closed draft is the operator saying the backup is not
+ * wanted. `found` is newest first, as the tracker port promises, so the link left is the latest.
+ */
+export const pullRequestMove = (found: readonly FoundPullRequest[], whole: boolean): PullRequestMove => {
+    const open = found.find(pullRequest => pullRequest.state === "open")
+    if (open !== undefined) {
+        const disagrees = open.draft === whole
+        return {
+            move: "update",
+            number: open.number,
+            url: open.url,
+            markAs: disagrees ? (whole ? "ready" : "draft") : undefined,
+        }
+    }
+
+    const [before] = found
+    return whole || before === undefined ? { move: "open" } : { move: "leave", url: before.url }
+}
 
 /**
  * Why a run opens no pull request at all. Nothing verified means nothing the gate proved, and an

@@ -63,12 +63,17 @@ branch. The last trailer naming a ticket is the one that says where it stands, w
 _Avoid_: rollback marker, undo tag
 
 **Spec PR**:
-The one pull request a run opens — spec branch into the spec base, squash-merged. Opening it is the
-last thing a run does, and merging it is the operator's (ADR-0007).
+The one pull request a spec has — spec branch into the spec base, squash-merged. The first run to
+reach it opens it and every later run updates it, draft while the spec is partial and ready once it
+is whole. Whole is read off the manifest's tickets, never off the spec issue. A draft is a backup of
+the spec branch and nothing more, so one the operator closed is not replaced by another draft — only
+a whole spec opens a new one. Opening or updating it is the last thing a run does, and merging it is
+the operator's (ADR-0007, ADR-0040).
 _Avoid_: layer PR, ticket PR, stack
 
 **The push**:
-Publishing the spec branch to its remote, once, immediately before the spec PR is opened. It is what
+Publishing the spec branch to its remote, once per run, immediately before the spec PR is opened or
+updated. It is what
 makes the pull request possible, and it is the only write besides the tracker's two that leaves the
 machine — ADR-0013 counts writes to the *tracker*, and this is not one. It moves no branch and no
 working tree; the upstream it records for the spec branch is the only local mark it leaves.
@@ -132,7 +137,7 @@ Stopping a run without stopping what it is already doing: nothing new starts, ev
 finishes and records its event, and the process then exits. What the first interrupt asks for, and
 what a halt does on its way out. A merge a drain has already made is still gated, because the gate
 is that merge's own proof rather than new work (ADR-0008). A drained run is a partial one, and opens
-the pull request a partial run opens.
+or updates the spec PR as a draft.
 _Avoid_: graceful shutdown, soft stop, quiesce
 
 **Critical path**:
@@ -351,7 +356,7 @@ which is recut instead; `fix`, which goes back to the gate; and `revert`, which 
 _Avoid_: recovery agent, triage agent
 
 **PR writer**:
-The agent that writes the spec PR's title and summary.
+The agent that writes a ready spec PR's title and summary. A draft has none (ADR-0040).
 _Avoid_: summariser, scribe
 
 **Agent profile**:

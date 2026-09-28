@@ -259,7 +259,7 @@ describe("createRun: the end of a run", () => {
         await run(invocation("plan-and-implement"))
 
         // then
-        expect(printed).toContain("pull request: https://example.invalid/pull/1")
+        expect(printed).toContain("pull request opened: https://example.invalid/pull/1")
     })
 
     it("should exit 0 for a ready pull request over the whole spec", async () => {
@@ -276,6 +276,18 @@ describe("createRun: the end of a run", () => {
     it("should exit 1 for a draft pull request over part of one", async () => {
         // given
         const { run } = worked(PREPARED, { finished: { outcome: "opened", draft: true, url: undefined } })
+
+        // when
+        const code = await run(invocation("plan-and-implement"))
+
+        // then
+        expect(code).toBe(EXIT.partial)
+    })
+
+    it("should exit 1 for a partial spec whose draft the operator closed", async () => {
+        // given
+        const finished: FinishResult = { outcome: "left", draft: true, url: "https://example.invalid/pull/1" }
+        const { run } = worked(PREPARED, { finished })
 
         // when
         const code = await run(invocation("plan-and-implement"))

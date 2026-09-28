@@ -3,9 +3,9 @@
  * distinct and closed.
  */
 export const EXIT = {
-    /** Every ticket verified, a ready pull request opened. */
+    /** Every ticket verified, a ready pull request opened or updated. */
     complete: 0,
-    /** Some tickets failed or were skipped, a draft pull request opened. */
+    /** Some tickets not verified: a draft opened or updated, or one the operator closed left closed. */
     partial: 1,
     /**
      * The **arguments** were refused: a bad flag combination, or no terminal without an explicit
