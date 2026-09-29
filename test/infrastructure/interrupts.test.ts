@@ -110,3 +110,82 @@ describe("createSignalInterrupts", () => {
         expect(run.kills()).toBe(kills)
     })
 })
+
+// The viewer drains nothing, so a drain would be a false statement: its first interrupt is a quit
+// (ADR-0041).
+describe("createSignalInterrupts: once a viewer quits on the first interrupt", () => {
+    it("should abort the viewer's signal on the first interrupt", () => {
+        // given
+        const { interrupts, interrupt } = harness()
+        const quit = interrupts.quitOnFirst()
+
+        // when
+        interrupt()
+
+        // then
+        expect(quit.aborted).toBe(true)
+    })
+
+    it("should say nothing about draining", () => {
+        // given
+        const { interrupts, interrupt, draining } = harness()
+        interrupts.quitOnFirst()
+
+        // when
+        interrupt()
+
+        // then
+        expect(draining).toEqual([])
+    })
+
+    it("should not be draining", () => {
+        // given
+        const { interrupts, interrupt } = harness()
+        interrupts.quitOnFirst()
+
+        // when
+        interrupt()
+
+        // then
+        expect(interrupts.draining()).toBe(false)
+    })
+
+    it("should still kill on the second interrupt", () => {
+        // given
+        const run = harness()
+        run.interrupts.quitOnFirst()
+        run.interrupt()
+
+        // when
+        run.interrupt()
+
+        // then
+        expect(run.kills()).toBe(1)
+    })
+})
+
+describe("createSignalInterrupts: once the first interrupt has drained", () => {
+    it("should hand a viewer asking to quit a signal already aborted", () => {
+        // given
+        const { interrupts, interrupt } = harness()
+        interrupt()
+
+        // when
+        const quit = interrupts.quitOnFirst()
+
+        // then
+        expect(quit.aborted).toBe(true)
+    })
+
+    it("should stay draining", () => {
+        // given
+        const { interrupts, interrupt } = harness()
+        interrupt()
+
+        // when
+        interrupts.quitOnFirst()
+
+        // then
+        expect(interrupts.draining()).toBe(true)
+    })
+})

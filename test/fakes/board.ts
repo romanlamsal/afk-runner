@@ -1,16 +1,16 @@
-import type { Board, BoardView } from "../../src/domain/board.ts"
+import type { Board, BoardNotice, BoardView } from "../../src/domain/board.ts"
 
 export type FakeBoard = {
     board: Board
     /** Every view the board was shown, oldest first. The frames a test asserts on. */
     shown: BoardView[]
-    /** Every run status line the board was given, oldest first. */
-    noticed: string[]
+    /** Every notice the board was given, oldest first. */
+    noticed: BoardNotice[]
 }
 
 export const createFakeBoard = (): FakeBoard => {
     const shown: BoardView[] = []
-    const noticed: string[] = []
+    const noticed: BoardNotice[] = []
     return {
         shown,
         noticed,
@@ -18,8 +18,8 @@ export const createFakeBoard = (): FakeBoard => {
             show: view => {
                 shown.push(view)
             },
-            notice: line => {
-                noticed.push(line)
+            notice: notice => {
+                noticed.push(notice)
             },
         },
     }

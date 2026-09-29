@@ -33,6 +33,8 @@ import type { Line, Role } from "./board-span.ts"
  *   failure rather than this ticket's.
  * - `failed` is red, which is reserved for the thing that actually broke.
  * - `verified` is green, and the ticket number is the only place it is ever reached.
+ * - `draining` is the footer's `Draining`: amber, the warning family, because an interrupted run is
+ *   not going clean and has broken nothing (ADR-0041).
  */
 const ROLE_CODES: Record<Role, readonly string[]> = {
     // Not a code of its own but the terminal's own foreground, so a span with nothing to say about
@@ -46,6 +48,7 @@ const ROLE_CODES: Record<Role, readonly string[]> = {
     failed: ["31"],
     skipped: ["33"],
     verified: ["32"],
+    draining: ["33"],
 }
 
 const SET = (codes: readonly string[]): string => `\u001b[${codes.join(";")}m`
