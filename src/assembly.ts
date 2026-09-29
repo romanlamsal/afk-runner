@@ -175,7 +175,7 @@ export const assembleCli = (): Cli => {
         run: createRun({
             readAfkonfig,
             fresh: createFreshService({ cwd, git, lock, self, records, tracker, takeOver }),
-            showBoard: createShowBoardService({ cwd, git, manifests, watch }),
+            showBoard: createShowBoardService({ cwd, git, interrupts, manifests, watch }),
             start,
             drive,
             finish: createFinishService({ agent, events, git, now, tracker }),

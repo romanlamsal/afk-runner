@@ -1,6 +1,7 @@
 import { concluded } from "../domain/decide.ts"
 import { progressOf } from "../domain/events.ts"
 import type { Git } from "../domain/git.ts"
+import type { Interrupts } from "../domain/interrupts.ts"
 import type { ManifestStore } from "../domain/manifest.ts"
 import { wholeSpec } from "../domain/pull-request.ts"
 import type { WatchBoard } from "./watch.ts"
@@ -28,6 +29,8 @@ export type ShowBoardDeps = {
     /** Where afk was invoked. The run directory is this directory's git top level. */
     cwd: string
     git: Git
+    /** The operator's Ctrl-C, which quits the viewer on the first one: it has nothing to drain (ADR-0041). */
+    interrupts: Interrupts
     manifests: ManifestStore
     /** What draws the board. The same watch the runner draws through, so both redraw alike. */
     watch: WatchBoard
@@ -46,11 +49,14 @@ export type ShowBoardDeps = {
  * There is nothing to choose between watching and looking: a finished run concludes on the first
  * frame and gives the shell back, and a live one draws until it does. What it will not do is give
  * up on its own — no timeout and no idle threshold, because a slow gate and a run that stopped look
- * identical from the outside and only one of them is finished (ADR-0030).
+ * identical from the outside and only one of them is finished (ADR-0030). The operator's first Ctrl-C
+ * is how a live one is left (ADR-0041).
  */
 export const createShowBoardService =
-    ({ cwd, git, manifests, watch }: ShowBoardDeps): ShowBoard =>
+    ({ cwd, git, interrupts, manifests, watch }: ShowBoardDeps): ShowBoard =>
     async spec => {
+        // Taken before anything is awaited, so that no interrupt of the viewer is ever a drain.
+        const quit = interrupts.quitOnFirst()
         const root = await git.topLevel(cwd)
         if (root === undefined) {
             return {
@@ -70,8 +76,9 @@ export const createShowBoardService =
         }
         const manifest = stored.manifest
 
-        // The last frame drawn is the frame that stays on screen, and its log is the run's verdict.
-        const last = await watch({ root, spec, manifest }, { until: log => concluded(manifest, log) })
+        // The last frame drawn is the frame that stays on screen, and its log is the run's verdict —
+        // whether the log concluded or the operator quit.
+        const last = await watch({ root, spec, manifest }, { until: log => concluded(manifest, log), signal: quit })
 
         const tickets = manifest.tickets.map(ticket => ticket.number)
         return { outcome: "shown", whole: wholeSpec(tickets, progressOf(tickets, last)) }

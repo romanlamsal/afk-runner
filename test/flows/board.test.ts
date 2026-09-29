@@ -15,6 +15,7 @@ import { createFakeEventLog } from "../fakes/event-log.ts"
 import { createStubFinish } from "../fakes/finish.ts"
 import { createStubFresh } from "../fakes/fresh.ts"
 import { createFakeGit } from "../fakes/git.ts"
+import { createFakeInterrupts } from "../fakes/interrupts.ts"
 import { createFakeManifestStore } from "../fakes/manifest-store.ts"
 import { createStubRelease } from "../fakes/release.ts"
 import { createFakeRunLock } from "../fakes/run-lock.ts"
@@ -81,6 +82,7 @@ const harness = ({
             showBoard: createShowBoardService({
                 cwd: "/repo",
                 git: git.git,
+                interrupts: createFakeInterrupts().interrupts,
                 manifests: manifests.store,
                 watch: createWatchBoardService({
                     activity: activity.activity,

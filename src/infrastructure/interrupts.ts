@@ -31,6 +31,9 @@ const KILLING = "afk: killed. Nothing was unwound; the next start picks the run 
  * The first interrupt drains and the second kills. Draining is a courtesy — a lifecycle event is
  * written when a step *starts*, so a kill at any point leaves a state the next start can dispatch
  * on, and nothing downstream may assume a run exited cleanly.
+ *
+ * A viewer has nothing to drain, so once it has asked to quit on the first interrupt that one quits
+ * it, and the drain notice — and with it the board's `Draining` — is never given (ADR-0041).
  */
 export const createSignalInterrupts = ({
     listen,
@@ -39,16 +42,29 @@ export const createSignalInterrupts = ({
     notifyKilled,
 }: SignalInterruptDeps): Interrupts => {
     let interrupts = 0
+    let quit: AbortController | undefined
 
     listen(() => {
         interrupts += 1
-        if (interrupts === 1) {
-            notifyDraining(DRAINING)
-        } else {
+        if (interrupts > 1) {
             notifyKilled(KILLING)
             kill()
+        } else if (quit === undefined) {
+            notifyDraining(DRAINING)
+        } else {
+            quit.abort()
         }
     })
 
-    return { draining: () => interrupts > 0 }
+    return {
+        draining: () => quit === undefined && interrupts > 0,
+        quitOnFirst: () => {
+            // Too late to quit instead: the first interrupt already drained and said so.
+            if (quit === undefined && interrupts > 0) {
+                return AbortSignal.abort()
+            }
+            quit ??= new AbortController()
+            return quit.signal
+        },
+    }
 }
