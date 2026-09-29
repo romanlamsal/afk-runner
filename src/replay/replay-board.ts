@@ -140,6 +140,7 @@ const boardFor = (args: ReplayArgs): Board => {
         write: chunk => process.stdout.write(chunk),
         columns: () => args.width ?? process.stdout.columns ?? 80,
         rows: () => args.height ?? process.stdout.rows ?? 24,
+        onResize: listener => process.stdout.on("resize", listener),
     })
 }
 

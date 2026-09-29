@@ -58,11 +58,34 @@ const TALL: BoardView = {
 const linesOf = (chunk: string | undefined): readonly string[] =>
     (chunk ?? "").replace(BEGIN, "").replace(END, "").split("\n").slice(0, -1)
 
+/** Any CSI escape sequence: colour, clearing, cursor movement. */
+const ESCAPE = new RegExp(String.raw`\u001b\[[0-9;?]*[A-Za-z]`, "g")
+
+/** A line as the terminal shows it, with every escape sequence taken off. */
+const visible = (line: string): string => line.replace(ESCAPE, "")
+
+/**
+ * The writer over a terminal the test can resize: `resize` changes the window's size and then tells
+ * the writer, the way stdout's `'resize'` does.
+ */
 const harness = ({ rows = 40, columns = 80 }: { rows?: number; columns?: number } = {}) => {
     const written: string[] = []
+    const size = { rows, columns }
+    const listeners: (() => void)[] = []
     return {
         written,
-        board: createTerminalBoard({ write: chunk => written.push(chunk), columns: () => columns, rows: () => rows }),
+        resize: (to: { rows?: number; columns?: number }) => {
+            Object.assign(size, to)
+            for (const listener of listeners) {
+                listener()
+            }
+        },
+        board: createTerminalBoard({
+            write: chunk => written.push(chunk),
+            columns: () => size.columns,
+            rows: () => size.rows,
+            onResize: listener => listeners.push(listener),
+        }),
     }
 }
 
@@ -199,6 +222,7 @@ describe("createTerminalBoard", () => {
             },
             columns: () => 80,
             rows: () => 40,
+            onResize: () => undefined,
         })
 
         // when
@@ -206,6 +230,116 @@ describe("createTerminalBoard", () => {
 
         // then
         expect(drawing).not.toThrow()
+    })
+
+    it("should redraw the last view as soon as the window is resized", () => {
+        // given
+        const { written, resize, board } = harness()
+        board.show(VIEW)
+        written.length = 0
+
+        // when
+        resize({ rows: 30 })
+
+        // then
+        expect(written.at(-1)).toContain(VIEW.at)
+    })
+
+    it.each([
+        ["shortened", { rows: 8 }, (chunk: string | undefined) => linesOf(chunk).length, 7],
+        [
+            "narrowed",
+            { columns: 20 },
+            (chunk: string | undefined) => Math.max(...linesOf(chunk).map(line => visible(line).length)),
+            20,
+        ],
+    ] as const)("should fit the redraw to a window %s mid-run", (_, to, measure, limit) => {
+        // given
+        const { written, resize, board } = harness()
+        board.show(TALL)
+
+        // when
+        resize(to)
+
+        // then
+        expect(measure(written.at(-1))).toBeLessThanOrEqual(limit)
+    })
+
+    it("should rewind no further than one line fewer than the resized window", () => {
+        // given
+        const { written, resize, board } = harness()
+        board.show(TALL)
+
+        // when
+        resize({ rows: 5 })
+
+        // then
+        expect(written.at(-1)?.startsWith(`${BEGIN}${up(4)}`)).toBe(true)
+    })
+
+    it("should erase down from where it rewound to before it draws the resized frame", () => {
+        // given
+        const { written, resize, board } = harness()
+        board.show(TALL)
+
+        // when
+        resize({ rows: 5 })
+
+        // then
+        expect(written.at(-1)?.replace(UP, "").startsWith(`${BEGIN}${ERASE_DOWN}`)).toBe(true)
+    })
+
+    it("should rewind over every line it drew where the resized window can reach them all", () => {
+        // given
+        const { written, resize, board } = harness({ rows: 20 })
+        board.show(VIEW)
+        const drawn = linesOf(written.at(-1)).length
+
+        // when
+        resize({ rows: 30 })
+
+        // then
+        expect(written.at(-1)?.startsWith(`${BEGIN}${up(drawn)}${ERASE_DOWN}`)).toBe(true)
+    })
+
+    it("should swallow a terminal that fails to say its size on a resize", () => {
+        // given
+        const listeners: (() => void)[] = []
+        let gone = false
+        const board = createTerminalBoard({
+            write: () => undefined,
+            columns: () => 80,
+            rows: () => {
+                if (gone) {
+                    throw new Error("EBADF")
+                }
+                return 40
+            },
+            onResize: listener => listeners.push(listener),
+        })
+        board.show(VIEW)
+        gone = true
+
+        // when
+        const resizing = () => {
+            for (const listener of listeners) {
+                listener()
+            }
+        }
+
+        // then
+        expect(resizing).not.toThrow()
+    })
+
+    it("should write nothing for a resize before the first frame", () => {
+        // given
+        const { written, resize } = harness()
+
+        // when
+        resize({ rows: 10 })
+
+        // then
+        expect(written).toEqual([])
     })
 
     it("should write nothing for a notice that arrives before the first frame", () => {

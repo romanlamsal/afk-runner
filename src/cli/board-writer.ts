@@ -12,7 +12,8 @@ import { widthOf } from "./board-span.ts"
  * A frame is fitted to the window before it is drawn, one line shorter than the terminal, so that
  * cursor-up always reaches the frame's first line and no redraw pushes a line into scrollback
  * (ADR-0041). Each frame is one synchronized write and no line is cleared before it is rewritten, so
- * the terminal never shows a half-drawn board.
+ * the terminal never shows a half-drawn board. A resize redraws the last view at once, fitted to the
+ * new size.
  *
  * It never throws and it never clears on its way out: a terminal write must not be able to fail a
  * run, and the last frame is the run's summary, so it stays on screen once the run ends.
@@ -25,6 +26,8 @@ export type TerminalBoardDeps = {
     columns: () => number
     /** The terminal's height, asked for every frame for the same reason. */
     rows: () => number
+    /** Where the writer hears that the window was resized: stdout's `'resize'`, on a terminal. */
+    onResize: (listener: () => void) => void
 }
 
 const ESC = "\u001b"
@@ -34,7 +37,7 @@ const ERASE_DOWN = `${ESC}[J`
 const BEGIN_FRAME = `${ESC}[?2026h`
 const END_FRAME = `${ESC}[?2026l`
 
-export const createTerminalBoard = ({ write, columns, rows }: TerminalBoardDeps): Board => {
+export const createTerminalBoard = ({ write, columns, rows, onResize }: TerminalBoardDeps): Board => {
     let drawn = 0
     /** Where the window is scrolled to, clamped by every frame. It opens at the board's first row. */
     let offset = 0
@@ -42,12 +45,20 @@ export const createTerminalBoard = ({ write, columns, rows }: TerminalBoardDeps)
     let shown: BoardView | undefined
     let notice: string | undefined
 
-    const draw = (view: BoardView): void => {
+    /**
+     * A resized frame starts from no higher than the new window reaches: a shortened window has
+     * already pushed whatever was above that into scrollback, where it stays, once (ADR-0041). The
+     * terminal may have rewrapped or moved what is left, so it is erased before the frame goes down
+     * rather than overwritten line by line. The offset is re-clamped by the frame against the new
+     * height.
+     */
+    const draw = (view: BoardView, { resized }: { resized: boolean }): void => {
         try {
             // The frame lays out plain text and says what each part is to be read at; the colour
             // goes on here, after every width has been computed (ADR-0031).
             const width = columns()
-            const framed = boardWindow(view, { width, rows: rows(), offset, notice })
+            const height = rows()
+            const framed = boardWindow(view, { width, rows: height, offset, notice })
             // A line as wide as the terminal has overwritten all of the old one already, and leaves
             // the cursor waiting to wrap on its last column, where clearing to the end would erase
             // the line's own last character.
@@ -56,7 +67,8 @@ export const createTerminalBoard = ({ write, columns, rows }: TerminalBoardDeps)
                 .join("")
             // A frame shorter than the last leaves the last one's tail below it, erased once the new
             // lines are down rather than before them.
-            write(`${BEGIN_FRAME}${up(drawn)}${body}${ERASE_DOWN}${END_FRAME}`)
+            const rewind = resized ? `${up(Math.min(drawn, height - 1))}${ERASE_DOWN}` : up(drawn)
+            write(`${BEGIN_FRAME}${rewind}${body}${ERASE_DOWN}${END_FRAME}`)
             drawn = framed.lines.length
             offset = framed.offset
             shown = view
@@ -65,14 +77,21 @@ export const createTerminalBoard = ({ write, columns, rows }: TerminalBoardDeps)
         }
     }
 
+    // A resize redraws at once rather than on the next frame.
+    onResize(() => {
+        if (shown !== undefined) {
+            draw(shown, { resized: true })
+        }
+    })
+
     return {
-        show: draw,
+        show: view => draw(view, { resized: false }),
         notice: line => {
             notice = line
             // Redrawn on the spot rather than left for the next pass: a step can run for minutes,
             // and an operator who sees nothing for their interrupt sends the one that kills.
             if (shown !== undefined) {
-                draw(shown)
+                draw(shown, { resized: false })
             }
         },
     }
