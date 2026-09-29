@@ -267,8 +267,9 @@ come to none.
 _Avoid_: result, final status, verdict
 
 **Board**:
-What a run shows while it runs: every ticket of the spec at once, one row each, so its height is the
-ticket count. A row is the ticket's number, its trail, and — where a step is running — how long that
+What a run shows while it runs: every ticket of the spec, one row each, then its notices and its
+footer. On a terminal too short for it and for what afk printed around it, the operator scrolls the
+whole; only the footer stays put. Once the run is over it is drawn once more, whole. A row is the ticket's number, its trail, and — where a step is running — how long that
 step has been going (`| 58s`); where its ticket is blocked, what it is blocked by; a row with
 neither ends at its trail. Derived from the run directory and an instant handed in, never from the
 driver's in-flight set: a step the log left `running` is one whose end event is not written rather
@@ -277,6 +278,18 @@ ADR-0034). Whether that step is still writing is carried by colour: a step gone 
 warning. Nothing about it is written down, and `afk <spec> --board-only` and a replay draw the same
 board from the same run directory.
 _Avoid_: dashboard, monitor, progress view, TUI
+
+**Footer**:
+The board's last line, always in view however far it is scrolled: when the last event happened,
+prefixed `Error` once afk has reported one while the board was showing, and `Draining` once the
+operator has interrupted the run — in that order whichever came first, so its words never move. Both
+prefixes stay for the rest of the run.
+_Avoid_: status line, status bar
+
+**Notice**:
+A line the run says about itself while the board is showing — the drain notice, an error — shown
+under the board's rows in the order it arrived.
+_Avoid_: message, alert, toast
 
 **Trail**:
 The steps on a board's row: every step of the run, in the order a ticket takes them, and the same on

@@ -1,5 +1,5 @@
 ---
-status: accepted, extended by ADR-0034
+status: accepted, extended by ADR-0034, amended by ADR-0041
 ---
 
 # The trail's text never changes, and colour carries the state
