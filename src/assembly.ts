@@ -69,6 +69,7 @@ export const assembleCli = (): Cli => {
         ? createTerminalBoard({
               write: chunk => process.stdout.write(chunk),
               columns: () => process.stdout.columns ?? 80,
+              rows: () => process.stdout.rows ?? 24,
           })
         : createLineBoard({ print })
 

@@ -27,14 +27,17 @@ import { type Line, plain, type Role, type Span, widthOf } from "./board-span.ts
  * shrinks while somebody is reading it. That is also why a row is cut rather than wrapped on a
  * terminal too narrow to hold it: a wrapped row would break the one property the layout rests on.
  *
- * Under the block sits the footer, which carries what is about the run rather than about a ticket:
- * when the last thing happened, and beneath that the drain notice when there is one. The footer may
- * grow, and growing costs nothing — the writer rewinds over the lines it last drew, so a line
- * appended at the bottom moves no row above it.
+ * Under the block sit the notices, what the run says about itself rather than about a ticket, and
+ * under those the footer: when the last thing happened. A notice appended under the rows moves no row
+ * above it, and the writer rewinds over the lines it last drew, so the frame growing costs nothing.
  *
- * A footer line too wide for the terminal is wrapped here rather than truncated or left to the
- * terminal: half an interrupt acknowledgement is the wrong thing to show, and a line the terminal
+ * A notice or footer line too wide for the terminal is wrapped here rather than truncated or left to
+ * the terminal: half an interrupt acknowledgement is the wrong thing to show, and a line the terminal
  * wrapped would occupy two rows while counting as one, which puts every later redraw out by a line.
+ *
+ * On a terminal too short for the frame, the frame is fitted to a window (`boardWindow`): the rows and
+ * notices are scrolled, and the footer is pinned as the window's last line (ADR-0041). The whole frame
+ * is what the window is cut from.
  */
 
 /** What a settled step came to, as the role it is read as. A step that simply worked is plain. */
@@ -268,14 +271,79 @@ const rowLine = (row: BoardRow, width: number): Line => {
     )
 }
 
+/** The rows and the notices under them: everything a window scrolls. */
+const contentOf = (view: BoardView, width: number, notice: string | undefined): readonly Line[] => [
+    ...view.rows.map(row => rowLine(row, width)),
+    ...(notice === undefined ? [] : wrapped(notice, width)),
+]
+
+/** The footer's text, and nothing where the log holds no event to have it from. */
+const footerOf = (view: BoardView): string | undefined => (view.at === undefined ? undefined : `${WHEN} ${view.at}`)
+
 /**
+ * The whole frame: every row, the notice under them, and the footer last.
+ *
  * @param notice What the run has to say about itself, if anything. It is not part of the view
  * because it is not derived from the run's state: it arrives from whoever had something to say.
  */
 export const boardFrame = (view: BoardView, width: number, notice?: string): readonly Line[] => {
-    const rows = view.rows.map(row => rowLine(row, width))
+    const footer = footerOf(view)
+    return [...contentOf(view, width, notice), ...(footer === undefined ? [] : wrapped(footer, width))]
+}
 
-    const footer = [...(view.at === undefined ? [] : [`${WHEN} ${view.at}`]), ...(notice === undefined ? [] : [notice])]
+/** What the window is asked to be: the terminal's size, where the operator has scrolled to, and the notice. */
+export type BoardWindow = {
+    width: number
+    /** The terminal's rows. The window is one fewer, so the cursor's trailing line never scrolls it. */
+    rows: number
+    /** How many content lines are scrolled off the top, counted from the board's first row. */
+    offset: number
+    notice?: string | undefined
+}
 
-    return [...rows, ...footer.flatMap(line => wrapped(line, width))]
+/** A fitted frame, and the offset it was drawn at once clamped into range, for the next one to start from. */
+export type Windowed = {
+    lines: readonly Line[]
+    offset: number
+}
+
+/** What stands in for the lines hidden above or below, in the content line it takes. */
+const marker = (arrow: "↑" | "↓", hidden: number, width: number): Line =>
+    fitted([plain(`${arrow} ${hidden} more`)], width)
+
+/**
+ * The frame fitted to a window of `rows - 1` lines: the content sliced from `offset`, a marker
+ * wherever some of it is hidden, and the footer pinned as the last line (ADR-0041).
+ *
+ * The footer keeps its line before the log holds any event, so the window's height does not change
+ * when the first one arrives. A marker takes a content line rather than a line of its own, which is
+ * why the last offset is one past where the content would end on a window with no marker at all.
+ */
+export const boardWindow = (view: BoardView, { width, rows, offset, notice }: BoardWindow): Windowed => {
+    const room = Math.max(rows - 1, 0)
+    // A window too short even for the footer keeps what of its end it can hold.
+    const whole = wrapped(footerOf(view) ?? "", width)
+    const footer = whole.slice(Math.max(whole.length - room, 0))
+    const content = contentOf(view, width, notice)
+    const space = room - footer.length
+
+    if (content.length <= space) {
+        return { lines: [...content, ...footer], offset: 0 }
+    }
+
+    // At the last offset the top marker is the only one, so one line fewer than the space is shown.
+    const last = Math.max(content.length - Math.max(space - 1, 1), 0)
+    const from = Math.min(Math.max(offset, 0), last)
+    const above = from > 0
+    const below = from + space - (above ? 1 : 0) < content.length
+    const shown = content.slice(from, from + Math.max(space - (above ? 1 : 0) - (below ? 1 : 0), 0))
+    const hidden = content.length - from - shown.length
+
+    const lines = [
+        ...(above ? [marker("↑", from, width)] : []),
+        ...shown,
+        ...(below ? [marker("↓", hidden, width)] : []),
+    ].slice(0, Math.max(space, 0))
+
+    return { lines: [...lines, ...footer], offset: from }
 }

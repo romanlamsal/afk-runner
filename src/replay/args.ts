@@ -18,12 +18,14 @@ export type ReplayArgs = {
     speed: number | undefined
     /** The width to fit frames to, for replaying a wide run's board into a narrow one. */
     width: number | undefined
+    /** The height to fit frames to, for replaying a tall run's board into a short window. */
+    height: number | undefined
     /** Draw the line board on a terminal too: what a pipe or a CI log would have seen. */
     lines: boolean
 }
 
 export const USAGE =
-    "afk-replay [<events.jsonl>] [--spec <n>] [--manifest <path>] [--interval <ms>] [--speed <factor>] [--lines] [--width <n>]"
+    "afk-replay [<events.jsonl>] [--spec <n>] [--manifest <path>] [--interval <ms>] [--speed <factor>] [--lines] [--width <n>] [--height <n>]"
 
 export const parseReplayArgs = (argv: string[]): ReplayArgs => {
     const parsed = cli(
@@ -62,6 +64,11 @@ export const parseReplayArgs = (argv: string[]): ReplayArgs => {
                     description: "Fit frames to this width instead of the terminal's",
                     placeholder: "<n>",
                 },
+                height: {
+                    type: Number,
+                    description: "Fit frames to this height instead of the terminal's",
+                    placeholder: "<n>",
+                },
             },
             help: { description: "Replays an afk event log as the board that run drew.", usage: USAGE },
         },
@@ -78,6 +85,7 @@ export const parseReplayArgs = (argv: string[]): ReplayArgs => {
         interval: parsed.flags.interval,
         speed: parsed.flags.speed,
         width: parsed.flags.width,
+        height: parsed.flags.height,
         lines: parsed.flags.lines,
     }
 }

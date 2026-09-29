@@ -139,6 +139,7 @@ const boardFor = (args: ReplayArgs): Board => {
     return createTerminalBoard({
         write: chunk => process.stdout.write(chunk),
         columns: () => args.width ?? process.stdout.columns ?? 80,
+        rows: () => args.height ?? process.stdout.rows ?? 24,
     })
 }
 

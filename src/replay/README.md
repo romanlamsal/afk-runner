@@ -24,6 +24,7 @@ carry their numbers and their figures, and claim no silence they cannot see.
 node src/replay/replay-board.ts .afk/37/events.jsonl        # 150ms a frame
 node src/replay/replay-board.ts --spec 37 --speed 120       # the run's own pace, two minutes a second
 node src/replay/replay-board.ts --spec 37 --lines           # what a CI log saw
+node src/replay/replay-board.ts --spec 37 --height 13       # fitted to a short pane
 ```
 
 See `docs/agents/layers.md` for the layers this sits outside of.
