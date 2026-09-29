@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { createLineBoard, createTerminalBoard } from "../../src/cli/board-writer.ts"
+import { createLineBoard, createTerminalBoard, type TerminalBoard } from "../../src/cli/board-writer.ts"
 import type { BoardNotice, BoardRow, BoardView } from "../../src/domain/board.ts"
 
 /**
@@ -47,6 +47,12 @@ const ROW: BoardRow = {
 const VIEW: BoardView = { at: "2026-09-15T11:18:38.314Z", rows: [ROW] }
 
 const DRAINING: BoardNotice = { kind: "draining", line: "afk: interrupted — starting nothing new" }
+
+const ERROR: BoardNotice = { kind: "error", line: "afk: halted" }
+
+/** Says a notice the way its caller does: an error through `error`, the drain notice through `notice`. */
+const say = (board: TerminalBoard, notice: BoardNotice): void =>
+    notice.kind === "error" ? board.error(notice.line) : board.notice(notice)
 
 /** Thirteen tickets, which is the spec whose board leaked into scrollback (#66). */
 const TALL: BoardView = {
@@ -508,6 +514,58 @@ describe("createTerminalBoard: printed lines", () => {
 
         // then
         expect(linesOf(written.at(-1))).toContain(`afk: halted${CLEAR_TO_END}`)
+    })
+
+    it.each([
+        ["an error", [ERROR], `Error - last event ${VIEW.at}`],
+        ["an error, then the drain notice", [ERROR, DRAINING], `Error - Draining - last event ${VIEW.at}`],
+        ["the drain notice, then an error", [DRAINING, ERROR], `Error - Draining - last event ${VIEW.at}`],
+    ] as const)("should prefix the footer with Error once %s was said", (_, said, expected) => {
+        // given
+        const { written, board } = harness()
+        board.show(VIEW)
+        for (const notice of said) {
+            say(board, notice)
+        }
+
+        // when
+        board.show(VIEW)
+
+        // then
+        expect(visible(linesOf(written.at(-1)).at(-1) ?? "")).toBe(expected)
+    })
+
+    it.each([
+        ["drain notice first", [DRAINING, ERROR]],
+        ["error first", [ERROR, DRAINING]],
+    ] as const)("should draw the error and the drain notice in arrival order, %s", (_, said) => {
+        // given
+        const { written, board } = harness()
+        board.show(VIEW)
+        for (const notice of said) {
+            say(board, notice)
+        }
+
+        // when
+        board.print(LINK)
+
+        // then
+        expect(linesOf(written.at(-1)).slice(1, 4)).toEqual(
+            [...said.map(notice => notice.line), LINK].map(line => `${line}${CLEAR_TO_END}`),
+        )
+    })
+
+    it("should paint the error notice and its footer prefix at the end", () => {
+        // given
+        const { written, board } = harness()
+        board.show(VIEW)
+        board.error("afk: halted")
+
+        // when
+        board.end()
+
+        // then
+        expect(linesOf(written.at(-1)).slice(1).map(visible)).toEqual([`Error - last event ${VIEW.at}`, "afk: halted"])
     })
 
     it("should keep an error line said while the board is showing on stderr where stderr is elsewhere", () => {

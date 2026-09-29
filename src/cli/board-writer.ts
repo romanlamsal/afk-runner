@@ -18,7 +18,8 @@ import { type Line, widthOf } from "./board-span.ts"
  * Every line afk prints in the process goes through it too. Before the first frame a line is written
  * through and remembered; at the first frame, the ones cursor-up still reaches are rewound over and
  * drawn as the window's content above the board, and from then on a printed line is drawn under
- * the notice rather than written into the middle of a frame (ADR-0041).
+ * the notices rather than written into the middle of a frame, and an error line becomes a notice
+ * (ADR-0041).
  *
  * It never throws and it never clears on its way out: a terminal write must not be able to fail a
  * run, and the last frame is the run's summary. `end` paints it once more, whole and unclipped, and
@@ -50,7 +51,10 @@ export type TerminalBoardDeps = {
 export type TerminalBoard = Board & {
     /** A line for stdout. Before the first frame it is written through; from it, drawn with the board. */
     print: (line: string) => void
-    /** A line for stderr, drawn with the board as a printed line is while the board is showing. */
+    /**
+     * A line for stderr. While the board is showing it is a notice under the rows instead, and sets
+     * the footer's `Error` prefix; it stays on stderr too where stderr is not this terminal.
+     */
     error: (line: string) => void
     /**
      * The board's last paint, whole and unclipped, and the terminal given back. A process that never
@@ -171,6 +175,18 @@ export const createTerminalBoard = ({
         }
     }
 
+    /**
+     * A notice joins the ones under the rows and is drawn on the spot rather than left for the next
+     * pass: a step can run for minutes, and an operator who sees nothing for their interrupt sends
+     * the one that kills.
+     */
+    const addNotice = (given: BoardNotice): void => {
+        notices.push(given)
+        if (phase === "showing" && shown !== undefined) {
+            draw(shown, { resized: false })
+        }
+    }
+
     // A resize redraws at once rather than on the next frame. Once the board has ended, its whole
     // last paint is what stays on screen, and nothing redraws over it.
     onResize(() => {
@@ -185,14 +201,7 @@ export const createTerminalBoard = ({
                 draw(view, { resized: false })
             }
         },
-        notice: given => {
-            notices.push(given)
-            // Redrawn on the spot rather than left for the next pass: a step can run for minutes,
-            // and an operator who sees nothing for their interrupt sends the one that kills.
-            if (phase === "showing" && shown !== undefined) {
-                draw(shown, { resized: false })
-            }
-        },
+        notice: addNotice,
         print: line => {
             if (phase === "showing") {
                 append(line)
@@ -213,7 +222,9 @@ export const createTerminalBoard = ({
                 safely(() => writeError(`${line}\n`))
                 return
             }
-            append(line)
+            // A notice rather than a printed line: it sets the footer's `Error` prefix, which is what
+            // tells an operator scrolled away from it that there is something to scroll to.
+            addNotice({ kind: "error", line })
             if (errorsElsewhere) {
                 safely(() => writeError(`${line}\n`))
             }
