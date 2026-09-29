@@ -57,6 +57,12 @@ export type TerminalBoard = Board & {
      */
     error: (line: string) => void
     /**
+     * A line a prompt drew itself, as it stands once its readline has closed: `setup:  pnpm i`. It is
+     * on screen already, so nothing is written; it is remembered as a printed line in its place, so
+     * the first frame rewinds over it and scrolls it with the rest (ADR-0041).
+     */
+    answered: (line: string) => void
+    /**
      * The board's last paint, whole and unclipped, and the terminal given back. A process that never
      * showed a board has nothing to paint, and every line after it is written through again.
      */
@@ -211,6 +217,12 @@ export const createTerminalBoard = ({
                 before.push(line)
             }
             safely(() => write(`${line}\n`))
+        },
+        answered: line => {
+            // Every prompt is closed before the board's first frame, so only then is there one to count.
+            if (phase === "before") {
+                before.push(line)
+            }
         },
         error: line => {
             if (phase !== "showing") {

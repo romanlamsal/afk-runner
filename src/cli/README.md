@@ -22,9 +22,10 @@ three pieces with one seam between each (ADR-0031).
 - **The writer** (`board-writer.ts`) holds the cursor and the lines around the board: it rewinds
   over the lines it last drew, writes the coloured ones, and swallows a write that fails, because a
   terminal that went away is not a run that failed. On a terminal it is the adapter every line afk
-  prints goes through, so the lines before the board, its rows and notices, and the lines after it
-  scroll as one; an error said while the board shows is one of its notices. Its `end` paints the
-  board once more, whole, once the cli returns (ADR-0041). Off a
+  prints goes through, so the lines before the board (the prompt answers readline drew included,
+  handed on by the operator once answered), its rows and notices, and the lines after it scroll as
+  one; an error said while the board shows is one of its notices. Its `end` paints the board once
+  more, whole, once the cli returns (ADR-0041). Off a
   terminal the second adapter of the same port runs, and it prints `board-lines.ts` — one line per
   row the next view changed.
 

@@ -479,6 +479,85 @@ describe("createTerminalBoard: printed lines", () => {
         expect(linesOf(written.at(-1))[0]).toBe(`↑ ${SUMMARY.length} more${CLEAR_TO_END}`)
     })
 
+    it("should write nothing for a prompt's answer, which the prompt drew already", () => {
+        // given
+        const { written, board } = harness()
+
+        // when
+        board.answered("setup:  pnpm i")
+
+        // then
+        expect(written).toEqual([])
+    })
+
+    it("should rewind over a prompt's answer at the first frame, as over a printed line", () => {
+        // given
+        const { written, board } = harness()
+        board.print("! main is 2 commits behind origin/main")
+        board.answered("setup:  pnpm i")
+        board.answered("verify: pnpm check")
+
+        // when
+        board.show(VIEW)
+
+        // then
+        expect(written.at(-1)?.startsWith(`${BEGIN}${up(3)}`)).toBe(true)
+    })
+
+    it("should draw a prompt's answer in its place among the printed lines above the rows", () => {
+        // given
+        const { written, board } = harness()
+        board.print("! main is 2 commits behind origin/main")
+        board.answered("setup:  pnpm i")
+        board.answered("verify: pnpm check")
+        board.print(SUMMARY[0] ?? "")
+
+        // when
+        board.show(VIEW)
+
+        // then
+        expect(linesOf(written.at(-1)).slice(0, 4)).toEqual(
+            ["! main is 2 commits behind origin/main", "setup:  pnpm i", "verify: pnpm check", SUMMARY[0]].map(
+                line => `${line}${CLEAR_TO_END}`,
+            ),
+        )
+    })
+
+    it("should take back on a short window only what cursor-up reaches, prompt answers counted", () => {
+        // given
+        const { written, board } = harness({ rows: 8 })
+        for (let line = 0; line < 5; line++) {
+            board.print(`line ${line}`)
+        }
+        board.answered("setup:  pnpm i")
+        board.answered("verify: pnpm check")
+        board.print(SUMMARY[0] ?? "")
+        board.show(VIEW)
+
+        // when
+        board.end()
+
+        // then
+        expect(linesOf(written.at(-1)).slice(0, 7)).toEqual(
+            ["line 1", "line 2", "line 3", "line 4", "setup:  pnpm i", "verify: pnpm check", SUMMARY[0]].map(
+                line => `${line}${CLEAR_TO_END}`,
+            ),
+        )
+    })
+
+    it("should write nothing for a prompt's answer after the first frame", () => {
+        // given
+        const { written, board } = harness()
+        board.show(VIEW)
+        const drawn = written.length
+
+        // when
+        board.answered("setup:  pnpm i")
+
+        // then
+        expect(written.length).toBe(drawn)
+    })
+
     it("should draw a line printed after the first frame as a frame, never into one", () => {
         // given
         const { written, board } = harness()

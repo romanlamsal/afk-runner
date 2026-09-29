@@ -112,7 +112,14 @@ export const assembleCli = (): Cli => {
     // Whether there is somebody at the terminal to answer a question. Decided once, so that the
     // invocation's rules and the takeover's offer cannot disagree about it (ADR-0014, ADR-0035).
     const interactive = process.stdin.isTTY === true
-    const operator = createTerminalOperator({ input: process.stdin, output: process.stdout, print })
+    // readline draws a prompt's lines itself, so the operator hands them on once answered, and on a
+    // terminal the board counts them in their place among the printed lines (ADR-0041).
+    const operator = createTerminalOperator({
+        input: process.stdin,
+        output: process.stdout,
+        print,
+        answered: terminal?.answered ?? (() => undefined),
+    })
     // Only ever offered where somebody can answer it: off a terminal, a live holder is a refusal and
     // nothing else (ADR-0035).
     const takeOver = createTakeOverService({
