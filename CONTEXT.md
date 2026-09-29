@@ -269,7 +269,9 @@ _Avoid_: result, final status, verdict
 **Board**:
 What a run shows while it runs: every ticket of the spec, one row each, then its notices and its
 footer. On a terminal too short for it and for what afk printed around it, the operator scrolls the
-whole; only the footer stays put. Once the run is over it is drawn once more, whole. A row is the ticket's number, its trail, and — where a step is running — how long that
+whole; only the footer stays put. It has the terminal's alternate screen to itself while it runs,
+and once the run is over it is drawn once more, whole, on the main screen. A row is the ticket's
+number, its trail, and — where a step is running — how long that
 step has been going (`| 58s`); where its ticket is blocked, what it is blocked by; a row with
 neither ends at its trail. Derived from the run directory and an instant handed in, never from the
 driver's in-flight set: a step the log left `running` is one whose end event is not written rather

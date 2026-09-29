@@ -1,35 +1,34 @@
 import type { Key } from "node:readline"
 import type { Board, BoardNotice, BoardView } from "../domain/board.ts"
-import { boardWhole, boardWindow, printedLines } from "./board-frame.ts"
+import { type BoardWindow, boardWhole, boardWindow, offsetAbove } from "./board-frame.ts"
 import { boardLines } from "./board-lines.ts"
 import { painted } from "./board-paint.ts"
 import { type Line, widthOf } from "./board-span.ts"
 
 /**
- * The writer: the impure half of the board, and the only thing that owns the cursor. It redraws the
- * block in place — cursor up over what it drew last, then every line overwritten and cleared to its
- * end — which is all a board with no animation and no clock needs.
+ * The writer: the impure half of the board, and the only thing that owns the cursor. It draws the
+ * board on the alternate screen, every frame from its top-left corner with every line overwritten and
+ * cleared to its end, which is all a board with no animation and no clock needs. That screen has no
+ * scrollback, so neither a redraw nor a resize can push a line into the operator's (ADR-0042).
  *
- * A frame is fitted to the window before it is drawn, one line shorter than the terminal, so that
- * cursor-up always reaches the frame's first line and no redraw pushes a line into scrollback
- * (ADR-0041). Each frame is one synchronized write and no line is cleared before it is rewritten, so
- * the terminal never shows a half-drawn board. A resize redraws the last view at once, fitted to the
- * new size.
+ * A frame is fitted to the window before it is drawn, one line shorter than the terminal, so that the
+ * newline after its last line never scrolls it (ADR-0041). Each frame is one synchronized write and
+ * no line is cleared before it is rewritten, so the terminal never shows a half-drawn board. A resize
+ * redraws the last view at once, fitted to the new size.
  *
  * Every line afk prints in the process goes through it too. Before the first frame a line is written
- * through and remembered; at the first frame, the ones cursor-up still reaches are rewound over and
- * drawn as the window's content above the board, and from then on a printed line is drawn under
- * the notices rather than written into the middle of a frame, and an error line becomes a notice
- * (ADR-0041).
+ * through to the main screen and remembered, and from the first frame on it is drawn as the window's
+ * content above the board. A line printed after it is drawn under the notices rather than written
+ * into the middle of a frame, and an error line becomes a notice (ADR-0041).
  *
  * From the first frame it takes the operator's keys, where stdin is a terminal: ↑/↓ scroll a line and
  * Home/End jump to either end, redrawn at once. Raw mode keeps Ctrl-C from being a signal, so it is
  * forwarded as the process's own, and the interrupt handling stays as it is (ADR-0016). The cursor
  * is hidden from the first frame, and shown again at the end or on an exit however it comes.
  *
- * It never throws and it never clears on its way out: a terminal write must not be able to fail a
- * run, and the last frame is the run's summary. `end` paints it once more, whole and unclipped, and
- * it stays on screen once the run ends.
+ * It never throws: a terminal write must not be able to fail a run. The last frame is the run's
+ * summary, so `end` goes back to the main screen, where the lines printed before the board still are,
+ * and paints the rest under them once more, whole and unclipped; an exit before the end does the same.
  */
 
 export type TerminalBoardDeps = {
@@ -85,7 +84,7 @@ export type TerminalBoard = Board & {
     /**
      * A line a prompt drew itself, as it stands once its readline has closed: `setup:  pnpm i`. It is
      * on screen already, so nothing is written; it is remembered as a printed line in its place, so
-     * the first frame rewinds over it and scrolls it with the rest (ADR-0041).
+     * the window scrolls it with the rest (ADR-0041).
      */
     answered: (line: string) => void
     /**
@@ -96,19 +95,32 @@ export type TerminalBoard = Board & {
 }
 
 const ESC = "\u001b"
-const up = (lines: number): string => (lines > 0 ? `${ESC}[${lines}A` : "")
 const CLEAR_TO_END = `${ESC}[K`
 const ERASE_DOWN = `${ESC}[J`
 const BEGIN_FRAME = `${ESC}[?2026h`
 const END_FRAME = `${ESC}[?2026l`
 const HIDE_CURSOR = `${ESC}[?25l`
 const SHOW_CURSOR = `${ESC}[?25h`
+const ALTERNATE_SCREEN = `${ESC}[?1049h`
+const MAIN_SCREEN = `${ESC}[?1049l`
+const HOME = `${ESC}[H`
 
-/** Where a scroll key moves the offset, which the frame clamps into range: Home and End go past either end. */
-const scrolled = (key: Key, offset: number): number | undefined => {
+/**
+ * Lines as they are written: each overwrites what was there and clears the rest of its row. A line
+ * as wide as the terminal has overwritten all of the old one already, and leaves the cursor waiting
+ * to wrap on its last column, where clearing to the end would erase the line's own last character.
+ */
+const bodyOf = (lines: readonly Line[], width: number): string =>
+    lines.map(line => `${painted(line)}${widthOf(line) < width ? CLEAR_TO_END : ""}\n`).join("")
+
+/**
+ * Where a scroll key moves the offset, which the frame clamps into range: Home and End go past either
+ * end. One line up is the frame's to say, since a wrapped line is one stop rather than several.
+ */
+const scrolled = (key: Key, offset: number, lineUp: () => number): number | undefined => {
     switch (key.name) {
         case "up":
-            return offset - 1
+            return lineUp()
         case "down":
             return offset + 1
         case "home":
@@ -135,9 +147,6 @@ export const createTerminalBoard = ({
     onExit,
 }: TerminalBoardDeps): TerminalBoard => {
     let phase: Phase = "before"
-    /** Hidden by the first frame, and shown again only once. */
-    let cursorHidden = false
-    let drawn = 0
     /**
      * Where the window is scrolled to, clamped by every frame. Nothing until the first, which opens
      * at the board's first row.
@@ -147,8 +156,8 @@ export const createTerminalBoard = ({
     let shown: BoardView | undefined
     /** Every notice given, oldest first. Each stays, and so does the footer prefix it set. */
     const notices: BoardNotice[] = []
-    /** Everything printed before the first frame, until it; then only what cursor-up could still reach. */
-    let before: string[] = []
+    /** Everything printed before the first frame, which stays on the main screen under the board. */
+    const before: string[] = []
     const after: string[] = []
 
     /** A write that fails is swallowed: a terminal that went away is not a run that failed (ADR-0029). */
@@ -161,87 +170,68 @@ export const createTerminalBoard = ({
     }
 
     /**
-     * The lines printed before the board that the first frame can take back, and the rows they take:
-     * the last of them, as many as fit in the rows cursor-up reaches. The rest are in real scrollback
-     * already, and drawing them again would say them twice.
+     * One frame, on the alternate screen and from its top-left corner: every line overwritten and
+     * cleared to its end, and what is left below erased. The first one switches to that screen and
+     * hides the cursor, in the same write.
+     *
+     * The alternate screen has no scrollback, so no frame — and no resize, however many rows it
+     * takes away at a time — can push a line of it into the operator's (ADR-0042). The lines printed
+     * before the board stay where they are on the main screen, which the last paint returns to.
      */
-    const reachable = (width: number): { lines: string[]; rows: number } => {
-        const reach = Math.max(rows() - 1, 0)
-        let taken = 0
-        let from = before.length
-        while (from > 0) {
-            const height = printedLines(before[from - 1] ?? "", width).length
-            if (taken + height > reach) {
-                break
-            }
-            taken += height
-            from -= 1
-        }
-        return { lines: before.slice(from), rows: taken }
-    }
+    const frame = (lines: readonly Line[], width: number, { first }: { first: boolean }): void =>
+        paint(`${first ? `${ALTERNATE_SCREEN}${HIDE_CURSOR}` : ""}${HOME}`, lines, width, "")
 
     /**
-     * One frame, replacing what is above it: rewound over, every line overwritten, and what is left
-     * erased.
-     *
-     * A resized frame starts from no higher than the new window reaches: a shortened window has
-     * already pushed whatever was above that into scrollback, where it stays, once (ADR-0041). The
-     * terminal may have rewrapped or moved what is left, so it is erased before the frame goes down
-     * rather than overwritten line by line.
+     * Lines written in one synchronized write, what switches the screen or moves the cursor before
+     * them, and what shows the cursor after, so that none of it is a write of its own.
      */
-    const frame = (
-        lines: readonly Line[],
-        width: number,
-        {
-            rewind,
-            resized,
-            first = false,
-            last = false,
-        }: { rewind: number; resized: boolean; first?: boolean; last?: boolean },
-    ): void => {
-        // A line as wide as the terminal has overwritten all of the old one already, and leaves the
-        // cursor waiting to wrap on its last column, where clearing to the end would erase the line's
-        // own last character.
-        const body = lines.map(line => `${painted(line)}${widthOf(line) < width ? CLEAR_TO_END : ""}\n`).join("")
-        // A frame shorter than the last leaves the last one's tail below it, erased once the new lines
-        // are down rather than before them.
-        const back = resized ? `${up(Math.min(rewind, rows() - 1))}${ERASE_DOWN}` : up(rewind)
-        // The cursor is hidden and shown as part of the frame it goes with, so that it is one write.
-        write(
-            `${BEGIN_FRAME}${back}${first ? HIDE_CURSOR : ""}${body}${ERASE_DOWN}${last ? SHOW_CURSOR : ""}${END_FRAME}`,
-        )
-        drawn = lines.length
-    }
+    const paint = (lead: string, lines: readonly Line[], width: number, trail: string): void =>
+        write(`${BEGIN_FRAME}${lead}${bodyOf(lines, width)}${ERASE_DOWN}${trail}${END_FRAME}`)
 
-    /** The offset is re-clamped by the frame, against the new height where the window was resized. */
-    const draw = (view: BoardView, { resized }: { resized: boolean }): void =>
+    /** The window as it is now, scrolled to `at`. */
+    const windowOf = (at: number | undefined): BoardWindow => ({
+        width: columns(),
+        rows: rows(),
+        offset: at,
+        notices,
+        before,
+        after,
+    })
+
+    /** The offset is re-clamped by the frame, against the new size where the window was resized. */
+    const draw = (view: BoardView): void =>
         safely(() => {
             // The frame lays out plain text and says what each part is to be read at; the colour
             // goes on here, after every width has been computed (ADR-0031).
             const width = columns()
-            // The first frame takes back what it rewinds over, and only once it is down: a frame that
-            // failed to write rewound over nothing, and the lines before it are still where they were.
+            // A first frame that failed to write switched to nothing, and the board is not showing.
             const first = phase === "before"
-            const taken = first ? reachable(width) : { lines: before, rows: drawn }
-            const framed = boardWindow(view, { width, rows: rows(), offset, notices, before: taken.lines, after })
-            frame(framed.lines, width, { rewind: taken.rows, resized, first })
-            before = taken.lines
+            const framed = boardWindow(view, windowOf(offset))
+            frame(framed.lines, width, { first })
             phase = "showing"
             offset = framed.offset
             shown = view
             if (first) {
-                cursorHidden = true
-                onExit(restoreCursor)
+                onExit(leave)
                 keys?.take(pressed)
             }
         })
 
-    /** The cursor back, on an exit that came before the end could show it: a kill, or a crash. */
-    const restoreCursor = (): void => {
-        if (cursorHidden) {
-            safely(() => write(SHOW_CURSOR))
-            cursorHidden = false
+    /**
+     * Back to the main screen, where the lines printed before the board still are, and the board's
+     * last paint under them: everything else, unclipped, and the cursor shown again (ADR-0042). The
+     * end does it, and so does an exit that came before the end, however it came: a kill, a crash.
+     */
+    const leave = (): void => {
+        if (phase !== "showing" || shown === undefined) {
+            return
         }
+        phase = "ended"
+        const view = shown
+        safely(() => {
+            const width = columns()
+            paint(MAIN_SCREEN, boardWhole(view, { width, notices, after }), width, SHOW_CURSOR)
+        })
     }
 
     const pressed = (key: Key): void => {
@@ -252,10 +242,11 @@ export const createTerminalBoard = ({
             interrupt()
             return
         }
-        const to = scrolled(key, offset ?? 0)
+        const view = shown
+        const to = scrolled(key, offset ?? 0, () => offsetAbove(view, windowOf(offset)))
         if (to !== undefined) {
             offset = to
-            draw(shown, { resized: false })
+            draw(shown)
         }
     }
 
@@ -263,7 +254,7 @@ export const createTerminalBoard = ({
     const append = (line: string): void => {
         after.push(line)
         if (shown !== undefined) {
-            draw(shown, { resized: false })
+            draw(shown)
         }
     }
 
@@ -275,7 +266,7 @@ export const createTerminalBoard = ({
     const addNotice = (given: BoardNotice): void => {
         notices.push(given)
         if (phase === "showing" && shown !== undefined) {
-            draw(shown, { resized: false })
+            draw(shown)
         }
     }
 
@@ -283,14 +274,14 @@ export const createTerminalBoard = ({
     // last paint is what stays on screen, and nothing redraws over it.
     onResize(() => {
         if (phase === "showing" && shown !== undefined) {
-            draw(shown, { resized: true })
+            draw(shown)
         }
     })
 
     return {
         show: view => {
             if (phase !== "ended") {
-                draw(view, { resized: false })
+                draw(view)
             }
         },
         notice: addNotice,
@@ -312,8 +303,8 @@ export const createTerminalBoard = ({
         },
         error: line => {
             if (phase !== "showing") {
-                // An error on this terminal before the board takes a row above it like a printed line
-                // does, so the first frame rewinds over it too rather than falling a row short.
+                // An error on this terminal before the board is a line on it like a printed one, so the
+                // window draws it among them.
                 if (phase === "before" && !errorsElsewhere) {
                     before.push(line)
                 }
@@ -328,19 +319,10 @@ export const createTerminalBoard = ({
             }
         },
         end: () => {
-            if (phase === "showing" && shown !== undefined) {
-                const view = shown
-                safely(() => {
-                    const width = columns()
-                    frame(boardWhole(view, { width, notices, before, after }), width, {
-                        rewind: drawn,
-                        resized: false,
-                        last: true,
-                    })
-                    cursorHidden = false
-                })
+            if (phase === "showing") {
+                leave()
                 // Given back whether or not the last paint could be written, or stdin holds the
-                // process open; a cursor that failed to show is tried again on the exit.
+                // process open.
                 safely(() => keys?.release())
             }
             phase = "ended"

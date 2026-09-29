@@ -19,18 +19,19 @@ three pieces with one seam between each (ADR-0031).
 - **The colouring** (`board-paint.ts`) holds the palette and no layout: a pure mapping from a line
   of spans to the string the writer writes. It is the last thing that happens to a line, and it
   changes no span's width. Changing a colour is a change here and nowhere else.
-- **The writer** (`board-writer.ts`) holds the cursor and the lines around the board: it rewinds
-  over the lines it last drew, writes the coloured ones, and swallows a write that fails, because a
-  terminal that went away is not a run that failed. On a terminal it is the adapter every line afk
-  prints goes through, so the lines before the board (the prompt answers readline drew included,
-  handed on by the operator once answered), its rows and notices, and the lines after it scroll as
-  one; an error said while the board shows is one of its notices. Its `end` paints the board once
-  more, whole, once the cli returns (ADR-0041). From the first frame it takes the keys where stdin
-  is a terminal — ↑/↓ scroll a line, Home/End jump to either end, Ctrl-C is forwarded as the
-  process's own SIGINT, read off stdin by `stdin-keys.ts` — hides the cursor, and gives both back
-  at the end or on the exit. Off a
-  terminal the second adapter of the same port runs, and it prints `board-lines.ts` — one line per
-  row the next view changed.
+- **The writer** (`board-writer.ts`) holds the cursor and the lines around the board: it draws every
+  frame on the alternate screen from its top-left corner (ADR-0042), writes the coloured lines, and
+  swallows a write that fails, because a terminal that went away is not a run that failed. On a
+  terminal it is the adapter every line afk prints goes through, so the lines before the board (the
+  prompt answers readline drew included, handed on by the operator once answered), its rows and
+  notices, and the lines after it scroll as one; an error said while the board shows is one of its
+  notices. Its `end` goes back to the main screen and paints the board once more, whole, under the
+  lines printed before it, once the cli returns, and an exit before the end does the same (ADR-0041,
+  ADR-0042). From the first frame it takes the keys where stdin is a terminal — ↑/↓ scroll a line,
+  Home/End jump to either end, Ctrl-C is forwarded as the process's own SIGINT, read off stdin by
+  `stdin-keys.ts` — hides the cursor, and gives both back at the end or on the exit. Off a terminal
+  the second adapter of the same port runs, and it prints `board-lines.ts` — one line per row the
+  next view changed.
 
 `board-span.ts` is the vocabulary the three share: a span, the roles a span can have, and what a
 line is worth in columns. A role is what a thing is and never what it looks like, so the palette is

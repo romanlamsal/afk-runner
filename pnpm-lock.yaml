@@ -21,6 +21,9 @@ importers:
       '@types/node':
         specifier: ^26.5.1
         version: 26.6.1
+      '@xterm/headless':
+        specifier: ^6.0.0
+        version: 6.0.0
       npm-run-all2:
         specifier: ^9.0.3
         version: 9.0.3
@@ -337,6 +340,9 @@ packages:
 
   '@vitest/spy@5.0.1':
     resolution: {integrity: sha512-rbto/mF/SGERxEgYOek7Xm6B9b+y+mVoo+f4b2LymYO8zM1b7uB5nHuhVMTP2hxdzgxvGiZYGxGIaMvL5y180Q==}
+
+  '@xterm/headless@6.0.0':
+    resolution: {integrity: sha512-5Yj1QINYCyzrZtf8OFIHi47iQtI+0qYFPHmouEfG8dHNxbZ9Tb9YGSuLcsEwj9Z+OL75GJqPyJbyoFer80a2Hw==}
 
   ansi-styles@7.0.0:
     resolution: {integrity: sha512-kKvt3m4uwzqL0wlkPd09CmljPJGOZZ4D0fP65sqFSvPkMRKhNi+74MgIJ5QxE6SxqB4t4KyUFGg8+n5zjo6hew==}
@@ -851,6 +857,8 @@ snapshots:
       vite: 8.3.0(@types/node@26.6.1)
 
   '@vitest/spy@5.0.1': {}
+
+  '@xterm/headless@6.0.0': {}
 
   ansi-styles@7.0.0: {}
 

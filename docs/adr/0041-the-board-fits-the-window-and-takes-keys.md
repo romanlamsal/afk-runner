@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded in part by ADR-0042
 ---
 
 # The board fits the window and takes keys
@@ -41,8 +41,9 @@ ticket count, where the window can hold it".
   offset, no keys and no resize.
 - **Ink.** Rejected. A frame taller than the terminal makes it clear the terminal, scrollback
   included, on every frame; it would still need clipping of our own, at 38 packages.
-- **The alternate screen.** Not decided here. It is what a later two-pane view would use, and it
-  leaves nothing on the main screen unless the final state is replayed onto it.
+- ~~**The alternate screen.** Not decided here. It is what a later two-pane view would use, and it
+  leaves nothing on the main screen unless the final state is replayed onto it.~~ **Decided by
+  ADR-0042**: the board is drawn there, and the whole last paint is what goes onto the main screen.
 - **Pin the footer and the lines before the board, scroll only the rows.** Rejected. The rows are
   what does not fit, and a pinned header takes the room they need.
 - **Start at the bottom, like a terminal.** Rejected. The interesting rows are at the top by
@@ -55,7 +56,9 @@ ticket count, where the window can hold it".
   cursor are undone on exit, a kill and a crash; stdin is released so the process can end.
 - **Frames are written without a blank moment**: each line is overwritten and cleared to its end,
   and a frame is wrapped in synchronized output.
-- **A window narrowed or shortened mid-run can leave a stale line or push one into scrollback once.**
-  Accepted: the redraw after a resize erases down from where it can reach.
+- ~~**A window narrowed or shortened mid-run can leave a stale line or push one into scrollback once.**
+  Accepted: the redraw after a resize erases down from where it can reach.~~ **Superseded by
+  ADR-0042.** It was not once: a window dragged shorter is a resize for every row, and each pushed
+  the window's top line into scrollback again.
 - **The slicing is pure and sits in the frame**; keys, resize, restore and the terminal's output are
   one cli adapter. Replay draws through the same writer and gets all of it by construction.

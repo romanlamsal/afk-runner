@@ -104,8 +104,10 @@ export const assembleCli = (): Cli => {
         // land in the middle of a frame; off one the board draws nothing and stderr is still where
         // it belongs (ADR-0029, ADR-0041).
         notifyDraining: drawing ? line => board.notice({ kind: "draining", line }) : printError,
-        // The kill is the process going away, so it is said on stderr and nowhere else.
-        notifyKilled: toStderr,
+        // The kill is the process going away. While the board shows, stderr is the alternate screen,
+        // which the exit leaves and discards, so it goes through the board: a notice under the rows,
+        // which the exit's last paint puts on the main screen (ADR-0042). Off one it is stderr's.
+        notifyKilled: printError,
     })
     const now = (): Date => new Date()
     // Both writes a whole run makes to GitHub go through it: the claim, and the spec pull request

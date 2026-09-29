@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { boardFrame, boardWhole, boardWindow, elapsedText, printedLines } from "../../src/cli/board-frame.ts"
+import {
+    boardFrame,
+    boardWhole,
+    boardWindow,
+    elapsedText,
+    offsetAbove,
+    printedLines,
+} from "../../src/cli/board-frame.ts"
 import { type Line, type Span, textOf, widthOf } from "../../src/cli/board-span.ts"
 import {
     type BoardNotice,
@@ -267,7 +274,7 @@ describe("boardFrame", () => {
 /**
  * The footer is what is about the run rather than about a ticket, and it sits under every row. It
  * may grow — a notice arrives, and a long one takes several lines — and growing moves nothing above
- * it, because the writer rewinds over the lines it last drew (ADR-0029).
+ * it, because the writer redraws the whole frame every time (ADR-0029, ADR-0042).
  */
 /** How long a running step has been going, at the end of its row and nowhere else (ADR-0034). */
 describe("boardFrame: the elapsed figure", () => {
@@ -631,8 +638,11 @@ describe("boardWindow", () => {
 
     it.each([
         [0, [...content(TALL).slice(0, 5), "↓ 8 more"]],
-        [3, ["↑ 3 more", ...content(TALL).slice(3, 7), "↓ 6 more"]],
-        [8, ["↑ 8 more", ...content(TALL).slice(8)]],
+        // One line further down than the top is every line one further up: the marker takes the line
+        // it stands on, rather than a line of its own that would leave the first step moving nothing.
+        [1, ["↑ 2 more", ...content(TALL).slice(2, 6), "↓ 7 more"]],
+        [3, ["↑ 4 more", ...content(TALL).slice(4, 8), "↓ 5 more"]],
+        [7, ["↑ 8 more", ...content(TALL).slice(8)]],
     ] as const)("should announce what is hidden at an offset of %i", (offset, expected) => {
         // given
         const view = TALL
@@ -647,7 +657,7 @@ describe("boardWindow", () => {
     it.each([
         [-5, 0],
         [4, 4],
-        [99, 8],
+        [99, 7],
     ] as const)("should clamp an offset of %i to %i", (offset, clamped) => {
         // given
         const view = TALL
@@ -701,6 +711,53 @@ describe("boardWindow", () => {
 
         // then
         expect(lines.map(textOf).slice(0, 2)).toEqual(["↑ 2 more", content(TALL)[0]])
+    })
+
+    it("should hide the rest of a wrapped line under the top marker rather than leave its tail showing", () => {
+        // given: a printed line two rows long, whose first row the marker stands on at an offset of 1
+        const before = ["spec #66: afk/66/spec cut from main", `pull request: ${"x".repeat(WIDE)}`]
+
+        // when
+        const { lines } = boardWindow(TALL, { width: WIDE, rows: 8, offset: 1, before })
+
+        // then
+        expect(lines.map(textOf).slice(0, 2)).toEqual(["↑ 3 more", content(TALL)[0]])
+    })
+
+    it("should keep the window's height, the footer pinned, where the top marker hides the rest of a wrapped line", () => {
+        // given: at the last offset the marker stands on the first row of a line two rows long
+        const after = [`pull request: ${"x".repeat(WIDE)}`, "a", "b", "c", "d"]
+
+        // when
+        const { lines } = boardWindow(TALL, { width: WIDE, rows: 8, offset: 99, after })
+
+        // then
+        expect(lines.map(textOf)).toEqual(["↑ 15 more", "a", "b", "c", "d", "", `last event ${AT}`])
+    })
+
+    it.each([
+        ["one line up, where nothing is wrapped", 5, 4],
+        ["past the rows of a wrapped line that the top marker hides as one", 2, 0],
+    ] as const)("should go %s from an offset of %i to %i", (_name, offset, expected) => {
+        // given: a printed line two rows long, under a line of its own
+        const before = ["spec #66: afk/66/spec cut from main", `pull request: ${"x".repeat(WIDE)}`]
+
+        // when
+        const above = offsetAbove(TALL, { width: WIDE, rows: 8, offset, before })
+
+        // then
+        expect(above).toBe(expected)
+    })
+
+    it("should open a window with room for one line on the board's first row, with no marker to take it", () => {
+        // given
+        const before = ["spec #66: afk/66/spec cut from main", "gate:   .afk/66/gate"]
+
+        // when
+        const { lines } = boardWindow(TALL, { width: WIDE, rows: 3, offset: undefined, before })
+
+        // then
+        expect(lines.map(textOf)).toEqual([content(TALL)[0], `last event ${AT}`])
     })
 
     it("should scroll the lines printed before the board above its rows", () => {

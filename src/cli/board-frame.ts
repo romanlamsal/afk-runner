@@ -37,7 +37,7 @@ import { type Line, plain, type Role, type Span, widthOf } from "./board-span.ts
  *
  * Under the block sit the notices, what the run says about itself rather than about a ticket, and
  * under those the footer: when the last thing happened. A notice appended under the rows moves no row
- * above it, and the writer rewinds over the lines it last drew, so the frame growing costs nothing.
+ * above it, and the writer redraws the whole frame every time, so the frame growing costs nothing.
  *
  * A notice or footer line too wide for the terminal is wrapped here rather than truncated or left to
  * the terminal: half an interrupt acknowledgement is the wrong thing to show, and a line the terminal
@@ -302,10 +302,13 @@ const rowLine = (row: BoardRow, width: number): Line => {
 }
 
 /** The rows and the notices under them, in the order they arrived: everything a window scrolls. */
-const contentOf = (view: BoardView, width: number, notices: readonly BoardNotice[]): readonly Line[] => [
-    ...view.rows.map(row => rowLine(row, width)),
-    ...notices.flatMap(notice => wrapped(wordsOf(notice.line), width)),
+const blocksOf = (view: BoardView, width: number, notices: readonly BoardNotice[]): readonly (readonly Line[])[] => [
+    ...view.rows.map(row => [rowLine(row, width)]),
+    ...notices.map(notice => wrapped(wordsOf(notice.line), width)),
 ]
+
+const contentOf = (view: BoardView, width: number, notices: readonly BoardNotice[]): readonly Line[] =>
+    blocksOf(view, width, notices).flat()
 
 /**
  * The footer's words: a prefix for every kind of notice given so far, then when the last event
@@ -351,7 +354,7 @@ export const printedLines = (text: string, width: number): readonly Line[] => {
 
 /** What else afk printed in this process: the lines before the board, and the lines after it. */
 export type Printed = {
-    /** The lines printed before the first frame that were still within cursor-up's reach at it. */
+    /** The lines printed before the first frame. */
     before?: readonly string[] | undefined
     /** The lines printed since the first frame: the interrupted line, the pull request's. */
     after?: readonly string[] | undefined
@@ -390,8 +393,9 @@ const marker = (arrow: "↑" | "↓", hidden: number, width: number): Line =>
  * its rows, its notices, and the lines after it.
  *
  * The footer keeps its line before the log holds any event, so the window's height does not change
- * when the first one arrives. A marker takes a content line rather than a line of its own, which is
- * why the last offset is one past where the content would end on a window with no marker at all.
+ * when the first one arrives. A marker stands on the first or the last line of the slice and hides
+ * the line it stands on too, so that one offset further is always every line one further up — a
+ * marker with a line of its own would make the first step down from the top move nothing.
  */
 export const boardWindow = (
     view: BoardView,
@@ -401,29 +405,61 @@ export const boardWindow = (
     // A window too short even for the footer keeps what of its end it can hold.
     const whole = wrapped(footerOf(view, notices) ?? [plain("")], width)
     const footer = whole.slice(Math.max(whole.length - room, 0))
-    const above = printed(before, width)
-    const content = [...above, ...contentOf(view, width, notices), ...printed(after, width)]
+    // Each block is one thing said — a printed line, a row, a notice — in the lines it wraps to.
+    const above = (before ?? []).map(line => printedLines(line, width))
+    const blocks = [
+        ...above,
+        ...blocksOf(view, width, notices),
+        ...(after ?? []).map(line => printedLines(line, width)),
+    ]
+    const content = blocks.flat()
+    const continues = blocks.flatMap(block => block.map((_, index) => index > 0))
     const space = room - footer.length
 
     if (content.length <= space) {
         return { lines: [...content, ...footer], offset: 0 }
     }
 
-    // At the last offset the top marker is the only one, so one line fewer than the space is shown.
-    const last = Math.max(content.length - Math.max(space - 1, 1), 0)
-    const from = Math.min(Math.max(offset ?? above.length, 0), last)
-    const hiddenAbove = from > 0
-    const hiddenBelow = from + space - (hiddenAbove ? 1 : 0) < content.length
-    const shown = content.slice(from, from + Math.max(space - (hiddenAbove ? 1 : 0) - (hiddenBelow ? 1 : 0), 0))
-    const hidden = content.length - from - shown.length
-
-    const lines = [
-        ...(hiddenAbove ? [marker("↑", from, width)] : []),
-        ...shown,
-        ...(hiddenBelow ? [marker("↓", hidden, width)] : []),
-    ].slice(0, Math.max(space, 0))
+    // A window with room for one line has no room for a marker as well, and shows the line itself.
+    const marked = space > 1
+    // The first view opens on the board's first row, with the top marker on the last line before it.
+    const last = content.length - Math.max(space, 1)
+    const opening = above.flat().length - (marked ? 1 : 0)
+    let from = Math.min(Math.max(offset ?? opening, 0), last)
+    // The top marker hides the rest of a wrapped line along with the row it stands on, rather than
+    // leave that line's tail showing under it as though it were a line of its own.
+    while (marked && from > 0 && continues[from + 1] === true) {
+        from += 1
+    }
+    const slice = content.slice(from, from + Math.max(space, 0))
+    const hiddenBelow = content.length - from - slice.length
+    const shown = slice.map((line, index) => {
+        if (marked && index === 0 && from > 0) {
+            return marker("↑", from + 1, width)
+        }
+        if (marked && index === slice.length - 1 && hiddenBelow > 0) {
+            return marker("↓", hiddenBelow + 1, width)
+        }
+        return line
+    })
+    // Past the last offset the content runs out, and the footer keeps its line all the same.
+    const lines = [...shown, ...Array.from({ length: Math.max(space - shown.length, 0) }, (): Line => [plain("")])]
 
     return { lines: [...lines, ...footer], offset: from }
+}
+
+/**
+ * Where one line up from `offset` is: the first offset above it whose window is not the one it
+ * shows. The top marker hides a wrapped line whole, so an offset inside one draws the window its end
+ * does, and going up one would draw the same window again — a key press that moved nothing.
+ */
+export const offsetAbove = (view: BoardView, window: BoardWindow): number => {
+    const from = boardWindow(view, window).offset
+    let to = from - 1
+    while (to > 0 && boardWindow(view, { ...window, offset: to }).offset === from) {
+        to -= 1
+    }
+    return Math.max(to, 0)
 }
 
 /**

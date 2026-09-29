@@ -9,8 +9,8 @@ import {
 import type { BoardNotice, BoardRow, BoardView } from "../../src/domain/board.ts"
 
 /**
- * The writer's own rules and none of the frame's: how far it rewinds before it draws again, that a
- * terminal which went away cannot fail a run, and that a notice arriving out of the loop's turn — a
+ * The writer's own rules and none of the frame's: which screen it draws on and where a frame starts,
+ * that a terminal which went away cannot fail a run, and that a notice arriving out of the loop's turn — a
  * signal handler is the caller — reaches the screen at once and stays on the frames after it
  * (ADR-0029). What a frame is made of is the frame's, and it is asserted there.
  */
@@ -32,11 +32,12 @@ const ERASE_DOWN = "\u001b[J"
 const HIDE_CURSOR = "\u001b[?25l"
 const SHOW_CURSOR = "\u001b[?25h"
 
-/** Cursor up by that many lines. */
-const up = (lines: number): string => `\u001b[${lines}A`
+/** The alternate screen, which the board is drawn on, and the main one, which the last paint goes back to. */
+const ALTERNATE_SCREEN = "\u001b[?1049h"
+const MAIN_SCREEN = "\u001b[?1049l"
 
-/** Cursor up, by however many lines. */
-const UP = new RegExp(String.raw`\u001b\[\d+A`)
+/** The cursor to the screen's top-left corner, where every frame starts. */
+const HOME = "\u001b[H"
 
 const ROW: BoardRow = {
     ticket: 7,
@@ -70,9 +71,17 @@ const TALL: BoardView = {
     rows: Array.from({ length: 13 }, (_, index) => ({ ...ROW, ticket: 21 + index })),
 }
 
-/** A frame's lines, with the synchronized-output wrapping, the rewind and the trailing erase taken off. */
+/** A frame's lines, with the synchronized-output wrapping, the switch of screen and the trailing erase taken off. */
 const linesOf = (chunk: string | undefined): readonly string[] =>
-    (chunk ?? "").replace(BEGIN, "").replace(UP, "").replace(HIDE_CURSOR, "").replace(END, "").split("\n").slice(0, -1)
+    (chunk ?? "")
+        .replace(BEGIN, "")
+        .replace(ALTERNATE_SCREEN, "")
+        .replace(MAIN_SCREEN, "")
+        .replace(HIDE_CURSOR, "")
+        .replace(HOME, "")
+        .replace(END, "")
+        .split("\n")
+        .slice(0, -1)
 
 /** Any CSI escape sequence: colour, clearing, cursor movement. */
 const ESCAPE = new RegExp(String.raw`\u001b\[[0-9;?]*[A-Za-z]`, "g")
@@ -211,20 +220,19 @@ describe("createTerminalBoard", () => {
         expect(linesOf(written.at(-1)).at(-1)).toContain("Draining")
     })
 
-    it("should rewind over every line it last drew before it draws again", () => {
+    it("should draw every frame after the first from the screen's top-left corner, over the last", () => {
         // given
         const { written, board } = harness()
         board.show(VIEW)
-        const drawn = linesOf(written.at(-1)).length
 
         // when
         board.show(VIEW)
 
         // then
-        expect(written.at(-1)?.startsWith(`${BEGIN}${up(drawn)}`)).toBe(true)
+        expect(written.at(-1)?.startsWith(`${BEGIN}${HOME}`)).toBe(true)
     })
 
-    it("should rewind over nothing before the first frame, where there is nothing drawn to rewind over", () => {
+    it("should switch to the alternate screen with the first frame, which no redraw can push into scrollback", () => {
         // given
         const { written, board } = harness()
 
@@ -232,7 +240,7 @@ describe("createTerminalBoard", () => {
         board.show(VIEW)
 
         // then
-        expect(written.at(-1)).not.toMatch(UP)
+        expect(written.at(-1)?.startsWith(`${BEGIN}${ALTERNATE_SCREEN}`)).toBe(true)
     })
 
     it("should draw no frame taller than one line fewer than the window, however often it redraws", () => {
@@ -354,7 +362,7 @@ describe("createTerminalBoard", () => {
         expect(measure(written.at(-1))).toBeLessThanOrEqual(limit)
     })
 
-    it("should rewind no further than one line fewer than the resized window", () => {
+    it("should draw a resized frame from the screen's top-left corner, as every other", () => {
         // given
         const { written, resize, board } = harness()
         board.show(TALL)
@@ -363,32 +371,7 @@ describe("createTerminalBoard", () => {
         resize({ rows: 5 })
 
         // then
-        expect(written.at(-1)?.startsWith(`${BEGIN}${up(4)}`)).toBe(true)
-    })
-
-    it("should erase down from where it rewound to before it draws the resized frame", () => {
-        // given
-        const { written, resize, board } = harness()
-        board.show(TALL)
-
-        // when
-        resize({ rows: 5 })
-
-        // then
-        expect(written.at(-1)?.replace(UP, "").startsWith(`${BEGIN}${ERASE_DOWN}`)).toBe(true)
-    })
-
-    it("should rewind over every line it drew where the resized window can reach them all", () => {
-        // given
-        const { written, resize, board } = harness({ rows: 20 })
-        board.show(VIEW)
-        const drawn = linesOf(written.at(-1)).length
-
-        // when
-        resize({ rows: 30 })
-
-        // then
-        expect(written.at(-1)?.startsWith(`${BEGIN}${up(drawn)}${ERASE_DOWN}`)).toBe(true)
+        expect(written.at(-1)?.startsWith(`${BEGIN}${HOME}`)).toBe(true)
     })
 
     it("should swallow a terminal that fails to say its size on a resize", () => {
@@ -448,8 +431,8 @@ describe("createTerminalBoard", () => {
 
 /**
  * Everything afk prints in the process goes through the terminal adapter: written through before the
- * first frame, taken back into the window at it where cursor-up still reaches, drawn under the board
- * from then on, and painted whole at the end (ADR-0041).
+ * first frame, drawn in the window above the board from it, drawn under the board once printed after
+ * it, and painted whole at the end under the lines the main screen kept (ADR-0041, ADR-0042).
  */
 describe("createTerminalBoard: printed lines", () => {
     const SUMMARY = ["spec #66: afk/66/spec cut from main", "gate:   .afk/66/gate", "setup:  pnpm i"]
@@ -466,20 +449,6 @@ describe("createTerminalBoard: printed lines", () => {
         expect(written).toEqual([`${SUMMARY[0]}\n`])
     })
 
-    it("should rewind over the lines printed before the board at its first frame", () => {
-        // given
-        const { written, board } = harness()
-        for (const line of SUMMARY) {
-            board.print(line)
-        }
-
-        // when
-        board.show(VIEW)
-
-        // then
-        expect(written.at(-1)?.startsWith(`${BEGIN}${up(SUMMARY.length)}`)).toBe(true)
-    })
-
     it("should draw the lines printed before the board above its rows", () => {
         // given
         const { written, board } = harness()
@@ -494,25 +463,11 @@ describe("createTerminalBoard: printed lines", () => {
         expect(linesOf(written.at(-1)).slice(0, SUMMARY.length)).toEqual(SUMMARY.map(line => `${line}${CLEAR_TO_END}`))
     })
 
-    it("should rewind no further than cursor-up reaches, leaving what is in scrollback there", () => {
+    it("should not paint the lines printed before the board again at the end, as the main screen has them", () => {
         // given
         const { written, board } = harness({ rows: 8 })
-        for (let line = 0; line < 20; line++) {
-            board.print(`line ${line}`)
-        }
-
-        // when
-        board.show(VIEW)
-
-        // then
-        expect(written.at(-1)?.startsWith(`${BEGIN}${up(7)}`)).toBe(true)
-    })
-
-    it("should not draw a line again that was beyond cursor-up's reach", () => {
-        // given
-        const { written, board } = harness({ rows: 8 })
-        for (let line = 0; line < 20; line++) {
-            board.print(`line ${line}`)
+        for (const line of SUMMARY) {
+            board.print(line)
         }
         board.show(VIEW)
 
@@ -520,7 +475,7 @@ describe("createTerminalBoard: printed lines", () => {
         board.end()
 
         // then
-        expect(linesOf(written.at(-1))[0]).toBe(`line 13${CLEAR_TO_END}`)
+        expect(visible(linesOf(written.at(-1))[0] ?? "")).toBe(visible(linesOf(written.at(-2))[SUMMARY.length] ?? ""))
     })
 
     it("should open at the board's first row, with the lines printed before it hidden above", () => {
@@ -548,20 +503,6 @@ describe("createTerminalBoard: printed lines", () => {
         expect(written).toEqual([])
     })
 
-    it("should rewind over a prompt's answer at the first frame, as over a printed line", () => {
-        // given
-        const { written, board } = harness()
-        board.print("! main is 2 commits behind origin/main")
-        board.answered("setup:  pnpm i")
-        board.answered("verify: pnpm check")
-
-        // when
-        board.show(VIEW)
-
-        // then
-        expect(written.at(-1)?.startsWith(`${BEGIN}${up(3)}`)).toBe(true)
-    })
-
     it("should draw a prompt's answer in its place among the printed lines above the rows", () => {
         // given
         const { written, board } = harness()
@@ -576,28 +517,6 @@ describe("createTerminalBoard: printed lines", () => {
         // then
         expect(linesOf(written.at(-1)).slice(0, 4)).toEqual(
             ["! main is 2 commits behind origin/main", "setup:  pnpm i", "verify: pnpm check", SUMMARY[0]].map(
-                line => `${line}${CLEAR_TO_END}`,
-            ),
-        )
-    })
-
-    it("should take back on a short window only what cursor-up reaches, prompt answers counted", () => {
-        // given
-        const { written, board } = harness({ rows: 8 })
-        for (let line = 0; line < 5; line++) {
-            board.print(`line ${line}`)
-        }
-        board.answered("setup:  pnpm i")
-        board.answered("verify: pnpm check")
-        board.print(SUMMARY[0] ?? "")
-        board.show(VIEW)
-
-        // when
-        board.end()
-
-        // then
-        expect(linesOf(written.at(-1)).slice(0, 7)).toEqual(
-            ["line 1", "line 2", "line 3", "line 4", "setup:  pnpm i", "verify: pnpm check", SUMMARY[0]].map(
                 line => `${line}${CLEAR_TO_END}`,
             ),
         )
@@ -625,7 +544,7 @@ describe("createTerminalBoard: printed lines", () => {
         board.print(LINK)
 
         // then
-        expect(written.at(-1)?.startsWith(`${BEGIN}${up(2)}`)).toBe(true)
+        expect(written.at(-1)?.startsWith(`${BEGIN}${HOME}`)).toBe(true)
     })
 
     it("should draw a line printed after the board under the notice", () => {
@@ -717,7 +636,7 @@ describe("createTerminalBoard: printed lines", () => {
         expect(errored).toEqual(["afk: halted\n"])
     })
 
-    it("should rewind over an error line said on this terminal before the board, too", () => {
+    it("should draw an error line said on this terminal before the board among the printed lines above it", () => {
         // given
         const { written, board } = harness()
         board.print(SUMMARY[0] ?? "")
@@ -728,7 +647,11 @@ describe("createTerminalBoard: printed lines", () => {
         board.show(VIEW)
 
         // then
-        expect(written.at(-1)?.startsWith(`${BEGIN}${up(3)}`)).toBe(true)
+        expect(linesOf(written.at(-1)).slice(0, 3).map(visible)).toEqual([
+            SUMMARY[0],
+            "afk: --max-parallel is ignored",
+            SUMMARY[1],
+        ])
     })
 
     it("should write a line printed after a first frame that failed straight through, as nothing was drawn", () => {
@@ -866,9 +789,9 @@ describe("createTerminalBoard: keys", () => {
     const topOf = (written: readonly string[]): string => visible(linesOf(written.at(-1)).at(0) ?? "")
 
     it.each([
-        ["↓ scrolls one line down", [DOWN_KEY], "↑ 1 more"],
-        ["↓ twice scrolls two lines down", [DOWN_KEY, DOWN_KEY], "↑ 2 more"],
-        ["↑ scrolls one line back up", [DOWN_KEY, DOWN_KEY, UP_KEY], "↑ 1 more"],
+        ["↓ scrolls one line down", [DOWN_KEY], "↑ 2 more"],
+        ["↓ twice scrolls two lines down", [DOWN_KEY, DOWN_KEY], "↑ 3 more"],
+        ["↑ scrolls one line back up", [DOWN_KEY, DOWN_KEY, UP_KEY], "↑ 2 more"],
         ["End jumps to the last line", [END_KEY], "↑ 8 more"],
         ["↓ at the last line stays there", [END_KEY, DOWN_KEY], "↑ 8 more"],
     ] as const)("should redraw at once where %s", (_, keys, expected) => {
@@ -910,7 +833,7 @@ describe("createTerminalBoard: keys", () => {
         board.show(TALL)
 
         // then
-        expect(topOf(written)).toBe("↑ 1 more")
+        expect(topOf(written)).toBe("↑ 2 more")
     })
 
     it("should draw nothing for a key that is not a scroll", () => {
@@ -1078,6 +1001,18 @@ describe("createTerminalBoard: keys", () => {
         expect(written.length).toBe(drawn)
     })
 
+    it("should go back to the main screen on an exit while the board is showing, as a kill or a crash is", () => {
+        // given
+        const { written, board, exit } = harness()
+        board.show(VIEW)
+
+        // when
+        exit()
+
+        // then
+        expect(written.at(-1)?.slice(0, BEGIN.length + MAIN_SCREEN.length)).toBe(`${BEGIN}${MAIN_SCREEN}`)
+    })
+
     it("should show the cursor on an exit while the board is showing, as a kill or a crash is", () => {
         // given
         const { written, board, exit } = harness()
@@ -1087,7 +1022,7 @@ describe("createTerminalBoard: keys", () => {
         exit()
 
         // then
-        expect(written.at(-1)).toBe(SHOW_CURSOR)
+        expect(written.at(-1)?.slice(-(SHOW_CURSOR.length + END.length))).toBe(`${SHOW_CURSOR}${END}`)
     })
 
     it("should write nothing on an exit once the end has shown the cursor", () => {
