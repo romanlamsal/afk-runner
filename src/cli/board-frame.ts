@@ -1,4 +1,12 @@
-import { type BoardRow, type BoardStep, type BoardView, dead, type SettledOutcome } from "../domain/board.ts"
+import {
+    type BoardNotice,
+    type BoardNoticeKind,
+    type BoardRow,
+    type BoardStep,
+    type BoardView,
+    dead,
+    type SettledOutcome,
+} from "../domain/board.ts"
 import type { Conclusion } from "../domain/events.ts"
 import { type Line, plain, type Role, type Span, widthOf } from "./board-span.ts"
 
@@ -121,6 +129,22 @@ const DEAD = "dead"
 const WHEN = "last event"
 
 /**
+ * What the footer says before `last event` once a notice of that kind has been given, in the order
+ * it says them: the words never move, whichever came first. A prefix stays for the rest of the run,
+ * because the notice that set it does (ADR-0041).
+ */
+const PREFIXES: Record<BoardNoticeKind, Span> = {
+    error: { text: "Error", role: "failed" },
+    draining: { text: "Draining", role: "draining" },
+}
+
+/** The order the prefixes are said in, every kind once. */
+const PREFIX_ORDER: readonly BoardNoticeKind[] = ["error", "draining"]
+
+/** What sets the footer's parts off from one another. */
+const FOOTER_SEPARATOR = "-"
+
+/**
  * How wide the ticket number is written, whatever number it is: right-aligned into five columns and
  * carrying no prefix, which covers every issue number this repository will realistically see. It is
  * a constant rather than the widest number the view holds, so that the trail starts in the same
@@ -160,34 +184,40 @@ const fitted = (line: Line, width: number): Line => {
     return [...kept, plain(ELLIPSIS)]
 }
 
+/** A line's text as the words it is broken between, each of them plain. */
+const wordsOf = (text: string): readonly Span[] => text.split(" ").map(plain)
+
 /**
- * A footer line as the lines the terminal can hold it in: broken between words where it can be, and
- * through a word no terminal of this width could hold whole. Nothing is dropped, because what the
- * footer carries is what the operator asked for an answer to.
+ * A notice or footer line as the lines the terminal can hold it in: broken between words where it
+ * can be, and through a word no terminal of this width could hold whole. Nothing is dropped, because
+ * what the footer carries is what the operator asked for an answer to. A word keeps its role on
+ * whichever line it lands.
  */
-const wrapped = (text: string, width: number): readonly Line[] => {
+const wrapped = (words: readonly Span[], width: number): readonly Line[] => {
     // A terminal claiming no width at all still gets a line each, rather than an endless one.
     const room = Math.max(1, width)
-    const lines: string[] = []
-    let current = ""
+    const lines: Line[] = []
+    let current: Span[] = []
 
-    for (const word of text.split(" ")) {
-        if (current !== "" && `${current} ${word}`.length <= room) {
-            current = `${current} ${word}`
+    for (const word of words) {
+        const taken = widthOf(current)
+        const started = taken > 0
+        if (started && taken + 1 + word.text.length <= room) {
+            current = [...current, plain(" "), word]
             continue
         }
-        if (current !== "") {
+        if (started) {
             lines.push(current)
         }
-        let rest = word
+        let rest = word.text
         while (rest.length > room) {
-            lines.push(rest.slice(0, room))
+            lines.push([{ ...word, text: rest.slice(0, room) }])
             rest = rest.slice(room)
         }
-        current = rest
+        current = [{ ...word, text: rest }]
     }
 
-    return [...lines, current].map(line => [plain(line)])
+    return [...lines, current]
 }
 
 /**
@@ -271,34 +301,45 @@ const rowLine = (row: BoardRow, width: number): Line => {
     )
 }
 
-/** The rows and the notices under them: everything a window scrolls. */
-const contentOf = (view: BoardView, width: number, notice: string | undefined): readonly Line[] => [
+/** The rows and the notices under them, in the order they arrived: everything a window scrolls. */
+const contentOf = (view: BoardView, width: number, notices: readonly BoardNotice[]): readonly Line[] => [
     ...view.rows.map(row => rowLine(row, width)),
-    ...(notice === undefined ? [] : wrapped(notice, width)),
+    ...notices.flatMap(notice => wrapped(wordsOf(notice.line), width)),
 ]
 
-/** The footer's text, and nothing where the log holds no event to have it from. */
-const footerOf = (view: BoardView): string | undefined => (view.at === undefined ? undefined : `${WHEN} ${view.at}`)
-
 /**
- * The whole frame: every row, the notice under them, and the footer last.
- *
- * @param notice What the run has to say about itself, if anything. It is not part of the view
- * because it is not derived from the run's state: it arrives from whoever had something to say.
+ * The footer's words: a prefix for every kind of notice given so far, then when the last event
+ * happened, each part set off from the next. Nothing at all where there is neither.
  */
-export const boardFrame = (view: BoardView, width: number, notice?: string): readonly Line[] => {
-    const footer = footerOf(view)
-    return [...contentOf(view, width, notice), ...(footer === undefined ? [] : wrapped(footer, width))]
+const footerOf = (view: BoardView, notices: readonly BoardNotice[]): readonly Span[] | undefined => {
+    const parts: (readonly Span[])[] = [
+        ...PREFIX_ORDER.filter(kind => notices.some(notice => notice.kind === kind)).map(kind => [PREFIXES[kind]]),
+        ...(view.at === undefined ? [] : [wordsOf(`${WHEN} ${view.at}`)]),
+    ]
+    return parts.length === 0
+        ? undefined
+        : parts.flatMap((part, index) => (index === 0 ? part : [plain(FOOTER_SEPARATOR), ...part]))
 }
 
-/** What the window is asked to be: the terminal's size, where the operator has scrolled to, and the notice. */
+/**
+ * The whole frame: every row, the notices under them, and the footer last.
+ *
+ * @param notices What the run has said about itself, oldest first. They are not part of the view
+ * because they are not derived from the run's state: they arrive from whoever had something to say.
+ */
+export const boardFrame = (view: BoardView, width: number, notices: readonly BoardNotice[] = []): readonly Line[] => {
+    const footer = footerOf(view, notices)
+    return [...contentOf(view, width, notices), ...(footer === undefined ? [] : wrapped(footer, width))]
+}
+
+/** What the window is asked to be: the terminal's size, where the operator has scrolled to, and the notices. */
 export type BoardWindow = {
     width: number
     /** The terminal's rows. The window is one fewer, so the cursor's trailing line never scrolls it. */
     rows: number
     /** How many content lines are scrolled off the top, counted from the board's first row. */
     offset: number
-    notice?: string | undefined
+    notices?: readonly BoardNotice[] | undefined
 }
 
 /** A fitted frame, and the offset it was drawn at once clamped into range, for the next one to start from. */
@@ -319,12 +360,12 @@ const marker = (arrow: "↑" | "↓", hidden: number, width: number): Line =>
  * when the first one arrives. A marker takes a content line rather than a line of its own, which is
  * why the last offset is one past where the content would end on a window with no marker at all.
  */
-export const boardWindow = (view: BoardView, { width, rows, offset, notice }: BoardWindow): Windowed => {
+export const boardWindow = (view: BoardView, { width, rows, offset, notices = [] }: BoardWindow): Windowed => {
     const room = Math.max(rows - 1, 0)
     // A window too short even for the footer keeps what of its end it can hold.
-    const whole = wrapped(footerOf(view) ?? "", width)
+    const whole = wrapped(footerOf(view, notices) ?? [plain("")], width)
     const footer = whole.slice(Math.max(whole.length - room, 0))
-    const content = contentOf(view, width, notice)
+    const content = contentOf(view, width, notices)
     const space = room - footer.length
 
     if (content.length <= space) {

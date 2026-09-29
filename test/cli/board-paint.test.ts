@@ -40,6 +40,7 @@ describe("painted", () => {
         ["a settled failed step", "failed", "\u001b[31mtext\u001b[0m"],
         ["a skipped ticket's verdict", "skipped", "\u001b[33mtext\u001b[0m"],
         ["a verified ticket's verdict", "verified", "\u001b[32mtext\u001b[0m"],
+        ["the footer's Draining", "draining", "\u001b[33mtext\u001b[0m"],
     ] as const)("should write %s as what its role is", (_case, role, expected) => {
         // given
         const line = span("text", role)

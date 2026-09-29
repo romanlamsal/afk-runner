@@ -186,6 +186,18 @@ export type BoardView = {
 }
 
 /**
+ * What a notice is about, and so what it makes the footer say: a drain notice sets `Draining`, and
+ * an error sets `Error` (ADR-0041). The kind is the notice's, never the adapter's guess from its text.
+ */
+export type BoardNoticeKind = "draining" | "error"
+
+/** A line about the run itself rather than about a ticket, and what kind of line it is. */
+export type BoardNotice = {
+    kind: BoardNoticeKind
+    line: string
+}
+
+/**
  * Where a view is shown. A driven port: the domain says what it needs, never how — a terminal
  * redraws a block, and off one there is nothing to draw on.
  *
@@ -196,16 +208,16 @@ export type BoardView = {
 export type Board = {
     show: (view: BoardView) => void
     /**
-     * A line about the run itself rather than about a ticket — the drain notice, and so far nothing
-     * else. The board owns the terminal for the drive's duration, so whatever has something to say
-     * to the operator while a run is going says it through here: two writers to one terminal is not
-     * a design choice (ADR-0029).
+     * A line about the run itself rather than about a ticket — the drain notice, or an error. The
+     * board owns the terminal for the drive's duration, so whatever has something to say to the
+     * operator while a run is going says it through here: two writers to one terminal is not a
+     * design choice (ADR-0029).
      *
      * It arrives out of the loop's turn — a signal handler is the caller — so an adapter that draws
      * shows it at once rather than waiting for the next frame. Off a terminal there is no frame to
      * tear and the notice keeps its own stream.
      */
-    notice: (line: string) => void
+    notice: (notice: BoardNotice) => void
 }
 
 /**

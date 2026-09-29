@@ -86,9 +86,10 @@ export const assembleCli = (): Cli => {
             process.exit(EXIT.interrupted)
         },
         // The drain notice goes through whoever owns the terminal. On one that is the board, which
-        // draws it as a status line instead of letting it land in the middle of a frame; off one
-        // the board draws nothing and stderr is still where it belongs (ADR-0029).
-        notifyDraining: drawing ? board.notice : printError,
+        // draws it as a notice under the rows and says `Draining` in its footer instead of letting it
+        // land in the middle of a frame; off one the board draws nothing and stderr is still where
+        // it belongs (ADR-0029, ADR-0041).
+        notifyDraining: drawing ? line => board.notice({ kind: "draining", line }) : printError,
         notifyKilled: printError,
     })
     const now = (): Date => new Date()

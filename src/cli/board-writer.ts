@@ -1,4 +1,4 @@
-import type { Board, BoardView } from "../domain/board.ts"
+import type { Board, BoardNotice, BoardView } from "../domain/board.ts"
 import { boardWindow } from "./board-frame.ts"
 import { boardLines } from "./board-lines.ts"
 import { painted } from "./board-paint.ts"
@@ -43,7 +43,8 @@ export const createTerminalBoard = ({ write, columns, rows, onResize }: Terminal
     let offset = 0
     /** The last view, kept so that a notice can be drawn without waiting for the run to move on. */
     let shown: BoardView | undefined
-    let notice: string | undefined
+    /** Every notice given, oldest first. Each stays, and so does the footer prefix it set. */
+    const notices: BoardNotice[] = []
 
     /**
      * A resized frame starts from no higher than the new window reaches: a shortened window has
@@ -58,7 +59,7 @@ export const createTerminalBoard = ({ write, columns, rows, onResize }: Terminal
             // goes on here, after every width has been computed (ADR-0031).
             const width = columns()
             const height = rows()
-            const framed = boardWindow(view, { width, rows: height, offset, notice })
+            const framed = boardWindow(view, { width, rows: height, offset, notices })
             // A line as wide as the terminal has overwritten all of the old one already, and leaves
             // the cursor waiting to wrap on its last column, where clearing to the end would erase
             // the line's own last character.
@@ -86,8 +87,8 @@ export const createTerminalBoard = ({ write, columns, rows, onResize }: Terminal
 
     return {
         show: view => draw(view, { resized: false }),
-        notice: line => {
-            notice = line
+        notice: given => {
+            notices.push(given)
             // Redrawn on the spot rather than left for the next pass: a step can run for minutes,
             // and an operator who sees nothing for their interrupt sends the one that kills.
             if (shown !== undefined) {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { createLineBoard, createTerminalBoard } from "../../src/cli/board-writer.ts"
-import type { BoardRow, BoardView } from "../../src/domain/board.ts"
+import type { BoardNotice, BoardRow, BoardView } from "../../src/domain/board.ts"
 
 /**
  * The writer's own rules and none of the frame's: how far it rewinds before it draws again, that a
@@ -46,7 +46,7 @@ const ROW: BoardRow = {
 
 const VIEW: BoardView = { at: "2026-09-15T11:18:38.314Z", rows: [ROW] }
 
-const DRAINING = "afk: interrupted — starting nothing new"
+const DRAINING: BoardNotice = { kind: "draining", line: "afk: interrupted — starting nothing new" }
 
 /** Thirteen tickets, which is the spec whose board leaked into scrollback (#66). */
 const TALL: BoardView = {
@@ -99,7 +99,7 @@ describe("createTerminalBoard", () => {
         board.notice(DRAINING)
 
         // then
-        expect(written.at(-1)).toContain(DRAINING)
+        expect(written.at(-1)).toContain(DRAINING.line)
     })
 
     it("should keep the notice on every frame after it", () => {
@@ -112,7 +112,20 @@ describe("createTerminalBoard", () => {
         board.show(VIEW)
 
         // then
-        expect(written.at(-1)).toContain(DRAINING)
+        expect(written.at(-1)).toContain(DRAINING.line)
+    })
+
+    it("should keep Draining in the footer on every frame after the drain notice", () => {
+        // given
+        const { written, board } = harness()
+        board.show(VIEW)
+        board.notice(DRAINING)
+
+        // when
+        board.show(VIEW)
+
+        // then
+        expect(linesOf(written.at(-1)).at(-1)).toContain("Draining")
     })
 
     it("should rewind over every line it last drew before it draws again", () => {

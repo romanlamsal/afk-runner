@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { boardFrame, boardWindow, elapsedText } from "../../src/cli/board-frame.ts"
 import { type Line, type Span, textOf, widthOf } from "../../src/cli/board-span.ts"
 import {
+    type BoardNotice,
     type BoardRow,
     type BoardStep,
     type BoardView,
@@ -80,6 +81,12 @@ const WIDE = 120
 
 /** The one text a trail ever has, which is what every row of every frame reads as. */
 const TRAIL = "setup implement rebase resolve merge gate fix revert"
+
+/** A drain notice carrying the given line. */
+const draining = (line: string): BoardNotice => ({ kind: "draining", line })
+
+/** An error notice carrying the given line. */
+const error = (line: string): BoardNotice => ({ kind: "error", line })
 
 /** What a span of a given text asks to be read at, where the line carries one. */
 const spanFor = (line: Line | undefined, text: string): Span | undefined => line?.find(span => span.text === text)
@@ -441,10 +448,10 @@ describe("boardFrame: the footer", () => {
         const view: BoardView = { ...VIEW, at: AT }
 
         // when
-        const lines = boardFrame(view, WIDE, "afk: interrupted").map(textOf)
+        const lines = boardFrame(view, WIDE, [draining("afk: interrupted")]).map(textOf)
 
         // then
-        expect(lines.slice(-2)).toEqual(["afk: interrupted", `last event ${AT}`])
+        expect(lines.slice(-2)).toEqual(["afk: interrupted", `Draining - last event ${AT}`])
     })
 
     it("should move no row when a notice arrives", () => {
@@ -453,7 +460,7 @@ describe("boardFrame: the footer", () => {
         const before = boardFrame(view, WIDE).map(textOf)
 
         // when
-        const after = boardFrame(view, WIDE, "afk: interrupted").map(textOf)
+        const after = boardFrame(view, WIDE, [draining("afk: interrupted")]).map(textOf)
 
         // then
         expect(after.slice(0, VIEW.rows.length)).toEqual(before.slice(0, VIEW.rows.length))
@@ -464,10 +471,10 @@ describe("boardFrame: the footer", () => {
         const notice = "afk: interrupted — starting nothing new"
 
         // when
-        const lines = boardFrame(VIEW, 20, notice).map(textOf)
+        const lines = boardFrame(VIEW, 20, [draining(notice)]).map(textOf)
 
         // then
-        expect(lines.slice(VIEW.rows.length).join(" ")).toBe(notice)
+        expect(lines.slice(VIEW.rows.length, -1).join(" ")).toBe(notice)
     })
 
     it.each([[WIDE], [20], [8], [1]] as const)("should hold the footer within a width of %i", width => {
@@ -475,7 +482,10 @@ describe("boardFrame: the footer", () => {
         const view: BoardView = { ...VIEW, at: AT }
 
         // when
-        const lines = boardFrame(view, width, "afk: interrupted — starting nothing new")
+        const lines = boardFrame(view, width, [
+            error("afk: failed"),
+            draining("afk: interrupted — starting nothing new"),
+        ])
 
         // then
         expect(lines.every(line => widthOf(line) <= width)).toBe(true)
@@ -490,6 +500,67 @@ describe("boardFrame: the footer", () => {
 
         // then
         expect(lines.slice(VIEW.rows.length)).toEqual(["last", "event", "2026-09-", "15T11:18", ":38.314Z"])
+    })
+
+    it.each([
+        ["a drain notice", [draining("afk: interrupted")], `Draining - last event ${AT}`],
+        ["an error", [error("afk: failed")], `Error - last event ${AT}`],
+        [
+            "an error after draining",
+            [draining("afk: interrupted"), error("afk: failed")],
+            `Error - Draining - last event ${AT}`,
+        ],
+        [
+            "a second drain notice",
+            [draining("afk: interrupted"), draining("afk: again")],
+            `Draining - last event ${AT}`,
+        ],
+    ] as const)("should prefix the footer once given %s", (_case, notices, footer) => {
+        // given
+        const view: BoardView = { ...VIEW, at: AT }
+
+        // when
+        const lines = boardFrame(view, WIDE, notices).map(textOf)
+
+        // then
+        expect(lines.at(-1)).toBe(footer)
+    })
+
+    it("should say Draining where the log holds no event yet", () => {
+        // given
+        const view = VIEW
+
+        // when
+        const lines = boardFrame(view, WIDE, [draining("afk: interrupted")]).map(textOf)
+
+        // then
+        expect(lines.at(-1)).toBe("Draining")
+    })
+
+    it("should put the notices under the rows in the order they arrived", () => {
+        // given
+        const view = VIEW
+
+        // when
+        const lines = boardFrame(view, WIDE, [draining("afk: interrupted"), error("afk: failed")]).map(textOf)
+
+        // then
+        expect(lines.slice(VIEW.rows.length, -1)).toEqual(["afk: interrupted", "afk: failed"])
+    })
+
+    it.each([
+        ["Draining", "draining"],
+        ["Error", "failed"],
+        ["last", "plain"],
+    ] as const)("should give the footer's %s the role %s", (text, role) => {
+        // given
+        const view: BoardView = { ...VIEW, at: AT }
+
+        // when
+        const footer = boardFrame(view, WIDE, [draining("afk: interrupted"), error("afk: failed")]).at(-1)
+
+        // then
+        expect(spanFor(footer, text)?.role).toBe(role)
     })
 })
 
@@ -508,8 +579,8 @@ describe("boardWindow", () => {
     }
 
     /** The scrolled content as the whole frame has it: everything but the footer. */
-    const content = (view: BoardView, notice?: string): readonly string[] =>
-        boardFrame(view, WIDE, notice).map(textOf).slice(0, -1)
+    const content = (view: BoardView, notices?: readonly BoardNotice[]): readonly string[] =>
+        boardFrame(view, WIDE, notices).map(textOf).slice(0, -1)
 
     it.each([[40], [13], [8], [3], [2], [1]] as const)(
         "should draw no more than one line fewer than a window of %i rows",
@@ -604,10 +675,21 @@ describe("boardWindow", () => {
         const notice = "afk: interrupted"
 
         // when
-        const { lines } = boardWindow(TALL, { width: WIDE, rows: 8, offset: 99, notice })
+        const { lines } = boardWindow(TALL, { width: WIDE, rows: 8, offset: 99, notices: [draining(notice)] })
 
         // then
-        expect(lines.map(textOf).slice(-2)).toEqual([notice, `last event ${AT}`])
+        expect(lines.map(textOf).slice(-2)).toEqual([notice, `Draining - last event ${AT}`])
+    })
+
+    it.each([[0], [4], [99]] as const)("should keep Draining in the pinned footer at an offset of %i", offset => {
+        // given
+        const notices = [draining("afk: interrupted")]
+
+        // when
+        const { lines } = boardWindow(TALL, { width: WIDE, rows: 8, offset, notices })
+
+        // then
+        expect(lines.map(textOf).at(-1)).toBe(`Draining - last event ${AT}`)
     })
 
     it("should keep a line for the footer before the log holds any event", () => {

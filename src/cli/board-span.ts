@@ -14,7 +14,8 @@
  * frame holds no opinion about colour (ADR-0033).
  *
  * The step roles are the outcomes a step settles on, `ok` aside: a step that simply worked is the
- * background everything else is read against, so it carries the same role as an indent.
+ * background everything else is read against, so it carries the same role as an indent. `draining`
+ * is the footer's, and no step's: the run was interrupted and is finishing what it started.
  */
 export const ROLES = [
     "plain",
@@ -26,6 +27,7 @@ export const ROLES = [
     "failed",
     "skipped",
     "verified",
+    "draining",
 ] as const
 
 export type Role = (typeof ROLES)[number]
