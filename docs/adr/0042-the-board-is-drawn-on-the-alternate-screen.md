@@ -27,7 +27,9 @@ at the end, and on an exit before it — goes back there and paints the rest und
 - **The kill's own line goes through the board** as a notice, not to stderr: while the board shows,
   stderr on this terminal is the alternate screen, which the exit leaves and discards. Anything else
   written straight to the terminal while the board shows is lost the same way, which is why every
-  line afk says goes through the writer (ADR-0041).
+  line afk says goes through the writer (ADR-0041). That includes children: one spawned with
+  `stdio: "inherit"` would draw onto the alternate screen, tear the frames while it runs and be lost
+  at the exit, so children keep piped output (`src/infrastructure/process.ts`).
 
 ## Considered options
 
@@ -40,7 +42,10 @@ at the end, and on an exit before it — goes back there and paints the rest und
 
 - **The writer is tested against a terminal emulator** (`@xterm/headless`, a dev dependency), since
   what reaches the screen and the scrollback is what a terminal made of the output, not the output
-  itself. That catches what xterm.js does; a quirk only another terminal has is not caught.
+  itself. That catches what xterm.js does; a quirk only another terminal has is not caught. The
+  tests are in the default suite: the emulator is in-process and deterministic, a stand-in for the
+  operator's terminal the way a fake stands in for a port, and no more real for being called an
+  integration test.
 - **Scrolling moves the screen with every key.** A marker stands on the first or last line of the
   slice and hides that line too, and the top marker hides the rest of a wrapped line along with the
   row it stands on, so the first ↓ from the top is no longer spent on putting the marker there and no

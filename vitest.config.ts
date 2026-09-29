@@ -3,8 +3,7 @@ import { defineConfig } from "vitest/config"
 /**
  * Two projects, split by file name so that the test tree keeps mirroring the source tree. An
  * integration test is one that uses a real external dependency — real git in a temporary
- * repository, afk's own entry point in a real process, or a terminal emulator standing in for the
- * operator's terminal — and nothing else is one.
+ * repository, or afk's own entry point in a real process — and nothing else is one.
  */
 export default defineConfig({
     test: {
