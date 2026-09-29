@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { boardFrame, boardWindow, elapsedText } from "../../src/cli/board-frame.ts"
+import { boardFrame, boardWhole, boardWindow, elapsedText, printedLines } from "../../src/cli/board-frame.ts"
 import { type Line, type Span, textOf, widthOf } from "../../src/cli/board-span.ts"
 import {
     type BoardNotice,
@@ -692,6 +692,40 @@ describe("boardWindow", () => {
         expect(lines.map(textOf).at(-1)).toBe(`Draining - last event ${AT}`)
     })
 
+    it("should open at the board's first row, behind the lines printed before it", () => {
+        // given
+        const before = ["spec #66: afk/66/spec cut from main", "gate:   .afk/66/gate"]
+
+        // when
+        const { lines } = boardWindow(TALL, { width: WIDE, rows: 8, offset: undefined, before })
+
+        // then
+        expect(lines.map(textOf).slice(0, 2)).toEqual(["↑ 2 more", content(TALL)[0]])
+    })
+
+    it("should scroll the lines printed before the board above its rows", () => {
+        // given
+        const before = ["spec #66: afk/66/spec cut from main", "gate:   .afk/66/gate"]
+
+        // when
+        const { lines } = boardWindow(TALL, { width: WIDE, rows: 8, offset: 0, before })
+
+        // then
+        expect(lines.map(textOf).slice(0, 3)).toEqual([...before, content(TALL)[0]])
+    })
+
+    it("should scroll the lines printed after the board under its notice", () => {
+        // given
+        const notice = draining("afk: interrupted")
+        const after = ["draft pull request opened: https://github.com/o/r/pull/1"]
+
+        // when
+        const { lines } = boardWindow(TALL, { width: WIDE, rows: 8, offset: 99, notices: [notice], after })
+
+        // then
+        expect(lines.map(textOf).slice(-3)).toEqual([notice.line, ...after, `Draining - last event ${AT}`])
+    })
+
     it("should keep a line for the footer before the log holds any event", () => {
         // given
         const view: BoardView = { ...TALL, at: undefined }
@@ -701,6 +735,52 @@ describe("boardWindow", () => {
 
         // then
         expect(lines.map(textOf).at(-1)).toBe("")
+    })
+})
+
+/**
+ * The last paint: everything afk printed with the board in the middle of it, unclipped, the footer
+ * directly under the rows and the lines printed after the board last (ADR-0041).
+ */
+describe("boardWhole", () => {
+    const AT = "2026-09-15T11:18:38.314Z"
+    const ROWS = Array.from({ length: 13 }, (_, index) => row(21 + index, "A ticket", "implement", IMPLEMENTING))
+    const TALL: BoardView = { at: AT, rows: ROWS }
+    const rowsOf = boardFrame({ at: undefined, rows: ROWS }, WIDE).map(textOf)
+
+    it("should paint every line, in order, with the footer under the rows", () => {
+        // given
+        const before = ["gate:   .afk/66/gate"]
+        const notice = draining("afk: interrupted")
+        const after = ["pull request opened: https://github.com/o/r/pull/1"]
+
+        // when
+        const lines = boardWhole(TALL, { width: WIDE, notices: [notice], before, after })
+
+        // then
+        expect(lines.map(textOf)).toEqual([...before, ...rowsOf, `Draining - last event ${AT}`, notice.line, ...after])
+    })
+})
+
+/**
+ * A printed line is laid out as the terminal wraps it: cut every width, whatever it holds.
+ */
+describe("printedLines", () => {
+    it.each([
+        ["", 10, [""]],
+        ["  gate", 10, ["  gate"]],
+        ["abcdefghij", 10, ["abcdefghij"]],
+        ["https://x.y/pull/12", 10, ["https://x.", "y/pull/12"]],
+        ["setup:\nverify:", 10, ["setup:", "verify:"]],
+    ] as const)("should lay %j out at a width of %i as %j", (text, width, expected) => {
+        // given
+        const room = width
+
+        // when
+        const lines = printedLines(text, room)
+
+        // then
+        expect(lines.map(textOf)).toEqual(expected)
     })
 })
 

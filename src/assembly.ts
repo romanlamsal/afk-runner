@@ -44,12 +44,31 @@ import { createWatchBoardService } from "./service/watch.ts"
  * it builds the adapters, calls the factories, and hands the result to the cli.
  */
 export const assembleCli = (): Cli => {
-    const printError = (line: string): void => {
+    // Selection is TTY detection and there is no flag: the board is simply what a run looks like,
+    // redrawn where there is a terminal to draw it on and a line per change where there is not
+    // (ADR-0029). On one, the terminal adapter owns the screen for the whole process, so every line
+    // afk prints goes through it and scrolls with the board (ADR-0041).
+    const drawing = process.stdout.isTTY === true
+    const terminal = drawing
+        ? createTerminalBoard({
+              write: chunk => process.stdout.write(chunk),
+              writeError: chunk => process.stderr.write(chunk),
+              errorsElsewhere: process.stderr.isTTY !== true,
+              columns: () => process.stdout.columns ?? 80,
+              rows: () => process.stdout.rows ?? 24,
+              onResize: listener => process.stdout.on("resize", listener),
+          })
+        : undefined
+    const toStderr = (line: string): void => {
         process.stderr.write(`${line}\n`)
     }
-    const print = (line: string): void => {
-        process.stdout.write(`${line}\n`)
-    }
+    const printError = terminal?.error ?? toStderr
+    const print =
+        terminal?.print ??
+        ((line: string): void => {
+            process.stdout.write(`${line}\n`)
+        })
+    const board = terminal ?? createLineBoard({ print })
 
     const manifests = createFileManifestStore()
     const records = createFileRunRecordStore()
@@ -61,18 +80,6 @@ export const assembleCli = (): Cli => {
     // One afk per spec, and this process is the one the lock names while it holds it (ADR-0036).
     const lock = createFileRunLock()
     const self = { pid: process.pid }
-    // Selection is TTY detection and there is no flag: the board is simply what a run looks like,
-    // redrawn where there is a terminal to draw it on and a line per change where there is not
-    // (ADR-0029).
-    const drawing = process.stdout.isTTY === true
-    const board = drawing
-        ? createTerminalBoard({
-              write: chunk => process.stdout.write(chunk),
-              columns: () => process.stdout.columns ?? 80,
-              rows: () => process.stdout.rows ?? 24,
-              onResize: listener => process.stdout.on("resize", listener),
-          })
-        : createLineBoard({ print })
 
     // Registered once for the whole process, which is the point: no step traps the signal, and the
     // loop reads a flag (ADR-0016). A termination request is the same request, so it drains too.
@@ -90,7 +97,8 @@ export const assembleCli = (): Cli => {
         // land in the middle of a frame; off one the board draws nothing and stderr is still where
         // it belongs (ADR-0029, ADR-0041).
         notifyDraining: drawing ? line => board.notice({ kind: "draining", line }) : printError,
-        notifyKilled: printError,
+        // The kill is the process going away, so it is said on stderr and nowhere else.
+        notifyKilled: toStderr,
     })
     const now = (): Date => new Date()
     // Both writes a whole run makes to GitHub go through it: the claim, and the spec pull request
@@ -167,7 +175,7 @@ export const assembleCli = (): Cli => {
     const afkonfig = createFileAfkonfig()
     const readAfkonfig = createReadAfkonfigService({ cwd, git, afkonfig })
 
-    return createCli({
+    const cli = createCli({
         isInteractive: () => interactive,
         printError,
         config: createConfig({
@@ -188,4 +196,14 @@ export const assembleCli = (): Cli => {
             boardDrawn: drawing,
         }),
     })
+
+    // The board stays up through the finish step, so the pull request's lines land under it, and
+    // is painted whole only once the cli is done with the terminal (ADR-0041).
+    return async argv => {
+        try {
+            return await cli(argv)
+        } finally {
+            terminal?.end()
+        }
+    }
 }

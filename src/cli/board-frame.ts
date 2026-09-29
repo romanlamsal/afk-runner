@@ -44,8 +44,8 @@ import { type Line, plain, type Role, type Span, widthOf } from "./board-span.ts
  * wrapped would occupy two rows while counting as one, which puts every later redraw out by a line.
  *
  * On a terminal too short for the frame, the frame is fitted to a window (`boardWindow`): the rows and
- * notices are scrolled, and the footer is pinned as the window's last line (ADR-0041). The whole frame
- * is what the window is cut from.
+ * notices are scrolled with the lines afk printed before and after the board, and the footer is pinned
+ * as the window's last line (ADR-0041). The last paint is `boardWhole`: all of it, unclipped.
  */
 
 /** What a settled step came to, as the role it is read as. A step that simply worked is plain. */
@@ -332,13 +332,44 @@ export const boardFrame = (view: BoardView, width: number, notices: readonly Boa
     return [...contentOf(view, width, notices), ...(footer === undefined ? [] : wrapped(footer, width))]
 }
 
+/**
+ * A line afk printed, as the terminal lays it out: cut every `width` columns, because that is where
+ * the terminal wraps it. Nothing is dropped and no leading space is lost, so that a line redrawn
+ * inside the window reads as it did when it was printed, and takes the rows it took then.
+ */
+export const printedLines = (text: string, width: number): readonly Line[] => {
+    const room = Math.max(1, width)
+    // A line break inside a printed line starts a row of its own, as it does on the terminal.
+    return text.split("\n").flatMap(part => {
+        const lines: Line[] = []
+        for (let from = 0; from < part.length; from += room) {
+            lines.push([plain(part.slice(from, from + room))])
+        }
+        return lines.length === 0 ? [[plain("")]] : lines
+    })
+}
+
+/** What else afk printed in this process: the lines before the board, and the lines after it. */
+export type Printed = {
+    /** The lines printed before the first frame that were still within cursor-up's reach at it. */
+    before?: readonly string[] | undefined
+    /** The lines printed since the first frame: the interrupted line, the pull request's. */
+    after?: readonly string[] | undefined
+}
+
+const printed = (lines: readonly string[] | undefined, width: number): readonly Line[] =>
+    (lines ?? []).flatMap(line => printedLines(line, width))
+
 /** What the window is asked to be: the terminal's size, where the operator has scrolled to, and the notices. */
-export type BoardWindow = {
+export type BoardWindow = Printed & {
     width: number
     /** The terminal's rows. The window is one fewer, so the cursor's trailing line never scrolls it. */
     rows: number
-    /** How many content lines are scrolled off the top, counted from the board's first row. */
-    offset: number
+    /**
+     * How many content lines are scrolled off the top, counted from the first line printed before
+     * the board. Nothing yet says the board's first row, which is where the first view opens.
+     */
+    offset: number | undefined
     notices?: readonly BoardNotice[] | undefined
 }
 
@@ -354,18 +385,24 @@ const marker = (arrow: "↑" | "↓", hidden: number, width: number): Line =>
 
 /**
  * The frame fitted to a window of `rows - 1` lines: the content sliced from `offset`, a marker
- * wherever some of it is hidden, and the footer pinned as the last line (ADR-0041).
+ * wherever some of it is hidden, and the footer pinned as the last line (ADR-0041). The content is
+ * everything afk printed in this process with the board in the middle of it: the lines before it,
+ * its rows, its notices, and the lines after it.
  *
  * The footer keeps its line before the log holds any event, so the window's height does not change
  * when the first one arrives. A marker takes a content line rather than a line of its own, which is
  * why the last offset is one past where the content would end on a window with no marker at all.
  */
-export const boardWindow = (view: BoardView, { width, rows, offset, notices = [] }: BoardWindow): Windowed => {
+export const boardWindow = (
+    view: BoardView,
+    { width, rows, offset, notices = [], before, after }: BoardWindow,
+): Windowed => {
     const room = Math.max(rows - 1, 0)
     // A window too short even for the footer keeps what of its end it can hold.
     const whole = wrapped(footerOf(view, notices) ?? [plain("")], width)
     const footer = whole.slice(Math.max(whole.length - room, 0))
-    const content = contentOf(view, width, notices)
+    const above = printed(before, width)
+    const content = [...above, ...contentOf(view, width, notices), ...printed(after, width)]
     const space = room - footer.length
 
     if (content.length <= space) {
@@ -374,17 +411,36 @@ export const boardWindow = (view: BoardView, { width, rows, offset, notices = []
 
     // At the last offset the top marker is the only one, so one line fewer than the space is shown.
     const last = Math.max(content.length - Math.max(space - 1, 1), 0)
-    const from = Math.min(Math.max(offset, 0), last)
-    const above = from > 0
-    const below = from + space - (above ? 1 : 0) < content.length
-    const shown = content.slice(from, from + Math.max(space - (above ? 1 : 0) - (below ? 1 : 0), 0))
+    const from = Math.min(Math.max(offset ?? above.length, 0), last)
+    const hiddenAbove = from > 0
+    const hiddenBelow = from + space - (hiddenAbove ? 1 : 0) < content.length
+    const shown = content.slice(from, from + Math.max(space - (hiddenAbove ? 1 : 0) - (hiddenBelow ? 1 : 0), 0))
     const hidden = content.length - from - shown.length
 
     const lines = [
-        ...(above ? [marker("↑", from, width)] : []),
+        ...(hiddenAbove ? [marker("↑", from, width)] : []),
         ...shown,
-        ...(below ? [marker("↓", hidden, width)] : []),
+        ...(hiddenBelow ? [marker("↓", hidden, width)] : []),
     ].slice(0, Math.max(space, 0))
 
     return { lines: [...lines, ...footer], offset: from }
+}
+
+/**
+ * The last paint: everything, unclipped, and nothing floating (ADR-0041). The footer sits directly
+ * under the rows rather than pinned to a window that is going away, and the lines printed after the
+ * board come last, so the pull request's link is the last thing on screen.
+ */
+export const boardWhole = (
+    view: BoardView,
+    { width, notices = [], before, after }: Omit<BoardWindow, "rows" | "offset">,
+): readonly Line[] => {
+    const footer = footerOf(view, notices)
+    return [
+        ...printed(before, width),
+        ...view.rows.map(row => rowLine(row, width)),
+        ...(footer === undefined ? [] : wrapped(footer, width)),
+        ...notices.flatMap(notice => wrapped(wordsOf(notice.line), width)),
+        ...printed(after, width),
+    ]
 }

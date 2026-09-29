@@ -54,9 +54,9 @@ const TALL: BoardView = {
     rows: Array.from({ length: 13 }, (_, index) => ({ ...ROW, ticket: 21 + index })),
 }
 
-/** A frame's lines, with the synchronized-output wrapping and the trailing erase taken off. */
+/** A frame's lines, with the synchronized-output wrapping, the rewind and the trailing erase taken off. */
 const linesOf = (chunk: string | undefined): readonly string[] =>
-    (chunk ?? "").replace(BEGIN, "").replace(END, "").split("\n").slice(0, -1)
+    (chunk ?? "").replace(BEGIN, "").replace(UP, "").replace(END, "").split("\n").slice(0, -1)
 
 /** Any CSI escape sequence: colour, clearing, cursor movement. */
 const ESCAPE = new RegExp(String.raw`\u001b\[[0-9;?]*[A-Za-z]`, "g")
@@ -68,12 +68,25 @@ const visible = (line: string): string => line.replace(ESCAPE, "")
  * The writer over a terminal the test can resize: `resize` changes the window's size and then tells
  * the writer, the way stdout's `'resize'` does.
  */
-const harness = ({ rows = 40, columns = 80 }: { rows?: number; columns?: number } = {}) => {
+const harness = ({
+    rows = 40,
+    columns = 80,
+    errorsElsewhere = false,
+    fails = false,
+}: {
+    rows?: number
+    columns?: number
+    errorsElsewhere?: boolean
+    /** Every write throws, as one to a terminal that went away does. */
+    fails?: boolean
+} = {}) => {
     const written: string[] = []
+    const errored: string[] = []
     const size = { rows, columns }
     const listeners: (() => void)[] = []
     return {
         written,
+        errored,
         resize: (to: { rows?: number; columns?: number }) => {
             Object.assign(size, to)
             for (const listener of listeners) {
@@ -81,7 +94,14 @@ const harness = ({ rows = 40, columns = 80 }: { rows?: number; columns?: number 
             }
         },
         board: createTerminalBoard({
-            write: chunk => written.push(chunk),
+            write: chunk => {
+                if (fails) {
+                    throw new Error("EPIPE")
+                }
+                written.push(chunk)
+            },
+            writeError: chunk => errored.push(chunk),
+            errorsElsewhere,
             columns: () => size.columns,
             rows: () => size.rows,
             onResize: listener => listeners.push(listener),
@@ -229,14 +249,7 @@ describe("createTerminalBoard", () => {
 
     it("should swallow a write that fails, because a terminal that went away is not a run that failed", () => {
         // given
-        const board = createTerminalBoard({
-            write: () => {
-                throw new Error("EPIPE")
-            },
-            columns: () => 80,
-            rows: () => 40,
-            onResize: () => undefined,
-        })
+        const { board } = harness({ fails: true })
 
         // when
         const drawing = () => board.show(VIEW)
@@ -321,6 +334,8 @@ describe("createTerminalBoard", () => {
         let gone = false
         const board = createTerminalBoard({
             write: () => undefined,
+            writeError: () => undefined,
+            errorsElsewhere: false,
             columns: () => 80,
             rows: () => {
                 if (gone) {
@@ -364,6 +379,278 @@ describe("createTerminalBoard", () => {
 
         // then
         expect(written).toEqual([])
+    })
+})
+
+/**
+ * Everything afk prints in the process goes through the terminal adapter: written through before the
+ * first frame, taken back into the window at it where cursor-up still reaches, drawn under the board
+ * from then on, and painted whole at the end (ADR-0041).
+ */
+describe("createTerminalBoard: printed lines", () => {
+    const SUMMARY = ["spec #66: afk/66/spec cut from main", "gate:   .afk/66/gate", "setup:  pnpm i"]
+    const LINK = "draft pull request opened: https://github.com/o/r/pull/1"
+
+    it("should write a line printed before the first frame straight through", () => {
+        // given
+        const { written, board } = harness()
+
+        // when
+        board.print(SUMMARY[0] ?? "")
+
+        // then
+        expect(written).toEqual([`${SUMMARY[0]}\n`])
+    })
+
+    it("should rewind over the lines printed before the board at its first frame", () => {
+        // given
+        const { written, board } = harness()
+        for (const line of SUMMARY) {
+            board.print(line)
+        }
+
+        // when
+        board.show(VIEW)
+
+        // then
+        expect(written.at(-1)?.startsWith(`${BEGIN}${up(SUMMARY.length)}`)).toBe(true)
+    })
+
+    it("should draw the lines printed before the board above its rows", () => {
+        // given
+        const { written, board } = harness()
+        for (const line of SUMMARY) {
+            board.print(line)
+        }
+
+        // when
+        board.show(VIEW)
+
+        // then
+        expect(linesOf(written.at(-1)).slice(0, SUMMARY.length)).toEqual(SUMMARY.map(line => `${line}${CLEAR_TO_END}`))
+    })
+
+    it("should rewind no further than cursor-up reaches, leaving what is in scrollback there", () => {
+        // given
+        const { written, board } = harness({ rows: 8 })
+        for (let line = 0; line < 20; line++) {
+            board.print(`line ${line}`)
+        }
+
+        // when
+        board.show(VIEW)
+
+        // then
+        expect(written.at(-1)?.startsWith(`${BEGIN}${up(7)}`)).toBe(true)
+    })
+
+    it("should not draw a line again that was beyond cursor-up's reach", () => {
+        // given
+        const { written, board } = harness({ rows: 8 })
+        for (let line = 0; line < 20; line++) {
+            board.print(`line ${line}`)
+        }
+        board.show(VIEW)
+
+        // when
+        board.end()
+
+        // then
+        expect(linesOf(written.at(-1))[0]).toBe(`line 13${CLEAR_TO_END}`)
+    })
+
+    it("should open at the board's first row, with the lines printed before it hidden above", () => {
+        // given
+        const { written, board } = harness({ rows: 8 })
+        for (const line of SUMMARY) {
+            board.print(line)
+        }
+
+        // when
+        board.show(TALL)
+
+        // then
+        expect(linesOf(written.at(-1))[0]).toBe(`↑ ${SUMMARY.length} more${CLEAR_TO_END}`)
+    })
+
+    it("should draw a line printed after the first frame as a frame, never into one", () => {
+        // given
+        const { written, board } = harness()
+        board.show(VIEW)
+
+        // when
+        board.print(LINK)
+
+        // then
+        expect(written.at(-1)?.startsWith(`${BEGIN}${up(2)}`)).toBe(true)
+    })
+
+    it("should draw a line printed after the board under the notice", () => {
+        // given
+        const { written, board } = harness()
+        board.show(VIEW)
+        board.notice(DRAINING)
+
+        // when
+        board.print(LINK)
+
+        // then
+        expect(linesOf(written.at(-1)).slice(1, 3)).toEqual([DRAINING.line, LINK].map(line => `${line}${CLEAR_TO_END}`))
+    })
+
+    it("should draw an error line said while the board is showing under it", () => {
+        // given
+        const { written, board } = harness()
+        board.show(VIEW)
+
+        // when
+        board.error("afk: halted")
+
+        // then
+        expect(linesOf(written.at(-1))).toContain(`afk: halted${CLEAR_TO_END}`)
+    })
+
+    it("should keep an error line said while the board is showing on stderr where stderr is elsewhere", () => {
+        // given
+        const { errored, board } = harness({ errorsElsewhere: true })
+        board.show(VIEW)
+
+        // when
+        board.error("afk: halted")
+
+        // then
+        expect(errored).toEqual(["afk: halted\n"])
+    })
+
+    it("should rewind over an error line said on this terminal before the board, too", () => {
+        // given
+        const { written, board } = harness()
+        board.print(SUMMARY[0] ?? "")
+        board.error("afk: --max-parallel is ignored")
+        board.print(SUMMARY[1] ?? "")
+
+        // when
+        board.show(VIEW)
+
+        // then
+        expect(written.at(-1)?.startsWith(`${BEGIN}${up(3)}`)).toBe(true)
+    })
+
+    it("should write a line printed after a first frame that failed straight through, as nothing was drawn", () => {
+        // given
+        let failing = true
+        const written: string[] = []
+        const board = createTerminalBoard({
+            write: chunk => {
+                if (failing) {
+                    throw new Error("EPIPE")
+                }
+                written.push(chunk)
+            },
+            writeError: () => undefined,
+            errorsElsewhere: false,
+            columns: () => 80,
+            rows: () => 40,
+            onResize: () => undefined,
+        })
+        board.show(VIEW)
+        failing = false
+
+        // when
+        board.print(LINK)
+
+        // then
+        expect(written).toEqual([`${LINK}\n`])
+    })
+
+    it("should keep an error line off stderr while the board is showing where stderr is the terminal", () => {
+        // given
+        const { errored, board } = harness()
+        board.show(VIEW)
+
+        // when
+        board.error("afk: halted")
+
+        // then
+        expect(errored).toEqual([])
+    })
+
+    it("should write an error line before the first frame to stderr, as ever", () => {
+        // given
+        const { errored, board } = harness()
+
+        // when
+        board.error("afk: refused")
+
+        // then
+        expect(errored).toEqual(["afk: refused\n"])
+    })
+
+    it("should paint every row at the end, however short the window", () => {
+        // given
+        const { written, board } = harness({ rows: 8 })
+        board.show(TALL)
+
+        // when
+        board.end()
+
+        // then
+        expect(linesOf(written.at(-1)).length).toBe(TALL.rows.length + 1)
+    })
+
+    it.each([
+        ["footer directly under the rows", TALL.rows.length, `Draining - last event ${VIEW.at}`],
+        ["pull request's link last", -1, LINK],
+    ] as const)("should paint the end with the %s", (_, index, expected) => {
+        // given
+        const { written, board } = harness({ rows: 8 })
+        board.show(TALL)
+        board.notice(DRAINING)
+        board.print(LINK)
+
+        // when
+        board.end()
+
+        // then
+        expect(visible(linesOf(written.at(-1)).at(index) ?? "")).toBe(expected)
+    })
+
+    it("should paint nothing at the end of a process that never showed a board", () => {
+        // given
+        const { written, board } = harness()
+        for (const line of SUMMARY) {
+            board.print(line)
+        }
+
+        // when
+        board.end()
+
+        // then
+        expect(written).toEqual(SUMMARY.map(line => `${line}\n`))
+    })
+
+    it("should write a line printed after the end straight through", () => {
+        // given
+        const { written, board } = harness()
+        board.show(VIEW)
+        board.end()
+
+        // when
+        board.print(LINK)
+
+        // then
+        expect(written.at(-1)).toBe(`${LINK}\n`)
+    })
+
+    it("should swallow a printed line whose write fails", () => {
+        // given
+        const { board } = harness({ fails: true })
+
+        // when
+        const printing = () => board.print(LINK)
+
+        // then
+        expect(printing).not.toThrow()
     })
 })
 
