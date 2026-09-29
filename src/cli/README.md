@@ -25,7 +25,10 @@ three pieces with one seam between each (ADR-0031).
   prints goes through, so the lines before the board (the prompt answers readline drew included,
   handed on by the operator once answered), its rows and notices, and the lines after it scroll as
   one; an error said while the board shows is one of its notices. Its `end` paints the board once
-  more, whole, once the cli returns (ADR-0041). Off a
+  more, whole, once the cli returns (ADR-0041). From the first frame it takes the keys where stdin
+  is a terminal — ↑/↓ scroll a line, Home/End jump to either end, Ctrl-C is forwarded as the
+  process's own SIGINT, read off stdin by `stdin-keys.ts` — hides the cursor, and gives both back
+  at the end or on the exit. Off a
   terminal the second adapter of the same port runs, and it prints `board-lines.ts` — one line per
   row the next view changed.
 

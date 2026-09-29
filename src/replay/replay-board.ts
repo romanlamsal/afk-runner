@@ -4,6 +4,8 @@ import { dirname, join, resolve } from "node:path"
 import { setTimeout as wait } from "node:timers/promises"
 import { z } from "zod"
 import { createLineBoard, createTerminalBoard } from "../cli/board-writer.ts"
+import { EXIT } from "../cli/exit-codes.ts"
+import { stdinKeys } from "../cli/stdin-keys.ts"
 import { lastWrites } from "../domain/activity.ts"
 import { type Board, boardOf, writers } from "../domain/board.ts"
 import { isLifecycleEvent, type LifecycleEvent, type LogRecord, readRecord } from "../domain/events.ts"
@@ -143,6 +145,11 @@ const boardFor = (args: ReplayArgs): { board: Board; end: () => void } => {
         columns: () => args.width ?? process.stdout.columns ?? 80,
         rows: () => args.height ?? process.stdout.rows ?? 24,
         onResize: listener => process.stdout.on("resize", listener),
+        keys: process.stdin.isTTY === true ? stdinKeys(process.stdin) : undefined,
+        // A replay has nothing to drain, so Ctrl-C leaves at once, through the exit that shows the
+        // cursor again, where a signal nobody handles would leave without it.
+        interrupt: () => process.exit(EXIT.interrupted),
+        onExit: hook => process.on("exit", hook),
     })
     return { board: terminal, end: terminal.end }
 }
@@ -188,16 +195,22 @@ const replay = async (argv: string[]): Promise<number> => {
     const activity = createFileActivity()
 
     const { board, end } = boardFor(args)
-    for (const moment of replayMoments(records, pacing)) {
-        if (moment.wait > 0) {
-            await wait(moment.wait)
+    try {
+        for (const moment of replayMoments(records, pacing)) {
+            if (moment.wait > 0) {
+                await wait(moment.wait)
+            }
+            const writes =
+                root === undefined
+                    ? undefined
+                    : await lastWrites(activity, root, writers(manifest, moment.log), moment.at)
+            board.show(boardOf(manifest, moment.log, moment.at, writes, moment.live))
         }
-        const writes =
-            root === undefined ? undefined : await lastWrites(activity, root, writers(manifest, moment.log), moment.at)
-        board.show(boardOf(manifest, moment.log, moment.at, writes, moment.live))
+    } finally {
+        // The last paint, whole, as a run's is once it is done, and the terminal given back even
+        // where reading a moment failed (ADR-0041).
+        end()
     }
-    // The last paint, whole, as a run's is once it is done (ADR-0041).
-    end()
 
     return 0
 }

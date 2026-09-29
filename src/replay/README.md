@@ -27,4 +27,8 @@ node src/replay/replay-board.ts --spec 37 --lines           # what a CI log saw
 node src/replay/replay-board.ts --spec 37 --height 13       # fitted to a short pane
 ```
 
+On a terminal it scrolls like a live run's board (ADR-0041). Ctrl-C quits it at once, rather than
+being forwarded as a SIGINT: a replay drains nothing and handles no signal, and a process a signal
+ends never runs the exit hook that shows the cursor again.
+
 See `docs/agents/layers.md` for the layers this sits outside of.

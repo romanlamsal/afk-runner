@@ -4,6 +4,7 @@ import { createConfig } from "./cli/config.ts"
 import { EXIT } from "./cli/exit-codes.ts"
 import { createTerminalOperator } from "./cli/operator.ts"
 import { createRun } from "./cli/run.ts"
+import { stdinKeys } from "./cli/stdin-keys.ts"
 import { createFileAfkonfig } from "./infrastructure/afkonfig.ts"
 import { createClaudeAgentRunner } from "./infrastructure/claude-agent-runner.ts"
 import { createShellCommandRunner } from "./infrastructure/commands.ts"
@@ -57,6 +58,12 @@ export const assembleCli = (): Cli => {
               columns: () => process.stdout.columns ?? 80,
               rows: () => process.stdout.rows ?? 24,
               onResize: listener => process.stdout.on("resize", listener),
+              // Scrolled only where somebody is at a keyboard; piped stdin still gets a fitted board.
+              keys: process.stdin.isTTY === true ? stdinKeys(process.stdin) : undefined,
+              // Ctrl-C in raw mode is a key, so it is raised as the signal it would have been, and the
+              // interrupts below count it as ever: the first drains, the second kills (ADR-0016).
+              interrupt: () => process.kill(process.pid, "SIGINT"),
+              onExit: hook => process.on("exit", hook),
           })
         : undefined
     const toStderr = (line: string): void => {

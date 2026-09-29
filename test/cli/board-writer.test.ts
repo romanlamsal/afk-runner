@@ -1,5 +1,11 @@
+import type { Key } from "node:readline"
 import { describe, expect, it } from "vitest"
-import { createLineBoard, createTerminalBoard, type TerminalBoard } from "../../src/cli/board-writer.ts"
+import {
+    createLineBoard,
+    createTerminalBoard,
+    type TerminalBoard,
+    type TerminalBoardDeps,
+} from "../../src/cli/board-writer.ts"
 import type { BoardNotice, BoardRow, BoardView } from "../../src/domain/board.ts"
 
 /**
@@ -21,6 +27,10 @@ const CLEAR_LINE = "\u001b[2K"
 
 /** What clears everything below the cursor, once a frame's lines are down. */
 const ERASE_DOWN = "\u001b[J"
+
+/** The cursor hidden, from the first frame on, and shown again once the board is done with the terminal. */
+const HIDE_CURSOR = "\u001b[?25l"
+const SHOW_CURSOR = "\u001b[?25h"
 
 /** Cursor up by that many lines. */
 const up = (lines: number): string => `\u001b[${lines}A`
@@ -62,7 +72,7 @@ const TALL: BoardView = {
 
 /** A frame's lines, with the synchronized-output wrapping, the rewind and the trailing erase taken off. */
 const linesOf = (chunk: string | undefined): readonly string[] =>
-    (chunk ?? "").replace(BEGIN, "").replace(UP, "").replace(END, "").split("\n").slice(0, -1)
+    (chunk ?? "").replace(BEGIN, "").replace(UP, "").replace(HIDE_CURSOR, "").replace(END, "").split("\n").slice(0, -1)
 
 /** Any CSI escape sequence: colour, clearing, cursor movement. */
 const ESCAPE = new RegExp(String.raw`\u001b\[[0-9;?]*[A-Za-z]`, "g")
@@ -70,36 +80,83 @@ const ESCAPE = new RegExp(String.raw`\u001b\[[0-9;?]*[A-Za-z]`, "g")
 /** A line as the terminal shows it, with every escape sequence taken off. */
 const visible = (line: string): string => line.replace(ESCAPE, "")
 
+/** What the test can see of a writer once it has ended. */
+type Ended = ReturnType<typeof harness>
+
+/** What a writer made outside of a test's own terminal needs besides it: no keys, and nobody to tell. */
+const DETACHED: Pick<TerminalBoardDeps, "keys" | "interrupt" | "onExit"> = {
+    keys: undefined,
+    interrupt: () => undefined,
+    onExit: () => undefined,
+}
+
 /**
  * The writer over a terminal the test can resize: `resize` changes the window's size and then tells
- * the writer, the way stdout's `'resize'` does.
+ * the writer, the way stdout's `'resize'` does. `press` is the operator at the keyboard, which is
+ * only there where stdin is a terminal, and `exit` is the process going away, however it does.
  */
 const harness = ({
     rows = 40,
     columns = 80,
     errorsElsewhere = false,
     fails = false,
+    keyboard = true,
 }: {
     rows?: number
     columns?: number
     errorsElsewhere?: boolean
     /** Every write throws, as one to a terminal that went away does. */
     fails?: boolean
+    /** Whether stdin is a terminal, and so whether there are keys to take. */
+    keyboard?: boolean
 } = {}) => {
     const written: string[] = []
     const errored: string[] = []
     const size = { rows, columns }
     const listeners: (() => void)[] = []
+    const pressed: ((key: Key) => void)[] = []
+    const exits: (() => void)[] = []
+    const stdin = { taken: false, released: false }
+    const interrupts = { raised: 0 }
     return {
         written,
         errored,
+        stdin,
+        interrupts,
         resize: (to: { rows?: number; columns?: number }) => {
             Object.assign(size, to)
             for (const listener of listeners) {
                 listener()
             }
         },
+        press: (...keys: readonly Key[]) => {
+            for (const key of keys) {
+                for (const listener of pressed) {
+                    listener(key)
+                }
+            }
+        },
+        exit: () => {
+            for (const hook of exits) {
+                hook()
+            }
+        },
         board: createTerminalBoard({
+            keys: keyboard
+                ? {
+                      take: listener => {
+                          stdin.taken = true
+                          pressed.push(listener)
+                      },
+                      release: () => {
+                          stdin.released = true
+                      },
+                  }
+                : undefined,
+            interrupt: () => {
+                interrupts.raised += 1
+            },
+            onExit: hook => exits.push(hook),
             write: chunk => {
                 if (fails) {
                     throw new Error("EPIPE")
@@ -350,6 +407,7 @@ describe("createTerminalBoard", () => {
                 return 40
             },
             onResize: listener => listeners.push(listener),
+            ...DETACHED,
         })
         board.show(VIEW)
         gone = true
@@ -689,6 +747,7 @@ describe("createTerminalBoard: printed lines", () => {
             columns: () => 80,
             rows: () => 40,
             onResize: () => undefined,
+            ...DETACHED,
         })
         board.show(VIEW)
         failing = false
@@ -788,6 +847,273 @@ describe("createTerminalBoard: printed lines", () => {
 
         // then
         expect(printing).not.toThrow()
+    })
+})
+
+/**
+ * The operator scrolls the board from its first frame on, where stdin is a terminal: ↑/↓ a line,
+ * Home/End to either end, and Ctrl-C, which raw mode keeps from being a signal, forwarded as the
+ * process's own (ADR-0041, ADR-0016). The terminal is given back at the end, and on an exit however it comes.
+ */
+describe("createTerminalBoard: keys", () => {
+    const UP_KEY: Key = { name: "up" }
+    const DOWN_KEY: Key = { name: "down" }
+    const HOME_KEY: Key = { name: "home" }
+    const END_KEY: Key = { name: "end" }
+    const CTRL_C: Key = { name: "c", ctrl: true }
+
+    /** The top line of the last frame, as the terminal shows it. */
+    const topOf = (written: readonly string[]): string => visible(linesOf(written.at(-1)).at(0) ?? "")
+
+    it.each([
+        ["↓ scrolls one line down", [DOWN_KEY], "↑ 1 more"],
+        ["↓ twice scrolls two lines down", [DOWN_KEY, DOWN_KEY], "↑ 2 more"],
+        ["↑ scrolls one line back up", [DOWN_KEY, DOWN_KEY, UP_KEY], "↑ 1 more"],
+        ["End jumps to the last line", [END_KEY], "↑ 8 more"],
+        ["↓ at the last line stays there", [END_KEY, DOWN_KEY], "↑ 8 more"],
+    ] as const)("should redraw at once where %s", (_, keys, expected) => {
+        // given
+        const { written, board, press } = harness({ rows: 8 })
+        board.show(TALL)
+
+        // when
+        press(...keys)
+
+        // then
+        expect(topOf(written)).toBe(expected)
+    })
+
+    it.each([
+        ["Home after End", [END_KEY, HOME_KEY]],
+        ["↑ at the first line", [UP_KEY]],
+        ["↑ back to the first line", [DOWN_KEY, UP_KEY]],
+    ] as const)("should show the first line again for %s", (_, keys) => {
+        // given
+        const { written, board, press } = harness({ rows: 8 })
+        board.show(TALL)
+        const first = topOf(written)
+
+        // when
+        press(...keys)
+
+        // then
+        expect(topOf(written)).toBe(first)
+    })
+
+    it("should keep the scroll position across a redraw", () => {
+        // given
+        const { written, board, press } = harness({ rows: 8 })
+        board.show(TALL)
+        press(DOWN_KEY)
+
+        // when
+        board.show(TALL)
+
+        // then
+        expect(topOf(written)).toBe("↑ 1 more")
+    })
+
+    it("should draw nothing for a key that is not a scroll", () => {
+        // given
+        const { written, board, press } = harness({ rows: 8 })
+        board.show(TALL)
+        const drawn = written.length
+
+        // when
+        press({ name: "x" })
+
+        // then
+        expect(written.length).toBe(drawn)
+    })
+
+    it("should forward Ctrl-C as one interrupt of the process's own", () => {
+        // given
+        const { interrupts, board, press } = harness()
+        board.show(VIEW)
+
+        // when
+        press(CTRL_C)
+
+        // then
+        expect(interrupts.raised).toBe(1)
+    })
+
+    it("should take no keys before the first frame", () => {
+        // given
+        const { stdin, board } = harness()
+
+        // when
+        board.print("spec #66: afk/66/spec cut from main")
+
+        // then
+        expect(stdin.taken).toBe(false)
+    })
+
+    it("should take the keys at the first frame", () => {
+        // given
+        const { stdin, board } = harness()
+
+        // when
+        board.show(VIEW)
+
+        // then
+        expect(stdin.taken).toBe(true)
+    })
+
+    it("should take no keys at a first frame that failed to write", () => {
+        // given
+        const { stdin, board } = harness({ fails: true })
+
+        // when
+        board.show(VIEW)
+
+        // then
+        expect(stdin.taken).toBe(false)
+    })
+
+    it("should still clip the frame to the window where stdin is not a terminal", () => {
+        // given
+        const { written, board } = harness({ rows: 8, keyboard: false })
+
+        // when
+        board.show(TALL)
+
+        // then
+        expect(linesOf(written.at(-1)).length).toBe(7)
+    })
+
+    it("should hide the cursor with the first frame", () => {
+        // given
+        const { written, board } = harness()
+
+        // when
+        board.show(VIEW)
+
+        // then
+        expect(written.at(-1)).toContain(HIDE_CURSOR)
+    })
+
+    it("should hide the cursor only once", () => {
+        // given
+        const { written, board } = harness()
+        board.show(VIEW)
+
+        // when
+        board.show(VIEW)
+
+        // then
+        expect(written.at(-1)).not.toContain(HIDE_CURSOR)
+    })
+
+    it.each([
+        ["show the cursor", ({ written }: Ended) => written.at(-1)?.includes(SHOW_CURSOR)],
+        ["release stdin", ({ stdin }: Ended) => stdin.released],
+    ] as const)("should %s at the end, once the last paint is down", (_, observed) => {
+        // given
+        const ended = harness()
+        ended.board.show(VIEW)
+
+        // when
+        ended.board.end()
+
+        // then
+        expect(observed(ended)).toBe(true)
+    })
+
+    it("should release stdin at the end even where the last paint fails to write", () => {
+        // given
+        let failing = false
+        let released = false
+        const board = createTerminalBoard({
+            write: () => {
+                if (failing) {
+                    throw new Error("EPIPE")
+                }
+            },
+            writeError: () => undefined,
+            errorsElsewhere: false,
+            columns: () => 80,
+            rows: () => 40,
+            onResize: () => undefined,
+            ...DETACHED,
+            keys: {
+                take: () => undefined,
+                release: () => {
+                    released = true
+                },
+            },
+        })
+        board.show(VIEW)
+        failing = true
+
+        // when
+        board.end()
+
+        // then
+        expect(released).toBe(true)
+    })
+
+    it("should release nothing at the end of a process that never showed a board", () => {
+        // given
+        const { stdin, board } = harness()
+
+        // when
+        board.end()
+
+        // then
+        expect(stdin.released).toBe(false)
+    })
+
+    it("should draw nothing for a key pressed after the end", () => {
+        // given
+        const { written, board, press } = harness({ rows: 8 })
+        board.show(TALL)
+        board.end()
+        const drawn = written.length
+
+        // when
+        press(DOWN_KEY)
+
+        // then
+        expect(written.length).toBe(drawn)
+    })
+
+    it("should show the cursor on an exit while the board is showing, as a kill or a crash is", () => {
+        // given
+        const { written, board, exit } = harness()
+        board.show(VIEW)
+
+        // when
+        exit()
+
+        // then
+        expect(written.at(-1)).toBe(SHOW_CURSOR)
+    })
+
+    it("should write nothing on an exit once the end has shown the cursor", () => {
+        // given
+        const { written, board, exit } = harness()
+        board.show(VIEW)
+        board.end()
+        const drawn = written.length
+
+        // when
+        exit()
+
+        // then
+        expect(written.length).toBe(drawn)
+    })
+
+    it("should swallow a cursor that fails to be shown on an exit", () => {
+        // given
+        const { board, exit } = harness({ fails: true })
+        board.show(VIEW)
+
+        // when
+        const exiting = () => exit()
+
+        // then
+        expect(exiting).not.toThrow()
     })
 })
 

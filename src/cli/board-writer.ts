@@ -1,3 +1,4 @@
+import type { Key } from "node:readline"
 import type { Board, BoardNotice, BoardView } from "../domain/board.ts"
 import { boardWhole, boardWindow, printedLines } from "./board-frame.ts"
 import { boardLines } from "./board-lines.ts"
@@ -21,6 +22,11 @@ import { type Line, widthOf } from "./board-span.ts"
  * the notices rather than written into the middle of a frame, and an error line becomes a notice
  * (ADR-0041).
  *
+ * From the first frame it takes the operator's keys, where stdin is a terminal: ↑/↓ scroll a line and
+ * Home/End jump to either end, redrawn at once. Raw mode keeps Ctrl-C from being a signal, so it is
+ * forwarded as the process's own, and the interrupt handling stays as it is (ADR-0016). The cursor
+ * is hidden from the first frame, and shown again at the end or on an exit however it comes.
+ *
  * It never throws and it never clears on its way out: a terminal write must not be able to fail a
  * run, and the last frame is the run's summary. `end` paints it once more, whole and unclipped, and
  * it stays on screen once the run ends.
@@ -42,6 +48,26 @@ export type TerminalBoardDeps = {
     rows: () => number
     /** Where the writer hears that the window was resized: stdout's `'resize'`, on a terminal. */
     onResize: (listener: () => void) => void
+    /**
+     * The operator's keys, where stdin is a terminal. Nothing where it is not: the board is still
+     * fitted to the window, there is just no scrolling it.
+     */
+    keys: KeySource | undefined
+    /** Raises the process's own interrupt, which Ctrl-C is not once stdin is in raw mode. */
+    interrupt: () => void
+    /** Runs a hook as the process exits, whichever way: an end, a kill's `process.exit`, a crash. */
+    onExit: (hook: () => void) => void
+}
+
+/** Stdin as a keyboard, taken by the board from its first frame and given back at its end. */
+export type KeySource = {
+    /**
+     * Raw mode on, and every key from now on to the listener. Only ever called once every prompt's
+     * readline is closed, since both would consume the keys otherwise.
+     */
+    take: (listener: (key: Key) => void) => void
+    /** Raw mode off, and stdin paused and unref'd, so that it no longer holds the process. */
+    release: () => void
 }
 
 /**
@@ -75,6 +101,24 @@ const CLEAR_TO_END = `${ESC}[K`
 const ERASE_DOWN = `${ESC}[J`
 const BEGIN_FRAME = `${ESC}[?2026h`
 const END_FRAME = `${ESC}[?2026l`
+const HIDE_CURSOR = `${ESC}[?25l`
+const SHOW_CURSOR = `${ESC}[?25h`
+
+/** Where a scroll key moves the offset, which the frame clamps into range: Home and End go past either end. */
+const scrolled = (key: Key, offset: number): number | undefined => {
+    switch (key.name) {
+        case "up":
+            return offset - 1
+        case "down":
+            return offset + 1
+        case "home":
+            return 0
+        case "end":
+            return Number.MAX_SAFE_INTEGER
+        default:
+            return undefined
+    }
+}
 
 /** Where the adapter is in the process: before the first frame, drawing the board, or done with it. */
 type Phase = "before" | "showing" | "ended"
@@ -86,8 +130,13 @@ export const createTerminalBoard = ({
     columns,
     rows,
     onResize,
+    keys,
+    interrupt,
+    onExit,
 }: TerminalBoardDeps): TerminalBoard => {
     let phase: Phase = "before"
+    /** Hidden by the first frame, and shown again only once. */
+    let cursorHidden = false
     let drawn = 0
     /**
      * Where the window is scrolled to, clamped by every frame. Nothing until the first, which opens
@@ -143,7 +192,12 @@ export const createTerminalBoard = ({
     const frame = (
         lines: readonly Line[],
         width: number,
-        { rewind, resized }: { rewind: number; resized: boolean },
+        {
+            rewind,
+            resized,
+            first = false,
+            last = false,
+        }: { rewind: number; resized: boolean; first?: boolean; last?: boolean },
     ): void => {
         // A line as wide as the terminal has overwritten all of the old one already, and leaves the
         // cursor waiting to wrap on its last column, where clearing to the end would erase the line's
@@ -152,7 +206,10 @@ export const createTerminalBoard = ({
         // A frame shorter than the last leaves the last one's tail below it, erased once the new lines
         // are down rather than before them.
         const back = resized ? `${up(Math.min(rewind, rows() - 1))}${ERASE_DOWN}` : up(rewind)
-        write(`${BEGIN_FRAME}${back}${body}${ERASE_DOWN}${END_FRAME}`)
+        // The cursor is hidden and shown as part of the frame it goes with, so that it is one write.
+        write(
+            `${BEGIN_FRAME}${back}${first ? HIDE_CURSOR : ""}${body}${ERASE_DOWN}${last ? SHOW_CURSOR : ""}${END_FRAME}`,
+        )
         drawn = lines.length
     }
 
@@ -164,14 +221,43 @@ export const createTerminalBoard = ({
             const width = columns()
             // The first frame takes back what it rewinds over, and only once it is down: a frame that
             // failed to write rewound over nothing, and the lines before it are still where they were.
-            const taken = phase === "before" ? reachable(width) : { lines: before, rows: drawn }
+            const first = phase === "before"
+            const taken = first ? reachable(width) : { lines: before, rows: drawn }
             const framed = boardWindow(view, { width, rows: rows(), offset, notices, before: taken.lines, after })
-            frame(framed.lines, width, { rewind: taken.rows, resized })
+            frame(framed.lines, width, { rewind: taken.rows, resized, first })
             before = taken.lines
             phase = "showing"
             offset = framed.offset
             shown = view
+            if (first) {
+                cursorHidden = true
+                onExit(restoreCursor)
+                keys?.take(pressed)
+            }
         })
+
+    /** The cursor back, on an exit that came before the end could show it: a kill, or a crash. */
+    const restoreCursor = (): void => {
+        if (cursorHidden) {
+            safely(() => write(SHOW_CURSOR))
+            cursorHidden = false
+        }
+    }
+
+    const pressed = (key: Key): void => {
+        if (phase !== "showing" || shown === undefined) {
+            return
+        }
+        if (key.ctrl === true && key.name === "c") {
+            interrupt()
+            return
+        }
+        const to = scrolled(key, offset ?? 0)
+        if (to !== undefined) {
+            offset = to
+            draw(shown, { resized: false })
+        }
+    }
 
     /** A line said while the board is showing joins what is drawn under it, at once. */
     const append = (line: string): void => {
@@ -246,8 +332,16 @@ export const createTerminalBoard = ({
                 const view = shown
                 safely(() => {
                     const width = columns()
-                    frame(boardWhole(view, { width, notices, before, after }), width, { rewind: drawn, resized: false })
+                    frame(boardWhole(view, { width, notices, before, after }), width, {
+                        rewind: drawn,
+                        resized: false,
+                        last: true,
+                    })
+                    cursorHidden = false
                 })
+                // Given back whether or not the last paint could be written, or stdin holds the
+                // process open; a cursor that failed to show is tried again on the exit.
+                safely(() => keys?.release())
             }
             phase = "ended"
         },
