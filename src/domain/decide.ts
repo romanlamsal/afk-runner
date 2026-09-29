@@ -13,6 +13,7 @@ import {
     repairableStep,
     running,
     runStepRunning,
+    type Step,
     settled,
     setUp,
     statusOf,
@@ -128,6 +129,19 @@ export const onMergeTrack = (action: Action): boolean =>
     action.kind === "fix" ||
     action.kind === "revert" ||
     (action.kind === "prepare" && mergeSideStep(action.brokenStep))
+
+/**
+ * Whether a pass sent to this step sends the ticket back to the head of the merge track: what a pass
+ * on a rebase or a resolve repaired is a trip through the track, and a trip starts at the rebase.
+ */
+const restartsTrip = (step: Step | undefined): boolean => step === "rebase" || step === "resolve"
+
+/**
+ * Whether a merge-side action starts a ticket's trip through the merge track rather than carrying
+ * one on: the rebase, and a pass that sends the ticket back to it.
+ */
+const opensTrip = (action: Action): boolean =>
+    action.kind === "rebase" || (action.kind === "prepare" && restartsTrip(action.brokenStep))
 
 /**
  * What a prepare pass would be sent to repair on a ticket, or nothing where no pass would help.
@@ -291,7 +305,7 @@ export const nextActions = (
         }
         // The head of the merge track. A pass sent to a rebase or to a resolve comes back here too:
         // what it repaired is a trip through the track, and a trip starts at the rebase.
-        if (implemented(events, ticket) || repaired === "rebase" || repaired === "resolve") {
+        if (implemented(events, ticket) || restartsTrip(repaired)) {
             return { kind: "rebase", ticket }
         }
 
@@ -301,9 +315,18 @@ export const nextActions = (
     // Seriality covers every merge-side action alike — the squash, the gate that follows it, and
     // the prepare pass a broken merge-side step earns: all of them are about the branch one
     // worktree writes, so one of them is the most that ever runs.
-    const merges: Action[] = inFlight.some(onMergeTrack)
+    //
+    // And it holds per ticket, not per step: the track is free between two steps of one ticket's
+    // trip, and a ticket whose resolve went through is waiting for its merge. A move that carries a
+    // trip on goes before one that opens a trip, or another ticket lands between that rebase and
+    // its merge and the squash conflicts after all (ADR-0006).
+    const candidates = inFlight.some(onMergeTrack)
         ? []
-        : actionable.flatMap<Action>(ticket => mergeSide(ticket.number) ?? []).slice(0, 1)
+        : actionable.flatMap<Action>(ticket => mergeSide(ticket.number) ?? [])
+    const merges: Action[] = [
+        ...candidates.filter(action => !opensTrip(action)),
+        ...candidates.filter(opensTrip),
+    ].slice(0, 1)
 
     // A drain starts nothing new, and the gate is not new work: it is the proof of a merge this run
     // has already made, and a drain that left one unproven would put an ungated squash on the spec

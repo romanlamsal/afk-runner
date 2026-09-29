@@ -397,6 +397,46 @@ describe("nextActions: the merge track", () => {
         expect(actions.filter(action => action.kind === "merge")).toEqual([merging(11)])
     })
 
+    it.each([
+        ["rebased", [event(11, "implement", "ok"), event(11, "rebase", "ok")], merging(11)],
+        ["resolved", [...collided(11), event(11, "resolve", "ok")], merging(11)],
+        ["conflicted", collided(11), resolving(11)],
+        ["merged", [event(11, "implement", "ok"), event(11, "merge", "ok")], gating(11)],
+        ["red at the gate", red(11), fixing(11)],
+    ] as const)(
+        "should finish the trip of a ticket %s before another ticket's rebase, so nothing lands between a rebase and its merge",
+        (_name, trip, expected) => {
+            // given: #10 comes first on the slate, and #11 is already part-way through the merge track
+            const tickets = [ticket(10), ticket(11)]
+            const events = [event(10, "implement", "ok"), ...trip]
+
+            // when
+            const actions = decide(tickets, events)
+
+            // then
+            expect(actions).toEqual([expected])
+        },
+    )
+
+    it.each([
+        ["a rebase", [event(10, "implement", "ok")]],
+        ["a pass for its broken rebase", [event(10, "rebase", "running"), event(10, "rebase", "failed")]],
+        ["a pass for its broken resolve", [event(10, "resolve", "running"), event(10, "resolve", "failed")]],
+    ] as const)(
+        "should merge a resolved ticket before another ticket's %s, because that opens a trip",
+        (_name, opening) => {
+            // given: #10 comes first on the slate and wants to open a trip, and #11's resolve went through
+            const tickets = [ticket(10), ticket(11)]
+            const events = [...opening, ...collided(11), event(11, "resolve", "ok")]
+
+            // when
+            const actions = decide(tickets, events)
+
+            // then
+            expect(actions).toEqual([merging(11)])
+        },
+    )
+
     it("should keep handing out implementers while a ticket is in the merge track", () => {
         // given
         const tickets = [ticket(10), ticket(11)]
